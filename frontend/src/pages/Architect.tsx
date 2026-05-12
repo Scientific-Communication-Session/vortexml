@@ -292,7 +292,7 @@ const Architect: React.FC = () => {
     return (
         <>
             <div className="page-header">
-                <h1>🧠 Architecture Builder</h1>
+                <h1>Architecture <em>Builder.</em></h1>
                 <p>Choose a neural network type, configure layers, and set hyperparameters.</p>
             </div>
 

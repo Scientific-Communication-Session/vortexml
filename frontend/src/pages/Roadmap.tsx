@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 
 /* ═══════════════════════════════════════════════════════
    ML ROADMAP DATA — based on roadmap.sh/machine-learning
@@ -530,7 +531,155 @@ const roadmapData: RoadmapCategory[] = [
 ];
 
 /* ═══════════════════════════════════════════════════════
-   CURVED SVG CONNECTORS
+   CURVED SPINE → NODE CONNECTOR
+   ═══════════════════════════════════════════════════════ */
+
+// SVG is centered horizontally on the spine (container's 50%).
+// Card-edge x = SPINE_X ± 24 (matches .roadmap-node padding gap).
+const SVG_W = 80;
+const SVG_H = 60;
+const SPINE_X = 40;       // SVG horizontal center
+const CY = 30;            // SVG vertical center
+const GAP = 24;           // distance between spine and card edge
+const CARD_X_LEFT = SPINE_X - GAP;   // 16
+const CARD_X_RIGHT = SPINE_X + GAP;  // 64
+
+const NodeConnector: React.FC<{
+    isLeft: boolean;
+    color: string;
+    index: number;
+}> = ({ isLeft, color, index }) => {
+    const cardX = isLeft ? CARD_X_LEFT : CARD_X_RIGHT;
+
+    // Alternate gentle S-curve direction by index for organic rhythm
+    const dir = index % 2 === 0 ? 1 : -1;
+    const amp = 10;
+    const cp1y = CY - amp * dir;
+    const cp2y = CY + amp * dir;
+
+    // Control points sit ~40% along the horizontal span,
+    // pulled vertically by `amp` to create a soft S.
+    const cp1x = isLeft ? SPINE_X - 10 : SPINE_X + 10;
+    const cp2x = isLeft ? cardX + 6 : cardX - 6;
+
+    const path = `M ${SPINE_X} ${CY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${cardX} ${CY}`;
+
+    // Stagger particle so the flow feels alive
+    const particleDur = 3.2 + ((index * 37) % 11) / 10;
+    const particleBegin = ((index * 0.31) % 2.6).toFixed(2) + 's';
+
+    return (
+        <svg
+            className={`node-curve-svg ${isLeft ? 'curve-left' : 'curve-right'}`}
+            width={SVG_W}
+            height={SVG_H}
+            viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+            style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                overflow: 'visible',
+                pointerEvents: 'none',
+            }}
+            aria-hidden
+        >
+            <defs>
+                <linearGradient id={`grad-${isLeft ? 'l' : 'r'}-${index}`} gradientUnits="userSpaceOnUse"
+                    x1={SPINE_X} y1={CY} x2={cardX} y2={CY}>
+                    <stop offset="0%" stopColor={color} stopOpacity="0.9" />
+                    <stop offset="100%" stopColor={color} stopOpacity="0.35" />
+                </linearGradient>
+            </defs>
+
+            {/* Soft glow halo behind the path */}
+            <motion.path
+                d={path}
+                stroke={color}
+                strokeOpacity={0.13}
+                strokeWidth={6}
+                strokeLinecap="round"
+                fill="none"
+                initial={{ pathLength: 0 }}
+                whileInView={{ pathLength: 1 }}
+                viewport={{ once: true, amount: 0.4 }}
+                transition={{ duration: 1.0, ease: [0.16, 1, 0.3, 1], delay: 0.05 }}
+                style={{ filter: 'blur(0.4px)' }}
+            />
+
+            {/* Main stroke */}
+            <motion.path
+                d={path}
+                stroke={`url(#grad-${isLeft ? 'l' : 'r'}-${index})`}
+                strokeOpacity={0.85}
+                strokeWidth={1.6}
+                strokeLinecap="round"
+                fill="none"
+                initial={{ pathLength: 0 }}
+                whileInView={{ pathLength: 1 }}
+                viewport={{ once: true, amount: 0.4 }}
+                transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.12 }}
+            />
+
+            {/* Spine origin dot — slight pulse */}
+            <motion.circle
+                cx={SPINE_X}
+                cy={CY}
+                r={2.6}
+                fill={color}
+                initial={{ scale: 0, opacity: 0 }}
+                whileInView={{ scale: 1, opacity: 0.85 }}
+                viewport={{ once: true, amount: 0.4 }}
+                transition={{ duration: 0.4, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            />
+
+            {/* Card-edge dot */}
+            <motion.circle
+                cx={cardX}
+                cy={CY}
+                r={2}
+                fill={color}
+                initial={{ scale: 0, opacity: 0 }}
+                whileInView={{ scale: 1, opacity: 0.65 }}
+                viewport={{ once: true, amount: 0.4 }}
+                transition={{ duration: 0.4, delay: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            />
+
+            {/* Flowing particle (SMIL — GPU-friendly, no React state) */}
+            <circle r={2.2} fill={color}>
+                <animateMotion
+                    dur={`${particleDur}s`}
+                    repeatCount="indefinite"
+                    begin={particleBegin}
+                    path={path}
+                    rotate="auto"
+                    keyTimes="0;1"
+                    keySplines="0.4 0 0.2 1"
+                    calcMode="spline"
+                />
+                <animate
+                    attributeName="opacity"
+                    dur={`${particleDur}s`}
+                    repeatCount="indefinite"
+                    begin={particleBegin}
+                    values="0;1;1;0"
+                    keyTimes="0;0.15;0.78;1"
+                />
+                <animate
+                    attributeName="r"
+                    dur={`${particleDur}s`}
+                    repeatCount="indefinite"
+                    begin={particleBegin}
+                    values="1.6;2.4;2.4;1.4"
+                    keyTimes="0;0.15;0.78;1"
+                />
+            </circle>
+        </svg>
+    );
+};
+
+/* ═══════════════════════════════════════════════════════
+   SUB-BRANCH CURVED CONNECTORS (kept; minor polish)
    ═══════════════════════════════════════════════════════ */
 
 const CurvedConnectors: React.FC<{
@@ -544,24 +693,17 @@ const CurvedConnectors: React.FC<{
     >([]);
 
     useEffect(() => {
-        // Wait for the panel's scaleX animation (400ms) to finish before measuring
         const timer = setTimeout(() => {
             const svg = svgRef.current;
             if (!svg) return;
             const panel = svg.closest('.subbranch-panel') as HTMLElement;
             if (!panel) return;
-
             const cards = panel.querySelectorAll('.subbranch-card');
             if (cards.length === 0) return;
 
             const panelRect = panel.getBoundingClientRect();
-
-            // Origin: center of the node card's outer edge
-            // Panel top aligns with wrapper top (== node card top).
-            // Node card is ~38px tall → center ≈ 19px
             const originY = 19;
             const originX = isLeft ? panelRect.width + 8 : -8;
-
             const newCurves: typeof curves = [];
 
             cards.forEach((card) => {
@@ -571,7 +713,6 @@ const CurvedConnectors: React.FC<{
                     ? r.right - panelRect.left + 2
                     : r.left - panelRect.left - 2;
 
-                // Smooth cubic bezier — control points create an organic S-curve
                 const dx = Math.abs(cx - originX);
                 const cpX = dx * 0.55;
 
@@ -605,7 +746,6 @@ const CurvedConnectors: React.FC<{
         >
             {curves.length > 0 && (
                 <>
-                    {/* ── Glow layer ── */}
                     {curves.map(({ path }, i) => (
                         <motion.path
                             key={`glow-${i}`}
@@ -613,66 +753,70 @@ const CurvedConnectors: React.FC<{
                             fill="none"
                             stroke={color}
                             strokeWidth={5}
-                            strokeOpacity={0.07}
+                            strokeOpacity={0.08}
                             strokeLinecap="round"
                             initial={{ pathLength: 0 }}
                             animate={{ pathLength: 1 }}
-                            transition={{
-                                duration: 0.6,
-                                delay: i * 0.07,
-                                ease: [0.16, 1, 0.3, 1],
-                            }}
+                            transition={{ duration: 0.7, delay: i * 0.07, ease: [0.16, 1, 0.3, 1] }}
                         />
                     ))}
-
-                    {/* ── Main stroke ── */}
                     {curves.map(({ path }, i) => (
                         <motion.path
                             key={`main-${i}`}
                             d={path}
                             fill="none"
                             stroke={color}
-                            strokeWidth={1.5}
-                            strokeOpacity={0.35}
+                            strokeWidth={1.4}
+                            strokeOpacity={0.42}
                             strokeLinecap="round"
                             initial={{ pathLength: 0 }}
                             animate={{ pathLength: 1 }}
-                            transition={{
-                                duration: 0.5,
-                                delay: i * 0.07 + 0.05,
-                                ease: [0.16, 1, 0.3, 1],
-                            }}
+                            transition={{ duration: 0.55, delay: i * 0.07 + 0.05, ease: [0.16, 1, 0.3, 1] }}
                         />
                     ))}
-
-                    {/* ── Origin dot (on the node card edge) ── */}
                     <motion.circle
                         cx={curves[0].ox}
                         cy={curves[0].oy}
                         r={3.5}
                         fill={color}
-                        fillOpacity={0.5}
+                        fillOpacity={0.55}
                         initial={{ scale: 0, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ duration: 0.3 }}
                     />
-
-                    {/* ── End dots (on each child card) ── */}
-                    {curves.map(({ ex, ey }, i) => (
-                        <motion.circle
-                            key={`dot-${i}`}
-                            cx={ex}
-                            cy={ey}
-                            r={2.5}
-                            fill={color}
-                            fillOpacity={0.45}
-                            initial={{ scale: 0, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            transition={{
-                                duration: 0.3,
-                                delay: i * 0.07 + 0.3,
-                            }}
-                        />
+                    {curves.map(({ ex, ey, path }, i) => (
+                        <g key={`end-${i}`}>
+                            <motion.circle
+                                cx={ex}
+                                cy={ey}
+                                r={2.5}
+                                fill={color}
+                                fillOpacity={0.5}
+                                initial={{ scale: 0, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                transition={{ duration: 0.3, delay: i * 0.07 + 0.3 }}
+                            />
+                            {/* Subtle flowing particle */}
+                            <circle r={1.8} fill={color}>
+                                <animateMotion
+                                    dur={`${3.2 + (i % 3) * 0.3}s`}
+                                    repeatCount="indefinite"
+                                    begin={`${0.3 + i * 0.18}s`}
+                                    path={path}
+                                    calcMode="spline"
+                                    keyTimes="0;1"
+                                    keySplines="0.4 0 0.2 1"
+                                />
+                                <animate
+                                    attributeName="opacity"
+                                    dur={`${3.2 + (i % 3) * 0.3}s`}
+                                    repeatCount="indefinite"
+                                    begin={`${0.3 + i * 0.18}s`}
+                                    values="0;1;1;0"
+                                    keyTimes="0;0.18;0.78;1"
+                                />
+                            </circle>
+                        </g>
                     ))}
                 </>
             )}
@@ -689,15 +833,18 @@ const Roadmap: React.FC = () => {
         node: RoadmapNode;
         category: RoadmapCategory;
     } | null>(null);
-
-    // Only one expanded sub-branch at a time
     const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
-
-    const spineRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const [spineHeight, setSpineHeight] = useState(0);
 
-    // Close popover on Escape
+    // Scroll-driven spine via motion (no React re-renders → smooth as butter)
+    const { scrollYProgress } = useScroll({
+        target: containerRef,
+        offset: ['start end', 'end end'],
+    });
+    const spineHeight = useTransform(scrollYProgress, [0, 1], ['0%', '100%']);
+    const spineTopShadow = useTransform(scrollYProgress, [0, 1], ['0%', '100%']);
+    const scannerOpacity = useTransform(scrollYProgress, [0, 0.04, 0.96, 1], [0, 1, 1, 0]);
+
     useEffect(() => {
         const handleEsc = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
@@ -709,24 +856,13 @@ const Roadmap: React.FC = () => {
         return () => window.removeEventListener('keydown', handleEsc);
     }, []);
 
-    // Animate spine height on scroll
+    // Body scroll lock while the popover is open
     useEffect(() => {
-        const handleScroll = () => {
-            if (!containerRef.current) return;
-            const rect = containerRef.current.getBoundingClientRect();
-            const containerTop = rect.top;
-            const containerHeight = rect.height;
-            const windowHeight = window.innerHeight;
-
-            const scrolled = windowHeight - containerTop;
-            const progress = Math.min(Math.max(scrolled / containerHeight, 0), 1);
-            setSpineHeight(progress * 100);
-        };
-
-        window.addEventListener('scroll', handleScroll, { passive: true });
-        handleScroll();
-        return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
+        if (!selectedNode) return;
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = prev; };
+    }, [selectedNode]);
 
     const handleNodeClick = useCallback(
         (node: RoadmapNode, category: RoadmapCategory) => {
@@ -737,40 +873,30 @@ const Roadmap: React.FC = () => {
 
     const handleToggleExpand = useCallback(
         (e: React.MouseEvent, nodeId: string) => {
-            e.stopPropagation(); // Don't trigger popover
+            e.stopPropagation();
             setExpandedNodeId((prev) => (prev === nodeId ? null : nodeId));
         },
         []
     );
 
+    // Build a global stagger index across categories so each curve gets a unique offset
+    let globalNodeIdx = 0;
+
     return (
         <div className="roadmap-container" ref={containerRef}>
-            {/* ── Header ── */}
-            <motion.div
-                className="roadmap-header"
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-            >
-                <span className="roadmap-badge">Interactive Roadmap</span>
-                <h1>
-                    Machine Learning{' '}
-                    <span className="gradient-text">Learning Path</span>
-                </h1>
-                <p className="roadmap-subtitle">
-                    Scroll to explore the complete ML journey — from fundamentals to
-                    production deployment. Click any node to learn more.
-                </p>
-            </motion.div>
-
             {/* ── Tree ── */}
             <div className="roadmap-tree">
-                {/* Spine — grows as you scroll */}
+                {/* Spine track */}
                 <div className="roadmap-spine-track">
-                    <div
+                    {/* Filled portion */}
+                    <motion.div
                         className="roadmap-spine"
-                        ref={spineRef}
-                        style={{ height: `${spineHeight}%` }}
+                        style={{ height: spineHeight }}
+                    />
+                    {/* Scanner — pulsing glow at the leading edge of the fill */}
+                    <motion.div
+                        className="roadmap-spine-scanner"
+                        style={{ top: spineTopShadow, opacity: scannerOpacity }}
                     />
                 </div>
 
@@ -782,27 +908,19 @@ const Roadmap: React.FC = () => {
                             initial={{ opacity: 0, scale: 0.7 }}
                             whileInView={{ opacity: 1, scale: 1 }}
                             viewport={{ once: true, amount: 0.5 }}
-                            transition={{
-                                duration: 0.5,
-                                ease: [0.16, 1, 0.3, 1],
-                                delay: 0.1,
-                            }}
+                            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1], delay: 0.05 }}
                         >
                             <div
                                 className="milestone-dot"
                                 style={{
                                     background: `linear-gradient(135deg, ${category.color}, ${category.color}99)`,
-                                    boxShadow: `0 0 24px ${category.color}40`,
+                                    boxShadow: `0 0 28px ${category.color}55, 0 0 0 4px ${category.color}14`,
                                 }}
                             />
                             <div className="milestone-content">
                                 <span className="milestone-icon">{category.icon}</span>
-                                <h2 style={{ color: category.color }}>
-                                    {category.title}
-                                </h2>
-                                <span className="milestone-count">
-                                    {category.nodes.length} topics
-                                </span>
+                                <h2 style={{ color: category.color }}>{category.title}</h2>
+                                <span className="milestone-count">{category.nodes.length} topics</span>
                             </div>
                         </motion.div>
 
@@ -812,6 +930,7 @@ const Roadmap: React.FC = () => {
                                 const isLeft = nodeIdx % 2 === 0;
                                 const hasChildren = node.children && node.children.length > 0;
                                 const isExpanded = expandedNodeId === node.id;
+                                const myGlobalIdx = globalNodeIdx++;
 
                                 return (
                                     <div
@@ -820,49 +939,34 @@ const Roadmap: React.FC = () => {
                                     >
                                         <motion.div
                                             className={`roadmap-node ${isLeft ? 'node-left' : 'node-right'}`}
-                                            initial={{
-                                                opacity: 0,
-                                                x: isLeft ? -60 : 60,
-                                            }}
+                                            initial={{ opacity: 0, x: isLeft ? -50 : 50 }}
                                             whileInView={{ opacity: 1, x: 0 }}
                                             viewport={{ once: true, amount: 0.3 }}
                                             transition={{
-                                                duration: 0.6,
+                                                duration: 0.65,
                                                 ease: [0.16, 1, 0.3, 1],
-                                                delay: nodeIdx * 0.08,
+                                                delay: nodeIdx * 0.06,
                                             }}
-                                            onClick={() =>
-                                                handleNodeClick(node, category)
-                                            }
-                                            style={
-                                                {
-                                                    '--node-color': category.color,
-                                                } as React.CSSProperties
-                                            }
+                                            onClick={() => handleNodeClick(node, category)}
+                                            style={{ '--node-color': category.color } as React.CSSProperties}
                                         >
-                                            {/* Connector line to spine */}
-                                            <div className="node-connector" />
+                                            {/* ── Curved SVG connector ── */}
+                                            <NodeConnector
+                                                isLeft={isLeft}
+                                                color={category.color}
+                                                index={myGlobalIdx}
+                                            />
 
                                             {/* Node card */}
                                             <div className={`node-card ${isExpanded ? 'node-card-expanded' : ''}`}>
-                                                <span className="node-icon">
-                                                    {node.icon}
-                                                </span>
-                                                <span className="node-title">
-                                                    {node.title}
-                                                </span>
+                                                <span className="node-icon">{node.icon}</span>
+                                                <span className="node-title">{node.title}</span>
                                                 {hasChildren && (
                                                     <button
                                                         className={`node-expand-btn ${isExpanded ? 'expanded' : ''}`}
-                                                        onClick={(e) =>
-                                                            handleToggleExpand(e, node.id)
-                                                        }
+                                                        onClick={(e) => handleToggleExpand(e, node.id)}
                                                         aria-label={isExpanded ? 'Collapse' : 'Expand sub-topics'}
-                                                        style={
-                                                            {
-                                                                '--node-color': category.color,
-                                                            } as React.CSSProperties
-                                                        }
+                                                        style={{ '--node-color': category.color } as React.CSSProperties}
                                                     >
                                                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                                                             <path
@@ -875,9 +979,7 @@ const Roadmap: React.FC = () => {
                                                         </svg>
                                                     </button>
                                                 )}
-                                                {!hasChildren && (
-                                                    <span className="node-arrow">→</span>
-                                                )}
+                                                {!hasChildren && <span className="node-arrow">→</span>}
                                             </div>
                                         </motion.div>
 
@@ -889,18 +991,12 @@ const Roadmap: React.FC = () => {
                                                     initial={{ opacity: 0, scaleX: 0 }}
                                                     animate={{ opacity: 1, scaleX: 1 }}
                                                     exit={{ opacity: 0, scaleX: 0 }}
-                                                    transition={{
-                                                        duration: 0.4,
-                                                        ease: [0.16, 1, 0.3, 1],
-                                                    }}
-                                                    style={
-                                                        {
-                                                            '--node-color': category.color,
-                                                            transformOrigin: isLeft ? 'right center' : 'left center',
-                                                        } as React.CSSProperties
-                                                    }
+                                                    transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                                                    style={{
+                                                        '--node-color': category.color,
+                                                        transformOrigin: isLeft ? 'right center' : 'left center',
+                                                    } as React.CSSProperties}
                                                 >
-                                                    {/* ── Curved SVG connectors ── */}
                                                     <CurvedConnectors
                                                         isLeft={isLeft}
                                                         color={category.color}
@@ -912,10 +1008,7 @@ const Roadmap: React.FC = () => {
                                                             <motion.div
                                                                 key={child.id}
                                                                 className="subbranch-node"
-                                                                initial={{
-                                                                    opacity: 0,
-                                                                    x: isLeft ? 20 : -20,
-                                                                }}
+                                                                initial={{ opacity: 0, x: isLeft ? 20 : -20 }}
                                                                 animate={{ opacity: 1, x: 0 }}
                                                                 exit={{ opacity: 0, x: isLeft ? 20 : -20 }}
                                                                 transition={{
@@ -923,19 +1016,11 @@ const Roadmap: React.FC = () => {
                                                                     ease: [0.16, 1, 0.3, 1],
                                                                     delay: childIdx * 0.06,
                                                                 }}
-                                                                style={
-                                                                    {
-                                                                        '--node-color': category.color,
-                                                                    } as React.CSSProperties
-                                                                }
+                                                                style={{ '--node-color': category.color } as React.CSSProperties}
                                                             >
                                                                 <div className="subbranch-card">
-                                                                    <span className="subbranch-icon">
-                                                                        {child.icon}
-                                                                    </span>
-                                                                    <span className="subbranch-title">
-                                                                        {child.title}
-                                                                    </span>
+                                                                    <span className="subbranch-icon">{child.icon}</span>
+                                                                    <span className="subbranch-title">{child.title}</span>
                                                                 </div>
                                                             </motion.div>
                                                         ))}
@@ -953,7 +1038,7 @@ const Roadmap: React.FC = () => {
                 {/* ── Finish flag ── */}
                 <motion.div
                     className="roadmap-finish"
-                    initial={{ opacity: 0, scale: 0.5 }}
+                    initial={{ opacity: 0, scale: 0.7 }}
                     whileInView={{ opacity: 1, scale: 1 }}
                     viewport={{ once: true, amount: 0.5 }}
                     transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
@@ -964,61 +1049,59 @@ const Roadmap: React.FC = () => {
                 </motion.div>
             </div>
 
-            {/* ── Popover ── */}
-            <AnimatePresence>
-                {selectedNode && (
-                    <motion.div
-                        className="roadmap-overlay"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        onClick={() => setSelectedNode(null)}
-                    >
+            {/* ── Popover — portalled to <body> so transformed ancestors
+                  (Learn's AnimatePresence wrapper) don't trap the fixed overlay ── */}
+            {createPortal(
+                <AnimatePresence>
+                    {selectedNode && (
                         <motion.div
-                            className="roadmap-popover"
-                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                            transition={{
-                                duration: 0.35,
-                                ease: [0.16, 1, 0.3, 1],
-                            }}
-                            onClick={(e) => e.stopPropagation()}
+                            className="roadmap-overlay"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            onClick={() => setSelectedNode(null)}
                         >
-                            <div className="popover-header">
-                                <div className="popover-meta">
-                                    <span
-                                        className="popover-category-badge"
-                                        style={{
-                                            color: selectedNode.category.color,
-                                            background: `${selectedNode.category.color}15`,
-                                            borderColor: `${selectedNode.category.color}30`,
-                                        }}
+                            <motion.div
+                                className="roadmap-popover"
+                                initial={{ opacity: 0, scale: 0.92, y: 18 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.92, y: 18 }}
+                                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div className="popover-header">
+                                    <div className="popover-meta">
+                                        <span
+                                            className="popover-category-badge"
+                                            style={{
+                                                color: selectedNode.category.color,
+                                                background: `${selectedNode.category.color}15`,
+                                                borderColor: `${selectedNode.category.color}30`,
+                                            }}
+                                        >
+                                            {selectedNode.category.icon} {selectedNode.category.title}
+                                        </span>
+                                    </div>
+                                    <button
+                                        className="popover-close"
+                                        onClick={() => setSelectedNode(null)}
+                                        aria-label="Close"
                                     >
-                                        {selectedNode.category.icon}{' '}
-                                        {selectedNode.category.title}
-                                    </span>
+                                        ✕
+                                    </button>
                                 </div>
-                                <button
-                                    className="popover-close"
-                                    onClick={() => setSelectedNode(null)}
-                                    aria-label="Close"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-                            <div className="popover-body">
-                                <div className="popover-icon-large">
-                                    {selectedNode.node.icon}
+                                <div className="popover-body">
+                                    <div className="popover-icon-large">{selectedNode.node.icon}</div>
+                                    <h3>{selectedNode.node.title}</h3>
+                                    <p>{selectedNode.node.description}</p>
                                 </div>
-                                <h3>{selectedNode.node.title}</h3>
-                                <p>{selectedNode.node.description}</p>
-                            </div>
+                            </motion.div>
                         </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+                    )}
+                </AnimatePresence>,
+                document.body
+            )}
         </div>
     );
 };

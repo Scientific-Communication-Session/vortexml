@@ -180,7 +180,7 @@ const Dataset: React.FC = () => {
     return (
         <>
             <div className="page-header">
-                <h1>📊 Dataset Designer</h1>
+                <h1>Dataset <em>Designer.</em></h1>
                 <p>Upload your data, preview it, and select the columns for training.</p>
             </div>
 

@@ -3,48 +3,90 @@ import { Link } from 'react-router-dom';
 
 const Footer: React.FC = () => {
     return (
-        <footer className="border-t border-white/10 bg-[#04040a] relative z-10 w-full">
-            <div className="mx-auto max-w-7xl px-6 py-16 lg:px-8">
+        <footer className="relative z-10 w-full border-t border-white/10 bg-[#04040a]">
+            {/* Top hairline accent */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80%] h-px bg-gradient-to-r from-transparent via-accent-2/40 to-transparent" />
+
+            <div className="mx-auto max-w-7xl px-6 py-20 lg:px-8">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-12 md:gap-8">
                     <div className="col-span-2 md:col-span-1">
-                        <div className="flex items-center gap-2 mb-4">
-                            <span className="text-xl font-bold bg-gradient-to-r from-accent-1 to-accent-3 bg-clip-text text-transparent">◎</span>
-                            <span className="font-semibold text-text-primary text-lg">VortexML</span>
-                        </div>
-                        <p className="text-sm text-text-secondary leading-relaxed max-w-xs">
-                            The future of machine learning development. Build, configure, and train models without extreme complexity.
+                        <Link to="/" className="flex items-center gap-2 mb-5 no-underline group">
+                            <span className="text-xl text-transparent bg-clip-text bg-gradient-to-br from-accent-1 to-accent-3 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:rotate-90">◎</span>
+                            <span className="text-[17px] font-semibold text-text-primary tracking-[-0.02em]">
+                                Vortex<span className="font-display italic font-normal tracking-[-0.01em] text-accent-2">ML</span>
+                            </span>
+                        </Link>
+                        <p className="text-[14px] text-text-secondary leading-[1.6] max-w-xs font-light tracking-[0.002em]">
+                            The future of machine learning development. Build, configure, and{' '}
+                            <em className="font-display italic font-normal text-text-primary">train</em>{' '}
+                            models without extreme complexity.
                         </p>
                     </div>
-                    <div>
-                        <h3 className="text-sm font-semibold text-text-primary mb-4 tracking-wider uppercase">Product</h3>
-                        <ul className="space-y-3">
-                            <li><Link to="/architect" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">Architect Builder</Link></li>
-                            <li><Link to="/dataset" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">Dataset Processing</Link></li>
-                            <li><Link to="/training" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">Live Training</Link></li>
-                        </ul>
-                    </div>
-                    <div>
-                        <h3 className="text-sm font-semibold text-text-primary mb-4 tracking-wider uppercase">Resources</h3>
-                        <ul className="space-y-3">
-                            <li><Link to="/courses" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">ML Courses</Link></li>
-                            <li><a href="#" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">Documentation</a></li>
-                            <li><a href="#" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">Community</a></li>
-                        </ul>
-                    </div>
-                    <div>
-                        <h3 className="text-sm font-semibold text-text-primary mb-4 tracking-wider uppercase">Company</h3>
-                        <ul className="space-y-3">
-                            <li><a href="#" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">About Us</a></li>
-                            <li><a href="#" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">Blog</a></li>
-                            <li><a href="#" className="text-sm text-text-secondary hover:text-white transition-colors duration-300">Contact</a></li>
-                        </ul>
-                    </div>
+
+                    {[
+                        {
+                            title: 'Product',
+                            links: [
+                                { to: '/architect', label: 'Architect Builder' },
+                                { to: '/dataset', label: 'Dataset Processing' },
+                                { to: '/training', label: 'Live Training' },
+                            ],
+                        },
+                        {
+                            title: 'Resources',
+                            links: [
+                                { to: '/courses', label: 'ML Courses' },
+                                { to: '#', label: 'Documentation' },
+                                { to: '#', label: 'Community' },
+                            ],
+                        },
+                        {
+                            title: 'Company',
+                            links: [
+                                { to: '#', label: 'About Us' },
+                                { to: '#', label: 'Blog' },
+                                { to: '#', label: 'Contact' },
+                            ],
+                        },
+                    ].map((col) => (
+                        <div key={col.title}>
+                            <h3 className="text-[11px] font-mono font-medium text-text-primary mb-5 tracking-[0.22em] uppercase">
+                                {col.title}
+                            </h3>
+                            <ul className="space-y-3 list-none p-0">
+                                {col.links.map((l) =>
+                                    l.to.startsWith('/') ? (
+                                        <li key={l.label}>
+                                            <Link
+                                                to={l.to}
+                                                className="text-[13.5px] text-text-secondary hover:text-white transition-colors duration-300 no-underline tracking-[-0.003em]"
+                                            >
+                                                {l.label}
+                                            </Link>
+                                        </li>
+                                    ) : (
+                                        <li key={l.label}>
+                                            <a
+                                                href={l.to}
+                                                className="text-[13.5px] text-text-secondary hover:text-white transition-colors duration-300 no-underline tracking-[-0.003em]"
+                                            >
+                                                {l.label}
+                                            </a>
+                                        </li>
+                                    )
+                                )}
+                            </ul>
+                        </div>
+                    ))}
                 </div>
-                <div className="mt-16 pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
-                    <p className="text-xs text-text-secondary">&copy; {new Date().getFullYear()} VortexML Platform. All rights reserved.</p>
+
+                <div className="mt-16 pt-8 border-t border-white/[0.06] flex flex-col md:flex-row justify-between items-center gap-4">
+                    <p className="font-mono text-[11px] tracking-[0.06em] text-text-muted">
+                        &copy; {new Date().getFullYear()} VORTEXML PLATFORM — ALL RIGHTS RESERVED
+                    </p>
                     <div className="flex gap-6">
-                        <a href="#" className="text-xs text-text-secondary hover:text-white transition-colors">Privacy Policy</a>
-                        <a href="#" className="text-xs text-text-secondary hover:text-white transition-colors">Terms of Service</a>
+                        <a href="#" className="font-mono text-[11px] tracking-[0.08em] uppercase text-text-secondary hover:text-white transition-colors">Privacy</a>
+                        <a href="#" className="font-mono text-[11px] tracking-[0.08em] uppercase text-text-secondary hover:text-white transition-colors">Terms</a>
                     </div>
                 </div>
             </div>

@@ -455,7 +455,7 @@ const Training: React.FC = () => {
     return (
         <>
             <div className="page-header">
-                <h1>⚡ Training Dashboard</h1>
+                <h1>Training <em>Dashboard.</em></h1>
                 <p>Watch your neural network learn in real-time.</p>
             </div>
 

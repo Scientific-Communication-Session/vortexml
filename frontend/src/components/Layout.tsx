@@ -16,6 +16,8 @@ const Layout: React.FC = () => {
     const location = useLocation();
 
     const isHome = location.pathname === '/';
+    const isAuth = location.pathname === '/signin' || location.pathname === '/signup';
+    const isFullBleed = isHome || isAuth;
 
     // Scroll to top on route change
     useEffect(() => {
@@ -63,9 +65,9 @@ const Layout: React.FC = () => {
             >
                 {/* ── Logo ── */}
                 <NavLink to="/" className="flex items-center gap-2 shrink-0 group no-underline">
-                    <span className="text-lg select-none transition-transform duration-300 group-hover:rotate-90">◎</span>
-                    <span className="text-[15px] font-semibold text-white tracking-tight">
-                        Vortex<span className="text-accent-2">ML</span>
+                    <span className="text-[18px] select-none transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:rotate-90 text-transparent bg-clip-text bg-gradient-to-br from-accent-1 to-accent-3">◎</span>
+                    <span className="text-[15px] font-semibold text-white tracking-[-0.02em]">
+                        Vortex<span className="font-display italic font-normal tracking-[-0.01em] text-accent-2 ml-px">ML</span>
                     </span>
                 </NavLink>
 
@@ -77,10 +79,10 @@ const Layout: React.FC = () => {
                             to={to}
                             className={({ isActive }) =>
                                 [
-                                    'px-4 py-1.5 rounded-xl text-[13px] font-medium no-underline',
-                                    'transition-all duration-300 ease-out',
+                                    'px-4 py-1.5 rounded-xl text-[12.5px] font-medium tracking-[-0.005em] no-underline',
+                                    'transition-[color,background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
                                     isActive
-                                        ? 'bg-white/[0.12] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+                                        ? 'bg-white/[0.11] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
                                         : 'text-white/55 hover:text-white/90 hover:bg-white/[0.06]',
                                 ].join(' ')
                             }
@@ -94,15 +96,15 @@ const Layout: React.FC = () => {
                 <div className="flex items-center shrink-0">
                     {user ? (
                         <div className="flex items-center gap-3">
-                            <span className="hidden md:inline text-[13px] text-white/60 font-medium">
+                            <span className="hidden md:inline text-[12.5px] text-white/65 font-medium tracking-[-0.005em]">
                                 {user.username}
-                                <span className="ml-2 px-2 py-0.5 rounded-lg bg-white/[0.07] text-[11px] text-white/45 border border-white/[0.06]">
+                                <span className="ml-2 px-2 py-0.5 rounded-lg bg-white/[0.07] font-mono text-[10px] tracking-[0.06em] text-white/50 border border-white/[0.06]">
                                     {user.is_beginner ? '🌿 Novice' : '🔥 Expert'}
                                 </span>
                             </span>
                             <button
                                 onClick={handleLogout}
-                                className="px-3.5 py-1.5 text-[13px] font-medium text-white/90 hover:text-white rounded-xl border border-white/10 bg-white/[0.05] hover:bg-white/[0.1] transition-all duration-300 focus:outline-none"
+                                className="px-3.5 py-1.5 text-[12.5px] font-medium text-white/90 hover:text-white rounded-xl border border-white/10 bg-white/[0.05] hover:bg-white/[0.1] transition-[color,background-color] duration-300 focus:outline-none"
                             >
                                 Logout
                             </button>
@@ -111,13 +113,13 @@ const Layout: React.FC = () => {
                         <div className="flex items-center gap-1.5">
                             <NavLink
                                 to="/signin"
-                                className="px-4 py-1.5 text-[13px] font-medium text-white/50 hover:text-white/90 rounded-xl hover:bg-white/[0.06] transition-all duration-300 focus:outline-none no-underline"
+                                className="px-4 py-1.5 text-[12.5px] font-medium tracking-[-0.005em] text-white/55 hover:text-white/90 rounded-xl hover:bg-white/[0.06] transition-colors duration-300 focus:outline-none no-underline"
                             >
                                 Sign In
                             </NavLink>
                             <NavLink
                                 to="/signup"
-                                className="px-4 py-1.5 text-[13px] font-semibold text-white rounded-xl bg-gradient-to-r from-accent-1 to-accent-2 hover:opacity-90 hover:scale-[1.03] active:scale-[0.98] transition-all duration-300 focus:outline-none shadow-[0_0_16px_rgba(139,92,246,0.3)] no-underline"
+                                className="px-4 py-1.5 text-[12.5px] font-semibold tracking-[-0.005em] text-white rounded-xl bg-gradient-to-r from-accent-1 to-accent-2 hover:scale-[1.03] active:scale-[0.98] transition-transform duration-300 focus:outline-none shadow-[0_0_16px_rgba(139,92,246,0.3)] no-underline"
                             >
                                 Sign Up
                             </NavLink>
@@ -126,7 +128,7 @@ const Layout: React.FC = () => {
                 </div>
             </nav>
 
-            <main className={isHome ? 'flex-grow relative' : 'main-content flex-grow'}>
+            <main className={isFullBleed ? 'flex-grow relative' : 'main-content flex-grow'}>
                 <Outlet />
             </main>
             <Footer />

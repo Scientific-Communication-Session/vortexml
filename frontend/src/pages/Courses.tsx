@@ -42,7 +42,7 @@ const Courses: React.FC = () => {
     return (
         <div className="courses-container">
             <div className="page-header" style={{ marginBottom: '2.5rem' }}>
-                <h1 className="gradient">🎓 ML Learning Paths</h1>
+                <h1>ML <em>Learning Paths.</em></h1>
                 <p>Master Machine Learning concepts securely and interactively.</p>
             </div>
 

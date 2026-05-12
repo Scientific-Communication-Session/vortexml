@@ -60,8 +60,9 @@ a {
     --shadow-elevated: 0 16px 48px rgba(0, 0, 0, 0.5);
 
     /* Typography */
-    --font-main: 'Space Grotesk', system-ui, -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --font-main: 'Cabinet Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Cormorant Garamond', 'Times New Roman', Georgia, serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
 
     /* Spacing */
     --radius-sm: 8px;
@@ -71,10 +72,24 @@ a {
 
     /* Transitions */
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-glide: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 html {
     font-size: 16px;
+    scroll-behavior: smooth;
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
 }
 
 body {
@@ -83,10 +98,35 @@ body {
     color: var(--text-primary);
     min-height: 100vh;
     overflow-x: hidden;
+    font-feature-settings: "kern", "calt", "ss01";
+    font-variant-ligatures: common-ligatures contextual;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    letter-spacing: -0.008em;
 }
 
-/* Animated background */
+/* Display serif utility — Cormorant Garamond italic for editorial accents */
+.font-display {
+    font-family: var(--font-display);
+    font-feature-settings: "kern", "liga", "dlig", "swsh";
+    font-style: italic;
+    letter-spacing: -0.005em;
+}
+
+/* Numeric tabular figures for tables, stats, logs */
+.tabular-nums, .data-table, .stat-card .stat-value, .training-log,
+.summary-item .si-value {
+    font-variant-numeric: tabular-nums lining-nums;
+}
+
+::selection {
+    background: rgba(139, 92, 246, 0.32);
+    color: #ffffff;
+    text-shadow: none;
+}
+
+/* Animated atmospheric background */
 body::before {
     content: '';
     position: fixed;
@@ -94,22 +134,29 @@ body::before {
     left: -50%;
     width: 200%;
     height: 200%;
-    background: radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
-        radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
-        radial-gradient(ellipse at 50% 80%, rgba(6, 182, 212, 0.05) 0%, transparent 50%);
-    animation: bgShift 20s ease-in-out infinite alternate;
+    background: radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.10) 0%, transparent 55%),
+        radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.07) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 80%, rgba(6, 182, 212, 0.06) 0%, transparent 50%);
+    animation: bgShift 36s ease-in-out infinite alternate;
     z-index: -1;
     pointer-events: none;
+    will-change: transform;
+    transform: translate3d(0, 0, 0);
 }
 
 @keyframes bgShift {
-    0% {
-        transform: translate(0, 0) rotate(0deg);
-    }
+    0%   { transform: translate3d(0, 0, 0) rotate(0deg); }
+    100% { transform: translate3d(-3%, 2%, 0) rotate(1.4deg); }
+}
 
-    100% {
-        transform: translate(-5%, 3%) rotate(3deg);
-    }
+/* Opt-in subtle grain overlay (used on pages that want extra texture) */
+.grain-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    opacity: 0.35;
+    mix-blend-mode: overlay;
 }
 
 /* ─── Navbar ─── */
@@ -223,9 +270,10 @@ body::before {
 .hero-badge {
     display: inline-block;
     padding: 0.35rem 1rem;
-    font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
     color: var(--accent-2);
     background: rgba(139, 92, 246, 0.1);
     border: 1px solid rgba(139, 92, 246, 0.25);
@@ -235,26 +283,33 @@ body::before {
 }
 
 .hero h1 {
-    font-size: 3.5rem;
+    font-size: clamp(2.5rem, 5.6vw + 0.5rem, 5.25rem);
     font-weight: 700;
-    line-height: 1.1;
+    line-height: 1.02;
     margin-bottom: 1.25rem;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.035em;
+    font-feature-settings: "ss01", "cv11", "calt", "kern";
 }
 
 .hero h1 .gradient-text {
-    background: var(--gradient-main);
+    background: linear-gradient(135deg, var(--accent-1) 0%, var(--accent-3) 50%, var(--accent-4) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.01em;
 }
 
 .hero-subtitle {
-    font-size: 1.2rem;
+    font-size: clamp(1rem, 0.6vw + 0.92rem, 1.2rem);
     color: var(--text-secondary);
-    max-width: 600px;
+    max-width: 620px;
     margin: 0 auto 3rem;
-    line-height: 1.6;
+    line-height: 1.65;
+    font-weight: 300;
+    letter-spacing: 0.005em;
 }
 
 .hero-cta {
@@ -337,8 +392,10 @@ body::before {
 
 .feature-card p {
     color: var(--text-secondary);
-    font-size: 0.9rem;
-    line-height: 1.6;
+    font-size: 0.92rem;
+    line-height: 1.65;
+    font-weight: 300;
+    letter-spacing: 0.003em;
 }
 
 .feature-card .card-arrow {
@@ -363,14 +420,28 @@ body::before {
 }
 
 .page-header h1 {
-    font-size: 2rem;
+    font-size: clamp(1.85rem, 2vw + 1.3rem, 2.4rem);
     font-weight: 700;
     margin-bottom: 0.4rem;
+    letter-spacing: -0.025em;
+    line-height: 1.08;
+}
+
+.page-header h1 em,
+.page-header h1 .accent {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
 }
 
 .page-header p {
     color: var(--text-secondary);
-    font-size: 1rem;
+    font-size: 1.02rem;
+    font-weight: 300;
+    line-height: 1.6;
+    max-width: 60ch;
 }
 
 /* ─── Glass Panels ─── */
@@ -1678,34 +1749,34 @@ body::before {
 
 /* Very simple and clean markdown styling mimicking Notion */
 .markdown-content {
-    font-family: 'Space Grotesk', system-ui, sans-serif;
-    line-height: 1.7;
+    font-family: var(--font-main);
+    line-height: 1.75;
     font-size: 1.05rem;
     color: #e0e0ea;
+    letter-spacing: -0.003em;
+    font-weight: 300;
 }
 
 .markdown-content h1,
 .markdown-content h2,
 .markdown-content h3 {
-    margin-top: 2rem;
+    margin-top: 2.25rem;
     margin-bottom: 1rem;
     color: var(--text-primary);
-    font-weight: 700;
+    font-weight: 600;
+    letter-spacing: -0.022em;
+    line-height: 1.18;
 }
 
 .markdown-content h1 {
-    font-size: 2rem;
+    font-size: 2.1rem;
     border-bottom: 1px solid var(--border-glass);
-    padding-bottom: 0.5rem;
+    padding-bottom: 0.55rem;
+    letter-spacing: -0.028em;
 }
 
-.markdown-content h2 {
-    font-size: 1.5rem;
-}
-
-.markdown-content h3 {
-    font-size: 1.25rem;
-}
+.markdown-content h2 { font-size: 1.55rem; }
+.markdown-content h3 { font-size: 1.25rem; letter-spacing: -0.018em; }
 
 .markdown-content p {
     margin-bottom: 1.25rem;
@@ -1854,11 +1925,26 @@ body::before {
 }
 
 .auth-card h2 {
-    font-size: 2rem;
+    font-size: clamp(1.75rem, 2vw + 1.1rem, 2.15rem);
     margin-bottom: 0.5rem;
     background: linear-gradient(135deg, var(--text-primary) 0%, rgba(255, 255, 255, 0.7) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    font-weight: 600;
+}
+
+.auth-card h2 em,
+.auth-card h2 .accent {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
+    background: linear-gradient(135deg, var(--accent-1), var(--accent-3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .auth-card p {
@@ -1988,15 +2074,27 @@ body::before {
 }
 
 .survey-header h2 {
-    font-size: 2.5rem;
+    font-size: clamp(2rem, 3vw + 1.2rem, 2.75rem);
     margin-bottom: 1rem;
+    letter-spacing: -0.035em;
+    line-height: 1.08;
+    font-weight: 600;
+}
+
+.survey-header h2 em,
+.survey-header h2 .accent {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
 }
 
 .survey-header p {
     color: var(--text-secondary);
-    font-size: 1.1rem;
-    max-width: 600px;
+    font-size: 1.05rem;
+    max-width: 60ch;
     margin: 0 auto;
+    line-height: 1.65;
+    font-weight: 300;
 }
 
 .survey-questions-grid {
@@ -2116,11 +2214,12 @@ body::before {
 }
 
 /* ═══════════════════════════════════════════════════════
-   LEARN TAB BAR
+   LEARN TAB
    ═══════════════════════════════════════════════════════ */
 
 .learn-page {
-    padding-top: 1rem;
+    padding-top: 0.5rem;
+    padding-bottom: 4rem;
 }
 
 .learn-tab-bar {
@@ -2214,26 +2313,31 @@ body::before {
 }
 
 .roadmap-header h1 {
-    font-size: 2.6rem;
+    font-size: clamp(2.2rem, 3vw + 1.5rem, 3rem);
     font-weight: 700;
-    line-height: 1.15;
+    line-height: 1.08;
     margin-bottom: 1rem;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.032em;
 }
 
 .roadmap-header .gradient-text {
-    background: var(--gradient-main);
+    background: linear-gradient(135deg, var(--accent-1), var(--accent-3) 60%, var(--accent-4));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.015em;
 }
 
 .roadmap-subtitle {
     color: var(--text-secondary);
     font-size: 1.05rem;
-    line-height: 1.6;
-    max-width: 540px;
+    line-height: 1.65;
+    max-width: 56ch;
     margin: 0 auto;
+    font-weight: 300;
 }
 
 /* ── Tree structure ── */
@@ -2241,25 +2345,84 @@ body::before {
     position: relative;
 }
 
-/* Central spine — track + fill */
+/* Central spine — track + fill (smoother + scanner glow) */
 .roadmap-spine-track {
     position: absolute;
     left: 50%;
     top: 0;
     bottom: 0;
-    width: 3px;
+    width: 2px;
     transform: translateX(-50%);
-    background: rgba(100, 100, 200, 0.08);
-    border-radius: 3px;
+    background: linear-gradient(
+        to bottom,
+        rgba(100, 100, 200, 0.04) 0%,
+        rgba(100, 100, 200, 0.10) 12%,
+        rgba(100, 100, 200, 0.10) 88%,
+        rgba(100, 100, 200, 0.04) 100%
+    );
+    border-radius: 999px;
     z-index: 0;
+    overflow: visible;
 }
 
 .roadmap-spine {
     width: 100%;
-    background: var(--gradient-main);
-    border-radius: 3px;
-    transition: height 0.15s linear;
-    box-shadow: 0 0 16px rgba(99, 102, 241, 0.3);
+    background: linear-gradient(
+        to bottom,
+        rgba(99, 102, 241, 0.0) 0%,
+        rgba(99, 102, 241, 0.55) 6%,
+        rgba(139, 92, 246, 0.85) 50%,
+        rgba(168, 85, 247, 0.85) 100%
+    );
+    border-radius: 999px;
+    box-shadow:
+        0 0 18px rgba(139, 92, 246, 0.35),
+        0 0 32px rgba(139, 92, 246, 0.18);
+    will-change: height;
+}
+
+/* Leading-edge scanner — follows the bottom of the filled portion.
+   Uses an inner ::after to animate a pulse without fighting motion's inline opacity. */
+.roadmap-spine-scanner {
+    position: absolute;
+    left: 50%;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(
+        circle at center,
+        rgba(168, 85, 247, 1) 0%,
+        rgba(139, 92, 246, 0.55) 30%,
+        transparent 70%
+    );
+    box-shadow:
+        0 0 18px rgba(168, 85, 247, 0.65),
+        0 0 36px rgba(139, 92, 246, 0.4);
+    will-change: top, opacity;
+}
+
+.roadmap-spine-scanner::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    background: radial-gradient(circle at center, rgba(168, 85, 247, 0.35), transparent 60%);
+    animation: spineScannerPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes spineScannerPulse {
+    0%, 100% { transform: scale(0.7); opacity: 0.55; }
+    50%      { transform: scale(1.05); opacity: 0.9; }
+}
+
+/* Old straight .node-connector — no longer rendered, but kept defensive in case it sneaks back */
+.node-connector { display: none; }
+
+/* New curve SVG: pure absolute positioning, layered above any background, below card */
+.node-curve-svg {
+    z-index: 0;
 }
 
 /* ── Category (milestone) ── */
@@ -2374,9 +2537,11 @@ body::before {
     border-radius: var(--radius-md);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    transition: all 0.3s var(--ease-out);
+    transition: border-color 0.3s var(--ease-out), background-color 0.3s var(--ease-out), transform 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out);
     max-width: 280px;
     width: 100%;
+    position: relative;
+    z-index: 1;
 }
 
 .node-card:hover {
