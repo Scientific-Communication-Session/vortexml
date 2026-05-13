@@ -738,8 +738,14 @@ def chat():
     try:
         client = _get_anthropic_client()
         resp = client.messages.create(
-            model="claude-opus-4-7",
+            # Sonnet 4.6 is ~40% cheaper per token than Opus 4.7 and the
+            # right tier for a Q&A tutor. Per the Anthropic migration guide,
+            # set `effort: low` and disable thinking for chat workloads —
+            # otherwise 4.6 defaults to `effort: high` and burns tokens.
+            model="claude-sonnet-4-6",
             max_tokens=_CHAT_MAX_TOKENS,
+            thinking={"type": "disabled"},
+            output_config={"effort": "low"},
             system=[
                 {
                     "type": "text",
@@ -765,6 +771,388 @@ def chat():
             break
 
     return jsonify({"role": "assistant", "content": text})
+
+
+# ─────────────────────────────────────────────────────────
+# Auto-Configure (two-bot flow)
+# ─────────────────────────────────────────────────────────
+# Bot 1 (questioner): conversational, asks 1-3 clarifying questions.
+# Bot 2 (picker):     one-shot, tool-use, emits a strict JSON config.
+# Available to ALL signed-in users (not gated on is_beginner).
+
+AUTO_CONFIG_QUESTIONER_PROMPT = (
+    "You are an ML expert helping a user pick a neural-network architecture and "
+    "hyperparameters for a dataset they have already uploaded to VortexML. "
+    "You are inside the Architect tab.\n\n"
+    "Your ONLY job in this conversation is to understand the user's goal well "
+    "enough that a separate picker model can make a great recommendation. You "
+    "MUST NOT output a configuration, recommend architectures, or list "
+    "hyperparameters yourself — that's done in a separate step.\n\n"
+    "Style:\n"
+    "- The user has already seen the greeting 'Describe your problem in a few "
+    "  words — what do you want the model to predict?'. Respond to whatever "
+    "  they typed.\n"
+    "- Ask AT MOST 1-3 short follow-up questions across the whole conversation, "
+    "  one per turn. Stop early if the user's answer is already clear.\n"
+    "- Useful things to confirm only if not obvious from the dataset/their "
+    "  message: classification vs regression, time-series vs independent rows, "
+    "  speed vs accuracy preference, risk of overfitting on small data.\n"
+    "- Each message: under 2 short sentences. Friendly, not chatty.\n"
+    "- When you have enough info, send a short reply ending with this exact "
+    "  sentence: 'Click **Generate Configuration** below when you're ready.'\n"
+    "- Never list architectures or hyperparameters. Never propose a config.\n\n"
+    "The user's dataset summary follows."
+)
+
+AUTO_CONFIG_PICKER_PROMPT = (
+    "You are a senior ML engineer choosing the BEST neural network configuration "
+    "for a user's dataset and stated problem in VortexML. Quality matters: the "
+    "user will train this model and judge VortexML by the result. Reason carefully "
+    "before you commit to a configuration — do NOT make a snap decision.\n\n"
+    "Available architectures (use EXACTLY one of these keys): mlp, dnn, cnn1d, "
+    "rnn, lstm, gru, autoencoder, resnet, transformer, wide_deep.\n\n"
+    "Your reasoning process MUST cover these steps, in order, before you call the "
+    "tool. Use the extended-thinking block to work through them. Do not skip a step.\n\n"
+    "1. TASK TYPE — Decide whether this is classification, regression, anomaly "
+    "   detection, or unsupervised representation learning. Anchor your answer to "
+    "   concrete dataset facts: the target column's dtype and unique-value count. "
+    "   A numeric target with many unique values → regression. A non-numeric or "
+    "   low-cardinality numeric target → classification. If the user said anomaly / "
+    "   fraud / outlier detection, lean autoencoder.\n\n"
+    "2. STRUCTURE — Is there sequential / temporal structure (time-series, ordered "
+    "   rows, columns with names like 'date', 'time', 't', 'timestamp', 'lag_*', "
+    "   'step')? If yes → RNN family (lstm for long deps, gru for short and faster). "
+    "   Are features otherwise independent and tabular? Then a feedforward family.\n\n"
+    "3. ARCHITECTURE CANDIDATES — List 2-3 architectures that could fit, then rule "
+    "   each one out or in based on dataset size, feature count, and the structure "
+    "   above. Pick the survivor. Never pick transformer or resnet on tiny datasets "
+    "   (< 2k rows) — they overfit. Never pick rnn/lstm/gru on clearly non-sequential "
+    "   tabular data. Wide & Deep is for sparse categorical-heavy data with both "
+    "   memorization and generalization needs (rare for typical user datasets).\n\n"
+    "4. CAPACITY — Choose layer_sizes based on dataset size and feature count:\n"
+    "   - < 1k rows:    [32, 16]      (small — overfitting is the risk)\n"
+    "   - 1k-10k rows:  [64, 32]      (modest)\n"
+    "   - 10k-50k rows: [128, 64]     (standard)\n"
+    "   - > 50k rows:   [256, 128, 64] (deeper allowed)\n"
+    "   For LSTM/GRU/Transformer, layer_sizes encode hidden/d_model dims — keep "
+    "   the FIRST value ≥ 32. For Wide & Deep, treat layer_sizes as the deep arm.\n\n"
+    "5. EPOCHS — Anchor to dataset size:\n"
+    "   - < 1k rows:    20-40 epochs, ALWAYS enable early_stopping (patience 5-8).\n"
+    "   - 1k-50k rows:  40-80 epochs, early_stopping recommended (patience 8-12).\n"
+    "   - > 50k rows:   80-150 epochs, early_stopping optional (patience 10-15).\n\n"
+    "6. LEARNING RATE — Default 0.001 for adam. For transformer/resnet/deeper "
+    "   stacks (3+ layers) → 0.0001. For very small datasets → 0.001 still fine.\n\n"
+    "7. BATCH SIZE — 32 default. Bump to 64 for > 10k rows, 128 for > 100k rows. "
+    "   Drop to 16 only if rows < 500.\n\n"
+    "8. OPTIMIZER & ACTIVATION — Default optimizer 'adam', activation 'relu'. "
+    "   Use 'adamw' on transformer/resnet. Use 'gelu' for transformer. Use 'tanh' "
+    "   inside rnn/lstm/gru only if the user mentioned bounded outputs.\n\n"
+    "9. SANITY CHECK — Before you commit, re-read your choices: does each one "
+    "   match a CONCRETE fact in the dataset summary (rows, dtype, cardinality, "
+    "   user message)? If a hyperparameter feels arbitrary, fix it.\n\n"
+    "JUSTIFICATION — When you finally call the tool, your `justification` string "
+    "MUST cite specific facts from THIS dataset: the row count, the target "
+    "column's name and characteristics, and ONE other property that drove your "
+    "architecture choice. Avoid generic platitudes like 'this is a flexible "
+    "architecture'. 2-4 sentences.\n\n"
+    "OUTPUT CONTRACT — Reason through every step above in the extended-thinking "
+    "block. Then your visible response MUST be a single call to the "
+    "`set_model_config` tool. Do NOT respond with plain text instead of a tool "
+    "call. Do NOT ask the user follow-up questions. Do NOT call the tool more "
+    "than once. The tool call IS your answer."
+)
+
+_AUTO_CONFIG_TOOL = {
+    "name": "set_model_config",
+    "description": "Submit the chosen neural-network architecture and hyperparameters.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "arch_type": {
+                "type": "string",
+                "enum": ["mlp", "dnn", "cnn1d", "rnn", "lstm", "gru",
+                         "autoencoder", "resnet", "transformer", "wide_deep"],
+            },
+            "layer_sizes": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 1, "maximum": 2048},
+                "minItems": 1,
+                "maxItems": 8,
+                "description": "Hidden-layer widths, in order. E.g. [128, 64, 32].",
+            },
+            "epochs": {"type": "integer", "minimum": 1, "maximum": 1000},
+            "lr": {"type": "number", "minimum": 1e-6, "maximum": 1.0},
+            "batch_size": {
+                "type": "integer",
+                "enum": [16, 32, 64, 128, 256],
+            },
+            "optimizer": {
+                "type": "string",
+                "enum": ["adam", "adamw", "sgd", "rmsprop"],
+            },
+            "activation": {
+                "type": "string",
+                "enum": ["relu", "leaky_relu", "elu", "selu", "gelu", "tanh", "sigmoid"],
+            },
+            "early_stopping": {
+                "type": "object",
+                "properties": {
+                    "enabled": {"type": "boolean"},
+                    "patience": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "min_delta": {"type": "number", "minimum": 0},
+                },
+                "required": ["enabled"],
+            },
+            "justification": {
+                "type": "string",
+                "description": (
+                    "2-4 sentences explaining WHY this configuration suits THIS "
+                    "specific dataset and user goal. MUST cite concrete dataset "
+                    "facts: the row count, the target column's name and key "
+                    "characteristic (dtype / cardinality / range), and one other "
+                    "property that drove the architecture choice. Do not use "
+                    "generic platitudes."
+                ),
+            },
+        },
+        "required": [
+            "arch_type", "layer_sizes", "epochs", "lr", "batch_size",
+            "optimizer", "activation", "early_stopping", "justification",
+        ],
+    },
+}
+
+
+def _auto_config_available_reason():
+    """Return None if Auto-Configure is callable, else a reason string."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return "Auto-Configure is not configured. The admin must set ANTHROPIC_API_KEY."
+    return None
+
+
+def _sanitize_chat_messages(raw_messages):
+    """Apply the same trim/cap rules used by the tutor chatbot."""
+    cleaned = []
+    for m in raw_messages[-_CHAT_MAX_HISTORY:]:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        content = m.get("content")
+        if role not in ("user", "assistant"):
+            continue
+        if not isinstance(content, str):
+            continue
+        content = content.strip()
+        if not content:
+            continue
+        if len(content) > _CHAT_MAX_MESSAGE_CHARS:
+            content = content[:_CHAT_MAX_MESSAGE_CHARS]
+        cleaned.append({"role": role, "content": content})
+    return cleaned
+
+
+def _format_float(v):
+    try:
+        return f"{float(v):.4g}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _build_dataset_context():
+    """Compose a compact text summary of the current dataset for the AI bots."""
+    info = _state.get("dataset_info")
+    if not info:
+        return "(No dataset has been uploaded yet.)"
+
+    feature_cols = _state.get("feature_cols") or []
+    target_col = _state.get("target_col")
+
+    lines = [
+        f"Filename: {_state.get('dataset_file')}",
+        f"Rows: {info.get('rows')}, Columns: {info.get('cols')}",
+        f"User-selected target column: {target_col or '(not yet picked)'}",
+        f"User-selected feature columns: {feature_cols if feature_cols else '(not yet picked)'}",
+        "Columns:",
+    ]
+    for c in (info.get("columns") or [])[:40]:
+        line = (
+            f"  - {c.get('name')} ({c.get('dtype')}) — "
+            f"{c.get('non_null')} non-null, {c.get('unique')} unique"
+        )
+        if c.get("is_numeric"):
+            line += (
+                f", range [{_format_float(c.get('min'))}, "
+                f"{_format_float(c.get('max'))}], mean {_format_float(c.get('mean'))}"
+            )
+        else:
+            tv = c.get("top_values") or {}
+            if tv:
+                preview = ", ".join(f"{k}={v}" for k, v in list(tv.items())[:3])
+                line += f", top: {preview}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+@app.route("/api/auto-config/status", methods=["GET"])
+def auto_config_status():
+    user, err = _require_user()
+    if err:
+        return err
+    reason = _auto_config_available_reason()
+    if reason:
+        return jsonify({"available": False, "reason": reason})
+    return jsonify({"available": True, "has_dataset": _state["dataset_path"] is not None})
+
+
+@app.route("/api/auto-config/chat", methods=["POST"])
+def auto_config_chat():
+    user, err = _require_user()
+    if err:
+        return err
+
+    reason = _auto_config_available_reason()
+    if reason:
+        return jsonify({"error": reason}), 503
+
+    data = request.get_json(silent=True) or {}
+    raw_messages = data.get("messages")
+    if not isinstance(raw_messages, list) or not raw_messages:
+        return jsonify({"error": "messages array required"}), 400
+
+    cleaned = _sanitize_chat_messages(raw_messages)
+    if not cleaned or cleaned[0]["role"] != "user":
+        return jsonify({"error": "First message must be from the user."}), 400
+
+    ds_context = _build_dataset_context()
+    sys_text = f"{AUTO_CONFIG_QUESTIONER_PROMPT}\n\n--- DATASET SUMMARY ---\n{ds_context}"
+
+    try:
+        client = _get_anthropic_client()
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=400,
+            thinking={"type": "disabled"},
+            output_config={"effort": "low"},
+            system=[
+                {
+                    "type": "text",
+                    "text": sys_text,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=cleaned,
+        )
+    except anthropic.AuthenticationError:
+        return jsonify({"error": "Auto-Configure misconfigured (invalid API key)."}), 503
+    except anthropic.RateLimitError:
+        return jsonify({"error": "Auto-Configure is busy — please try again."}), 429
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Auto-Configure error: {e}"}), 502
+    except Exception as e:
+        return jsonify({"error": f"Auto-Configure error: {e}"}), 500
+
+    text = ""
+    for block in resp.content:
+        if getattr(block, "type", None) == "text":
+            text = block.text
+            break
+    return jsonify({"role": "assistant", "content": text})
+
+
+@app.route("/api/auto-config/decide", methods=["POST"])
+def auto_config_decide():
+    user, err = _require_user()
+    if err:
+        return err
+
+    reason = _auto_config_available_reason()
+    if reason:
+        return jsonify({"error": reason}), 503
+
+    if not _state["dataset_path"]:
+        return jsonify({"error": "Upload a dataset before using Auto-Configure."}), 400
+
+    data = request.get_json(silent=True) or {}
+    raw_messages = data.get("messages") or []
+    if not isinstance(raw_messages, list):
+        raw_messages = []
+    cleaned = _sanitize_chat_messages(raw_messages)
+
+    transcript_lines = [f"{m['role'].upper()}: {m['content']}" for m in cleaned]
+    transcript = "\n".join(transcript_lines) if transcript_lines else (
+        "(no conversation — user clicked Generate Configuration without describing their problem)"
+    )
+
+    ds_context = _build_dataset_context()
+
+    picker_messages = [
+        {
+            "role": "user",
+            "content": (
+                "Below is the user's dataset summary and the transcript of a "
+                "clarifying conversation. Based on this, choose ONE configuration "
+                "via the `set_model_config` tool.\n\n"
+                f"--- DATASET SUMMARY ---\n{ds_context}\n\n"
+                f"--- CONVERSATION TRANSCRIPT ---\n{transcript}"
+            ),
+        }
+    ]
+
+    # Picker uses the most capable model (Opus 4.7) with adaptive thinking at
+    # high effort — a single, high-stakes call per session, so quality wins.
+    #
+    # Two API constraints we have to obey:
+    #   - Opus 4.7 only accepts thinking.type "adaptive" or "disabled". The
+    #     literal {"type": "enabled", "budget_tokens": N} form returns 400.
+    #     Adaptive + effort=high tells the model to deliberate as needed.
+    #   - Forced tool_choice ({"type": "tool", ...}) is rejected when thinking
+    #     is on. We leave tool_choice at the default ("auto") and rely on the
+    #     "OUTPUT CONTRACT" section of the system prompt to make calling the
+    #     tool the only sensible response.
+    try:
+        client = _get_anthropic_client()
+        resp = client.messages.create(
+            model="claude-opus-4-7",
+            max_tokens=8192,
+            thinking={"type": "adaptive"},
+            output_config={"effort": "high"},
+            system=[
+                {
+                    "type": "text",
+                    "text": AUTO_CONFIG_PICKER_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            tools=[_AUTO_CONFIG_TOOL],
+            messages=picker_messages,
+        )
+    except anthropic.AuthenticationError:
+        return jsonify({"error": "Auto-Configure misconfigured (invalid API key)."}), 503
+    except anthropic.RateLimitError:
+        return jsonify({"error": "Auto-Configure is busy — please try again."}), 429
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Auto-Configure error: {e}"}), 502
+    except Exception as e:
+        return jsonify({"error": f"Auto-Configure error: {e}"}), 500
+
+    config = None
+    fallback_text = ""
+    for block in resp.content:
+        btype = getattr(block, "type", None)
+        if btype == "tool_use" and getattr(block, "name", None) == "set_model_config":
+            config = block.input
+            break
+        if btype == "text" and not fallback_text:
+            fallback_text = getattr(block, "text", "") or ""
+
+    if not config or not isinstance(config, dict):
+        hint = (
+            f' (The picker replied with text instead: "{fallback_text[:200]}")'
+            if fallback_text else ""
+        )
+        return jsonify({"error": f"Picker did not produce a configuration.{hint}"}), 502
+
+    return jsonify({"config": config})
 
 
 # ─────────────────────────────────────────────────────────

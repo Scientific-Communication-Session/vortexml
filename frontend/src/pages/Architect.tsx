@@ -1,10 +1,16 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import HelpButton from '../components/help/HelpButton';
 import AskButton from '../components/chatbot/AskButton';
 import { ARCH_HELP_TOPIC } from '../components/help/help-content';
+import {
+    AutoConfigProvider,
+    useAutoConfig,
+    type AutoConfigProposal,
+} from '../components/auto-config/AutoConfigContext';
+import AutoConfigDrawer from '../components/auto-config/AutoConfigDrawer';
 
 interface Architecture {
     key: string;
@@ -55,6 +61,9 @@ const Architect: React.FC = () => {
     const [showAllArchs, setShowAllArchs] = useState<boolean>(false);
     const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
+    // Dataset gating for AI Auto-Configure
+    const [hasDataset, setHasDataset] = useState(false);
+
     // Upload state
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -80,6 +89,7 @@ const Architect: React.FC = () => {
                 if (mounted) setArchitectures(archs);
 
                 const state = await apiGet('/api/state');
+                if (mounted) setHasDataset(Boolean(state?.has_dataset));
                 if (mounted && state.has_model && state.model_config) {
                     const cfg = state.model_config as ModelConfig;
                     setSelectedArch(cfg.arch_type);
@@ -306,6 +316,39 @@ const Architect: React.FC = () => {
         setLayers(newLayers);
     };
 
+    const handleApplyAutoConfig = useCallback((cfg: AutoConfigProposal) => {
+        setSelectedArch(cfg.arch_type);
+        if (Array.isArray(cfg.layer_sizes) && cfg.layer_sizes.length) {
+            setLayers(cfg.layer_sizes);
+        }
+        if (typeof cfg.epochs === 'number') setEpochs(cfg.epochs);
+        if (typeof cfg.lr === 'number') setLr(cfg.lr);
+        if (typeof cfg.batch_size === 'number') setBatchSize(cfg.batch_size);
+        if (cfg.optimizer) setOptimizer(cfg.optimizer);
+        if (cfg.activation) setActivation(cfg.activation);
+
+        const es = cfg.early_stopping;
+        if (es) {
+            setEsEnabled(Boolean(es.enabled));
+            if (typeof es.patience === 'number') setEsPatience(es.patience);
+            if (typeof es.min_delta === 'number') setEsDelta(es.min_delta);
+            // Make sure the (beginner-hidden) Early Stopping panel is visible
+            // when the AI turned it on, so the user can see what it did.
+            if (isBeginner && es.enabled) setShowAdvanced(true);
+        }
+
+        // If the AI picked an architecture hidden in beginner mode, reveal it.
+        if (isBeginner) {
+            const a = architectures.find(x => x.key === cfg.arch_type);
+            if (a && !a.beginner_friendly) setShowAllArchs(true);
+        }
+
+        showToast(
+            `AI configured: ${cfg.arch_type.toUpperCase()} · [${(cfg.layer_sizes || []).join(', ')}]`,
+            'success'
+        );
+    }, [architectures, isBeginner]);
+
     const handleStartTraining = async () => {
         if (!selectedArch) {
             showToast('Please select a network architecture.', 'error');
@@ -349,7 +392,7 @@ const Architect: React.FC = () => {
     };
 
     return (
-        <>
+        <AutoConfigProvider onApply={handleApplyAutoConfig}>
             <div className="page-header" style={{ position: 'relative' }}>
                 <h1>Architecture <em>Builder.</em></h1>
                 <p>Choose a neural network type, configure layers, and set hyperparameters.</p>
@@ -406,6 +449,9 @@ const Architect: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {/* AI Auto-Configure (dataset-gated) */}
+            {hasDataset && <AutoConfigBanner />}
 
             {/* Architecture Selection */}
             <div className="glass-panel">
@@ -607,7 +653,39 @@ const Architect: React.FC = () => {
                     </div>
                 </>
             )}
-        </>
+
+            <AutoConfigDrawer />
+        </AutoConfigProvider>
+    );
+};
+
+// Small consumer used inside the Architect tree so it can call `useAutoConfig`.
+const AutoConfigBanner: React.FC = () => {
+    const { open, isAvailable, unavailableReason } = useAutoConfig();
+    return (
+        <div className="glass-panel auto-config-banner">
+            <div className="auto-config-banner__text">
+                <div className="panel-title"><span className="pt-icon">🪄</span> Not sure what to pick?</div>
+                <p className="text-muted mb-0">
+                    Let an AI co-pilot choose the architecture and hyperparameters that
+                    best fit your dataset and goal — describe your problem in plain words.
+                </p>
+                {!isAvailable && unavailableReason && (
+                    <p className="text-muted mb-0" style={{ marginTop: '0.4rem', fontSize: '0.78rem' }}>
+                        ⚠️ {unavailableReason}
+                    </p>
+                )}
+            </div>
+            <button
+                type="button"
+                className="btn btn-primary auto-config-banner__btn"
+                onClick={open}
+                disabled={!isAvailable}
+                title={isAvailable ? 'Open the AI Auto-Configure assistant' : unavailableReason || 'Unavailable'}
+            >
+                🪄 AI Auto-Configure
+            </button>
+        </div>
     );
 };
 
