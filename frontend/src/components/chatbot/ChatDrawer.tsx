@@ -47,7 +47,7 @@ const ChatDrawer: React.FC = () => {
                     <span className="chat-drawer__title-icon">🌿</span>
                     <div>
                         <div className="chat-drawer__title-main">Novice Tutor</div>
-                        <div className="chat-drawer__title-sub">Powered by Claude</div>
+                        <div className="chat-drawer__title-sub">Your ML Tutor</div>
                     </div>
                 </div>
                 <div className="chat-drawer__actions">
