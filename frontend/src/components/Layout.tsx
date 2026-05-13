@@ -2,6 +2,9 @@ import React, { useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Footer from './Footer';
+import { ChatProvider } from './chatbot/ChatContext';
+import ChatDrawer from './chatbot/ChatDrawer';
+import ChatButton from './chatbot/ChatButton';
 
 const navLinks = [
     { to: '/dataset', label: 'Dataset' },
@@ -143,9 +146,13 @@ const Layout: React.FC = () => {
                 </div>
             </nav>
 
-            <main className={isFullBleed ? 'flex-grow relative' : 'main-content flex-grow'}>
-                <Outlet />
-            </main>
+            <ChatProvider>
+                <main className={isFullBleed ? 'flex-grow relative' : 'main-content flex-grow'}>
+                    <Outlet />
+                </main>
+                <ChatDrawer />
+                <ChatButton />
+            </ChatProvider>
             <Footer />
         </div>
     );

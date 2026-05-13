@@ -12,6 +12,8 @@ import threading
 
 import json as _json
 
+import anthropic
+
 from data_processor import save_uploaded_file, analyze_dataset, prepare_dataset
 from training_engine import (
     create_model, train_model, stop_training, MODEL_REGISTRY,
@@ -150,18 +152,39 @@ def submit_survey():
 
     data = request.get_json(silent=True) or {}
     is_beginner = data.get("is_beginner")
-    
+
     if is_beginner is None:
         return jsonify({"error": "Missing survey result"}), 400
 
     user = User.query.get(user_id)
     if not user:
         return jsonify({"error": "User not found"}), 404
-        
+
     user.is_beginner = bool(is_beginner)
     db.session.commit()
-    
+
     return jsonify({"message": "Survey completed successfully", "user": user.to_dict()})
+
+
+@app.route("/api/auth/beginner", methods=["PATCH"])
+def update_beginner_status():
+    """Let a signed-in user flip their beginner flag at any time (not only via survey)."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    data = request.get_json(silent=True) or {}
+    is_beginner = data.get("is_beginner")
+    if not isinstance(is_beginner, bool):
+        return jsonify({"error": "is_beginner must be a boolean"}), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user.is_beginner = is_beginner
+    db.session.commit()
+    return jsonify({"user": user.to_dict()})
 
 # ─────────────────────────────────────────────────────────
 # Dataset API
@@ -228,34 +251,34 @@ def list_architectures():
     archs = [
         {"key": "mlp", "name": "Multi-Layer Perceptron", "short": "MLP",
          "desc": "Classic feedforward network. Great for general tabular classification and regression.",
-         "icon": "🔵"},
+         "icon": "🔵", "beginner_friendly": True},
         {"key": "dnn", "name": "Deep Neural Network", "short": "DNN",
          "desc": "Deep feedforward with BatchNorm and Dropout for complex patterns.",
-         "icon": "🟣"},
+         "icon": "🟣", "beginner_friendly": True},
         {"key": "cnn1d", "name": "1D Convolutional Network", "short": "CNN-1D",
          "desc": "Detects local patterns and sequences in feature columns.",
-         "icon": "🟢"},
+         "icon": "🟢", "beginner_friendly": False},
         {"key": "rnn", "name": "Recurrent Neural Network", "short": "RNN",
          "desc": "Processes sequential/time-series data with memory.",
-         "icon": "🔴"},
+         "icon": "🔴", "beginner_friendly": False},
         {"key": "lstm", "name": "Long Short-Term Memory", "short": "LSTM",
          "desc": "Captures long-term dependencies in sequential data.",
-         "icon": "🟡"},
+         "icon": "🟡", "beginner_friendly": False},
         {"key": "gru", "name": "Gated Recurrent Unit", "short": "GRU",
          "desc": "Efficient alternative to LSTM with fewer parameters.",
-         "icon": "🟠"},
+         "icon": "🟠", "beginner_friendly": False},
         {"key": "autoencoder", "name": "Autoencoder", "short": "AE",
          "desc": "Learns compressed feature representations. Good for anomaly detection.",
-         "icon": "🔷"},
+         "icon": "🔷", "beginner_friendly": False},
         {"key": "resnet", "name": "Residual Network", "short": "ResNet",
          "desc": "Skip connections allow very deep networks without vanishing gradients.",
-         "icon": "⬛"},
+         "icon": "⬛", "beginner_friendly": False},
         {"key": "transformer", "name": "Transformer", "short": "TF",
          "desc": "Attention-based architecture for learning feature relationships.",
-         "icon": "💎"},
+         "icon": "💎", "beginner_friendly": False},
         {"key": "wide_deep", "name": "Wide & Deep Network", "short": "W&D",
          "desc": "Combines memorization (wide) with generalization (deep).",
-         "icon": "🌐"},
+         "icon": "🌐", "beginner_friendly": True},
     ]
     return jsonify(archs)
 
@@ -604,6 +627,144 @@ def load_project(project_id):
     _state["last_weights_file"] = proj.weight_filename
 
     return jsonify({"status": "ok", "config": cfg, "weight_filename": proj.weight_filename})
+
+
+# ─────────────────────────────────────────────────────────
+# Novice-mode Chatbot
+# ─────────────────────────────────────────────────────────
+_anthropic_client = None
+
+
+def _get_anthropic_client():
+    """Lazily build the Anthropic client. ANTHROPIC_API_KEY comes from env."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.Anthropic()
+    return _anthropic_client
+
+
+CHAT_SYSTEM_PROMPT = (
+    "You are a friendly machine-learning tutor embedded in VortexML, a web app "
+    "for training small neural networks on tabular data.\n\n"
+    "Your audience is a beginner who has explicitly opted in to Novice mode. "
+    "Help them understand:\n"
+    "- Core ML concepts (epochs, loss, overfitting, learning rate, optimisers, "
+    "  activation functions, train/val/test split, classification vs regression, etc.).\n"
+    "- The VortexML app's tabs and features:\n"
+    "  * Dataset tab — upload CSV / Excel, preview rows, pick which columns are\n"
+    "    features (inputs) and which column is the target (what the model predicts).\n"
+    "  * Architect tab — pick one of the 10 architectures (MLP, DNN, CNN-1D, RNN,\n"
+    "    LSTM, GRU, Autoencoder, ResNet, Transformer, Wide & Deep), configure hidden\n"
+    "    layer sizes and hyperparameters (epochs, learning rate, batch size, optimiser,\n"
+    "    activation), and optionally enable Early Stopping.\n"
+    "  * Training tab — live loss / accuracy chart and a network visualisation while\n"
+    "    the model trains; saves a .pt weights file when finished.\n"
+    "  * Profile tab — saved projects, each with its config + weights, downloadable\n"
+    "    or reloadable into the Architect.\n"
+    "- Picking reasonable defaults for a first run (e.g. MLP, layers [32,16], 20 epochs,\n"
+    "  Adam, lr 0.001, batch size 32, ReLU activation).\n\n"
+    "Guidelines:\n"
+    "- Keep answers short: 2-4 short paragraphs, plain prose, minimal code unless asked.\n"
+    "- Use simple language. Define jargon when you introduce it.\n"
+    "- Be encouraging and make concrete recommendations rather than hedging.\n"
+    "- If a question is unrelated to ML or VortexML, politely steer back.\n"
+    "- Never invent VortexML features that aren't in the list above."
+)
+
+# Limits to keep cost + latency predictable
+_CHAT_MAX_HISTORY = 20         # last N turns we'll forward to Claude
+_CHAT_MAX_MESSAGE_CHARS = 4000  # per-message cap (silently truncated)
+_CHAT_MAX_TOKENS = 1024         # cap on the assistant's reply
+
+
+def _chatbot_available_reason(user):
+    """Return None if the chatbot is available for this user, else a 'why not' string."""
+    if not user.is_beginner:
+        return "Chatbot is only available in Novice mode."
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return "Chatbot is not configured. The admin must set ANTHROPIC_API_KEY."
+    return None
+
+
+@app.route("/api/chat/status", methods=["GET"])
+def chat_status():
+    user, err = _require_user()
+    if err:
+        return err
+    reason = _chatbot_available_reason(user)
+    if reason:
+        return jsonify({"available": False, "reason": reason})
+    return jsonify({"available": True})
+
+
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    user, err = _require_user()
+    if err:
+        return err
+
+    reason = _chatbot_available_reason(user)
+    if reason:
+        # 503 when misconfigured server-side; 403 when the user isn't novice
+        status_code = 403 if user.is_beginner is False else 503
+        return jsonify({"error": reason}), status_code
+
+    data = request.get_json(silent=True) or {}
+    raw_messages = data.get("messages")
+    if not isinstance(raw_messages, list) or not raw_messages:
+        return jsonify({"error": "messages array required"}), 400
+
+    # Sanitise + cap incoming messages.
+    cleaned = []
+    for m in raw_messages[-_CHAT_MAX_HISTORY:]:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        content = m.get("content")
+        if role not in ("user", "assistant"):
+            continue
+        if not isinstance(content, str):
+            continue
+        content = content.strip()
+        if not content:
+            continue
+        if len(content) > _CHAT_MAX_MESSAGE_CHARS:
+            content = content[:_CHAT_MAX_MESSAGE_CHARS]
+        cleaned.append({"role": role, "content": content})
+
+    if not cleaned or cleaned[0]["role"] != "user":
+        return jsonify({"error": "First message must be from the user."}), 400
+
+    try:
+        client = _get_anthropic_client()
+        resp = client.messages.create(
+            model="claude-opus-4-7",
+            max_tokens=_CHAT_MAX_TOKENS,
+            system=[
+                {
+                    "type": "text",
+                    "text": CHAT_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=cleaned,
+        )
+    except anthropic.AuthenticationError:
+        return jsonify({"error": "Chatbot misconfigured (invalid API key)."}), 503
+    except anthropic.RateLimitError:
+        return jsonify({"error": "Chatbot is busy — please try again in a moment."}), 429
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Chatbot error: {e}"}), 502
+    except Exception as e:
+        return jsonify({"error": f"Chatbot error: {e}"}), 500
+
+    text = ""
+    for block in resp.content:
+        if getattr(block, "type", None) == "text":
+            text = block.text
+            break
+
+    return jsonify({"role": "assistant", "content": text})
 
 
 # ─────────────────────────────────────────────────────────
