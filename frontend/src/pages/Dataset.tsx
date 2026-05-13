@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { DragEvent, ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
+import { useAuth } from '../context/AuthContext';
+import HelpButton from '../components/help/HelpButton';
 
 interface ColumnInfo {
     name: string;
@@ -19,6 +21,8 @@ interface DatasetInfo {
 
 const Dataset: React.FC = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const isBeginner = user?.is_beginner === true;
     const [step, setStep] = useState<number>(1);
 
     const [isDragging, setIsDragging] = useState(false);
@@ -296,7 +300,26 @@ const Dataset: React.FC = () => {
                     </div>
 
                     <div className="glass-panel">
-                        <div className="panel-title"><span className="pt-icon">🎯</span> Select Columns</div>
+                        <div className="panel-title">
+                            <span className="pt-icon">🎯</span> Select Columns
+                            <HelpButton topic="features_target" />
+                        </div>
+
+                        <div className="info-banner">
+                            <span className="info-banner-icon">💡</span>
+                            <div>
+                                <strong>Features</strong> are the inputs the model uses to make a prediction
+                                (e.g. <em>hours_studied</em>, <em>attendance_rate</em>). The <strong>target</strong> is the value
+                                you want the model to predict (e.g. <em>passed</em>).
+                                {isBeginner && (
+                                    <>
+                                        {' '}Pick every column that looks like a useful input as a feature, and exactly{' '}
+                                        <strong>one</strong> column as your target.
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
                         <p className="text-muted mb-2">
                             Click <strong>Feature</strong> to mark input variables, and <strong>Target</strong> to select what the model
                             should predict.

@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
+import { useAuth } from '../context/AuthContext';
+import HelpButton from '../components/help/HelpButton';
+import { ARCH_HELP_TOPIC } from '../components/help/help-content';
 
 interface Architecture {
     key: string;
@@ -8,6 +11,7 @@ interface Architecture {
     short: string;
     desc: string;
     icon: string;
+    beginner_friendly?: boolean;
 }
 
 interface ModelConfig {
@@ -24,14 +28,17 @@ interface ModelConfig {
 
 const Architect: React.FC = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const isBeginner = user?.is_beginner === true;
 
     // State
     const [architectures, setArchitectures] = useState<Architecture[]>([]);
     const [selectedArch, setSelectedArch] = useState<string | null>(null);
-    const [layers, setLayers] = useState<number[]>([128, 64]);
+    // Beginner-friendly defaults: smaller layers + fewer epochs by default.
+    const [layers, setLayers] = useState<number[]>(isBeginner ? [32, 16] : [128, 64]);
 
     // Hyperparameters
-    const [epochs, setEpochs] = useState<number>(50);
+    const [epochs, setEpochs] = useState<number>(isBeginner ? 20 : 50);
     const [lr, setLr] = useState<number>(0.001);
     const [batchSize, setBatchSize] = useState<number>(32);
     const [optimizer, setOptimizer] = useState<string>('adam');
@@ -43,6 +50,10 @@ const Architect: React.FC = () => {
     const [esPatience, setEsPatience] = useState<number>(10);
     const [esDelta, setEsDelta] = useState<number>(0.0001);
 
+    // Beginner UX: hide all-archs / advanced controls behind explicit opt-ins
+    const [showAllArchs, setShowAllArchs] = useState<boolean>(false);
+    const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+
     // Upload state
     const [isDragging, setIsDragging] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -52,6 +63,11 @@ const Architect: React.FC = () => {
     const startTrainingBtnRef = useRef<HTMLButtonElement>(null);
 
     const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    const visibleArchs = useMemo(() => {
+        if (!isBeginner || showAllArchs) return architectures;
+        return architectures.filter((a) => a.beginner_friendly);
+    }, [architectures, isBeginner, showAllArchs]);
 
     // Initial load
     useEffect(() => {
@@ -257,8 +273,8 @@ const Architect: React.FC = () => {
             return;
         }
         setSelectedArch(null);
-        setLayers([128, 64]);
-        setEpochs(50);
+        setLayers(isBeginner ? [32, 16] : [128, 64]);
+        setEpochs(isBeginner ? 20 : 50);
         setLr(0.001);
         setBatchSize(32);
         setOptimizer('adam');
@@ -392,7 +408,28 @@ const Architect: React.FC = () => {
 
             {/* Architecture Selection */}
             <div className="glass-panel">
-                <div className="panel-title"><span className="pt-icon">🔬</span> Select Architecture</div>
+                <div className="panel-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                    <span><span className="pt-icon">🔬</span> Select Architecture</span>
+                    {isBeginner && architectures.length > 0 && (
+                        <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setShowAllArchs((v) => !v)}
+                            title={showAllArchs ? 'Show only beginner-friendly architectures' : 'Show every architecture (advanced)'}
+                        >
+                            {showAllArchs ? '◴ Beginner picks only' : '⚙ Show all architectures'}
+                        </button>
+                    )}
+                </div>
+                {isBeginner && !showAllArchs && architectures.length > 0 && (
+                    <div className="info-banner" style={{ marginTop: '0.4rem' }}>
+                        <span className="info-banner-icon">🌿</span>
+                        <div>
+                            <strong>Beginner mode:</strong> we're showing the most approachable architectures.
+                            Start with <strong>MLP</strong> for any tabular problem — you can switch to “Show all” once you're comfortable.
+                        </div>
+                    </div>
+                )}
                 <div className="arch-grid">
                     {architectures.length === 0 ? (
                         <div className="text-center text-muted" style={{ gridColumn: '1/-1' }}>
@@ -400,12 +437,16 @@ const Architect: React.FC = () => {
                             <p className="mt-1">Loading architectures...</p>
                         </div>
                     ) : (
-                        architectures.map(a => (
+                        visibleArchs.map(a => (
                             <div
                                 key={a.key}
                                 className={`arch-card ${selectedArch === a.key ? 'selected' : ''}`}
                                 onClick={() => setSelectedArch(a.key)}
+                                style={{ position: 'relative' }}
                             >
+                                <div style={{ position: 'absolute', top: 8, right: 8 }} onClick={(e) => e.stopPropagation()}>
+                                    <HelpButton topic={ARCH_HELP_TOPIC[a.key] ?? 'arch_mlp'} />
+                                </div>
                                 <div className="arch-icon">{a.icon}</div>
                                 <div className="arch-name">{a.name}</div>
                                 <div className="arch-short">{a.short}</div>
@@ -420,7 +461,10 @@ const Architect: React.FC = () => {
                 <>
                     {/* Layer Configurator */}
                     <div className="glass-panel">
-                        <div className="panel-title"><span className="pt-icon">📐</span> Configure Layers</div>
+                        <div className="panel-title">
+                            <span className="pt-icon">📐</span> Configure Layers
+                            <HelpButton topic="layers" />
+                        </div>
                         <p className="text-muted mb-2">Add hidden layers and set the number of neurons in each.</p>
 
                         <div className="layer-list">
@@ -454,15 +498,15 @@ const Architect: React.FC = () => {
                         <div className="panel-title"><span className="pt-icon">⚙️</span> Hyperparameters</div>
                         <div className="form-row">
                             <div className="form-group">
-                                <label className="form-label">Epochs</label>
+                                <label className="form-label">Epochs <HelpButton topic="epochs" /></label>
                                 <input type="number" className="form-input" value={epochs} onChange={e => setEpochs(parseInt(e.target.value) || 50)} />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Learning Rate</label>
+                                <label className="form-label">Learning Rate <HelpButton topic="learning_rate" /></label>
                                 <input type="number" className="form-input" step="0.0001" value={lr} onChange={e => setLr(parseFloat(e.target.value) || 0.001)} />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Batch Size</label>
+                                <label className="form-label">Batch Size <HelpButton topic="batch_size" /></label>
                                 <select className="form-select" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value) || 32)}>
                                     <option value="16">16</option>
                                     <option value="32">32</option>
@@ -472,7 +516,7 @@ const Architect: React.FC = () => {
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Optimizer</label>
+                                <label className="form-label">Optimizer <HelpButton topic="optimizer" /></label>
                                 <select className="form-select" value={optimizer} onChange={e => setOptimizer(e.target.value)}>
                                     <option value="adam">Adam</option>
                                     <option value="adamw">AdamW</option>
@@ -481,7 +525,7 @@ const Architect: React.FC = () => {
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Activation</label>
+                                <label className="form-label">Activation <HelpButton topic="activation" /></label>
                                 <select className="form-select" value={activation} onChange={e => setActivation(e.target.value)}>
                                     <option value="relu">ReLU</option>
                                     <option value="leaky_relu">Leaky ReLU</option>
@@ -494,37 +538,53 @@ const Architect: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Early Stopping */}
-                        <div className="es-section">
-                            <div className="es-header">
-                                <label className="toggle-switch">
-                                    <input type="checkbox" checked={esEnabled} onChange={e => setEsEnabled(e.target.checked)} />
-                                    <span className="toggle-slider"></span>
-                                </label>
-                                <span className="es-label">Early Stopping</span>
-                            </div>
-                            {esEnabled && (
-                                <div className="es-params">
-                                    <div className="form-row">
-                                        <div className="form-group">
-                                            <label className="form-label">Patience</label>
-                                            <input type="number" className="form-input" value={esPatience} onChange={e => setEsPatience(parseInt(e.target.value) || 10)} />
-                                            <span className="form-hint">Epochs to wait for improvement</span>
-                                        </div>
-                                        <div className="form-group">
-                                            <label className="form-label">Min Delta</label>
-                                            <input type="number" className="form-input" step="0.0001" value={esDelta} onChange={e => setEsDelta(parseFloat(e.target.value) || 0.0001)} />
-                                            <span className="form-hint">Minimum change to qualify as improvement</span>
+                        {/* Advanced options — gated behind a toggle for beginners */}
+                        {(!isBeginner || showAdvanced) && (
+                            <div className="es-section">
+                                <div className="es-header">
+                                    <label className="toggle-switch">
+                                        <input type="checkbox" checked={esEnabled} onChange={e => setEsEnabled(e.target.checked)} />
+                                        <span className="toggle-slider"></span>
+                                    </label>
+                                    <span className="es-label">Early Stopping</span>
+                                    <HelpButton topic="early_stopping" />
+                                </div>
+                                {esEnabled && (
+                                    <div className="es-params">
+                                        <div className="form-row">
+                                            <div className="form-group">
+                                                <label className="form-label">Patience <HelpButton topic="patience" /></label>
+                                                <input type="number" className="form-input" value={esPatience} onChange={e => setEsPatience(parseInt(e.target.value) || 10)} />
+                                                <span className="form-hint">Epochs to wait for improvement</span>
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Min Delta <HelpButton topic="min_delta" /></label>
+                                                <input type="number" className="form-input" step="0.0001" value={esDelta} onChange={e => setEsDelta(parseFloat(e.target.value) || 0.0001)} />
+                                                <span className="form-hint">Minimum change to qualify as improvement</span>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            )}
-                        </div>
+                                )}
+                            </div>
+                        )}
+
+                        {isBeginner && (
+                            <div className="mt-2">
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => setShowAdvanced((v) => !v)}
+                                    title="Show / hide expert-only settings"
+                                >
+                                    {showAdvanced ? '▴ Hide advanced options' : '▾ Show advanced options (Early Stopping)'}
+                                </button>
+                            </div>
+                        )}
 
                         {/* Project Name */}
                         <div className="form-row mt-2">
                             <div className="form-group" style={{ flex: 1 }}>
-                                <label className="form-label">Project Name</label>
+                                <label className="form-label">Project Name <HelpButton topic="project_name" /></label>
                                 <input type="text" className="form-input" value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="MyProject" />
                                 <span className="form-hint">Used in the weight filename</span>
                             </div>

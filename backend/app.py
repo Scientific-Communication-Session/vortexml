@@ -150,18 +150,39 @@ def submit_survey():
 
     data = request.get_json(silent=True) or {}
     is_beginner = data.get("is_beginner")
-    
+
     if is_beginner is None:
         return jsonify({"error": "Missing survey result"}), 400
 
     user = User.query.get(user_id)
     if not user:
         return jsonify({"error": "User not found"}), 404
-        
+
     user.is_beginner = bool(is_beginner)
     db.session.commit()
-    
+
     return jsonify({"message": "Survey completed successfully", "user": user.to_dict()})
+
+
+@app.route("/api/auth/beginner", methods=["PATCH"])
+def update_beginner_status():
+    """Let a signed-in user flip their beginner flag at any time (not only via survey)."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    data = request.get_json(silent=True) or {}
+    is_beginner = data.get("is_beginner")
+    if not isinstance(is_beginner, bool):
+        return jsonify({"error": "is_beginner must be a boolean"}), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user.is_beginner = is_beginner
+    db.session.commit()
+    return jsonify({"user": user.to_dict()})
 
 # ─────────────────────────────────────────────────────────
 # Dataset API
@@ -228,34 +249,34 @@ def list_architectures():
     archs = [
         {"key": "mlp", "name": "Multi-Layer Perceptron", "short": "MLP",
          "desc": "Classic feedforward network. Great for general tabular classification and regression.",
-         "icon": "🔵"},
+         "icon": "🔵", "beginner_friendly": True},
         {"key": "dnn", "name": "Deep Neural Network", "short": "DNN",
          "desc": "Deep feedforward with BatchNorm and Dropout for complex patterns.",
-         "icon": "🟣"},
+         "icon": "🟣", "beginner_friendly": True},
         {"key": "cnn1d", "name": "1D Convolutional Network", "short": "CNN-1D",
          "desc": "Detects local patterns and sequences in feature columns.",
-         "icon": "🟢"},
+         "icon": "🟢", "beginner_friendly": False},
         {"key": "rnn", "name": "Recurrent Neural Network", "short": "RNN",
          "desc": "Processes sequential/time-series data with memory.",
-         "icon": "🔴"},
+         "icon": "🔴", "beginner_friendly": False},
         {"key": "lstm", "name": "Long Short-Term Memory", "short": "LSTM",
          "desc": "Captures long-term dependencies in sequential data.",
-         "icon": "🟡"},
+         "icon": "🟡", "beginner_friendly": False},
         {"key": "gru", "name": "Gated Recurrent Unit", "short": "GRU",
          "desc": "Efficient alternative to LSTM with fewer parameters.",
-         "icon": "🟠"},
+         "icon": "🟠", "beginner_friendly": False},
         {"key": "autoencoder", "name": "Autoencoder", "short": "AE",
          "desc": "Learns compressed feature representations. Good for anomaly detection.",
-         "icon": "🔷"},
+         "icon": "🔷", "beginner_friendly": False},
         {"key": "resnet", "name": "Residual Network", "short": "ResNet",
          "desc": "Skip connections allow very deep networks without vanishing gradients.",
-         "icon": "⬛"},
+         "icon": "⬛", "beginner_friendly": False},
         {"key": "transformer", "name": "Transformer", "short": "TF",
          "desc": "Attention-based architecture for learning feature relationships.",
-         "icon": "💎"},
+         "icon": "💎", "beginner_friendly": False},
         {"key": "wide_deep", "name": "Wide & Deep Network", "short": "W&D",
          "desc": "Combines memorization (wide) with generalization (deep).",
-         "icon": "🌐"},
+         "icon": "🌐", "beginner_friendly": True},
     ]
     return jsonify(archs)
 

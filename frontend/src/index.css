@@ -2904,3 +2904,141 @@ body::before {
         min-width: 0;
     }
 }
+
+/* ─────────────────────────────────────────────────────────
+   Beginner-mode help UI: HelpButton + HelpModal
+   ───────────────────────────────────────────────────────── */
+.help-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 6px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+    vertical-align: middle;
+}
+
+.help-button:hover {
+    color: var(--accent-2, #8b5cf6);
+    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.5);
+    transform: scale(1.08);
+}
+
+.help-button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.55);
+}
+
+.help-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(6, 6, 18, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    animation: help-fade-in 160ms ease-out;
+}
+
+@keyframes help-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.help-modal {
+    width: min(520px, 100%);
+    background: linear-gradient(180deg, rgba(20, 20, 36, 0.95), rgba(12, 12, 24, 0.95));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    padding: 1.5rem 1.6rem 1.4rem;
+    box-shadow:
+        0 30px 80px -10px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.92);
+    animation: help-pop-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes help-pop-in {
+    from { transform: translateY(8px) scale(0.96); opacity: 0; }
+    to   { transform: translateY(0)   scale(1);    opacity: 1; }
+}
+
+.help-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.85rem;
+}
+
+.help-modal-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: #fff;
+}
+
+.help-modal-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.help-modal-close:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
+}
+
+.help-modal-body {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.78);
+    white-space: pre-line;
+}
+
+/* Inline info banner used by the Dataset features/target hint. */
+.info-banner {
+    display: flex;
+    gap: 0.85rem;
+    align-items: flex-start;
+    padding: 0.85rem 1rem;
+    border: 1px solid rgba(139, 92, 246, 0.28);
+    background: linear-gradient(180deg, rgba(139, 92, 246, 0.08), rgba(139, 92, 246, 0.03));
+    border-radius: 12px;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 1rem;
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+
+.info-banner-icon {
+    flex-shrink: 0;
+    font-size: 1.1rem;
+    line-height: 1.25;
+}
+
+.info-banner strong {
+    color: #fff;
+}

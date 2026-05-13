@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import Chart from 'chart.js/auto';
 import { apiGet, formatTime, showToast } from '../utils/helpers';
+import HelpButton from '../components/help/HelpButton';
 
 interface LogEntry {
     id: number;
@@ -463,21 +464,21 @@ const Training: React.FC = () => {
             <div className="training-top-bar">
                 <div className="stat-card">
                     <div className="stat-value gradient">{epoch}/{totalEpochs}</div>
-                    <div className="stat-label">Epoch</div>
+                    <div className="stat-label">Epoch <HelpButton topic="metric_epoch" size={12} /></div>
                 </div>
                 <div className="stat-card">
                     <div className="stat-value" style={{ color: 'var(--accent-2)' }}>{trainLoss}</div>
-                    <div className="stat-label">Train Loss</div>
+                    <div className="stat-label">Train Loss <HelpButton topic="metric_train_loss" size={12} /></div>
                 </div>
                 <div className="stat-card">
                     <div className="stat-value" style={{ color: hasAcc ? '#22c55e' : 'inherit' }}>
                         {hasAcc ? valAcc : valLoss}
                     </div>
-                    <div className="stat-label">{hasAcc ? 'Val Accuracy' : 'Val Loss'}</div>
+                    <div className="stat-label">{hasAcc ? 'Val Accuracy' : 'Val Loss'} <HelpButton topic="metric_val" size={12} /></div>
                 </div>
                 <div className="stat-card">
                     <div className="stat-value" style={{ color: 'var(--accent-4)' }}>{eta}</div>
-                    <div className="stat-label">ETA</div>
+                    <div className="stat-label">ETA <HelpButton topic="metric_eta" size={12} /></div>
                 </div>
             </div>
 

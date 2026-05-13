@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3 } from 'lucide-react';
+import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
@@ -48,10 +48,13 @@ const formatDate = (iso: string) => {
 
 const Profile: React.FC = () => {
     const navigate = useNavigate();
-    const { user, isLoading: authLoading } = useAuth();
+    const { user, isLoading: authLoading, checkAuth } = useAuth();
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(true);
     const [busyId, setBusyId] = useState<number | null>(null);
+    const [togglingBeginner, setTogglingBeginner] = useState(false);
+
+    const isBeginner = user?.is_beginner === true;
 
     useEffect(() => {
         if (authLoading) return;
@@ -88,6 +91,33 @@ const Profile: React.FC = () => {
             showToast('Load failed: ' + msg, 'error');
         } finally {
             setBusyId(null);
+        }
+    };
+
+    const handleToggleBeginner = async () => {
+        const next = !isBeginner;
+        const verb = next ? 'enable' : 'disable';
+        if (!confirm(`${next ? 'Enable' : 'Disable'} Novice mode? This will ${verb} simplified architectures, beginner defaults, and inline help hints.`)) return;
+        setTogglingBeginner(true);
+        try {
+            const res = await fetch('/api/auth/beginner', {
+                method: 'PATCH',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_beginner: next }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast(data.error || `Failed (HTTP ${res.status})`, 'error');
+                return;
+            }
+            await checkAuth();
+            showToast(next ? 'Novice mode enabled' : 'Expert mode enabled', 'success');
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast('Failed: ' + msg, 'error');
+        } finally {
+            setTogglingBeginner(false);
         }
     };
 
@@ -136,6 +166,56 @@ const Profile: React.FC = () => {
             <div className="page-header">
                 <h1>Your <em>Profile.</em></h1>
                 <p>Signed in as <strong>{user?.username}</strong> · {projects.length} saved {projects.length === 1 ? 'project' : 'projects'}</p>
+            </div>
+
+            {/* Experience level card */}
+            <div
+                className="glass-panel"
+                style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'auto 1fr auto',
+                    gap: '1.25rem',
+                    alignItems: 'center',
+                    padding: '1.25rem 1.5rem',
+                }}
+            >
+                <div style={{ fontSize: '2rem', lineHeight: 1 }}>
+                    {isBeginner ? '🌿' : '🔥'}
+                </div>
+                <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: '1.05rem' }}>
+                            {isBeginner ? 'Novice mode' : 'Expert mode'}
+                        </strong>
+                        <span className="bento-tag bento-tag-sm">
+                            {isBeginner ? '🌿 Novice' : '🔥 Expert'}
+                        </span>
+                    </div>
+                    <div className="text-muted" style={{ fontSize: '0.88rem', marginTop: '0.25rem' }}>
+                        {isBeginner ? (
+                            <>
+                                Architectures are filtered to the most approachable picks, hyperparameters use safer defaults,
+                                and inline <strong>?</strong> hints appear next to settings.
+                            </>
+                        ) : (
+                            <>
+                                All architectures and advanced settings are unlocked. Inline hints are minimal.
+                            </>
+                        )}
+                    </div>
+                </div>
+                <div>
+                    <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={handleToggleBeginner}
+                        disabled={togglingBeginner || user?.is_beginner === null || user?.is_beginner === undefined}
+                        title={isBeginner ? 'Remove Novice status and unlock everything' : 'Re-enable Novice mode with simplified UI'}
+                    >
+                        <Sparkles size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                        {togglingBeginner ? 'Saving…' : isBeginner ? 'Switch to Expert' : 'Switch to Novice'}
+                    </button>
+                </div>
             </div>
 
             {/* Summary cards */}
