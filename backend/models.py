@@ -1,10 +1,21 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+
+
+def _utcnow():
+    """Return current UTC time as a naive datetime.
+
+    Replaces the deprecated `datetime.utcnow()` (removed in a future Python).
+    We strip tzinfo so it stays compatible with `db.DateTime` columns that
+    don't enable `timezone=True` and with the existing `isoformat() + 'Z'`
+    serialization in `to_dict`.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 class User(db.Model):
     __tablename__ = 'users'
@@ -60,7 +71,7 @@ class Project(db.Model):
     stopped_epoch = db.Column(db.Integer, nullable=True)
     history = db.Column(db.Text, nullable=True)  # JSON-encoded list of per-epoch dicts
     weight_filename = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
 
     def to_dict(self, include_history=False):
         d = {
