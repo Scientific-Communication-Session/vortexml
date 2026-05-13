@@ -10,12 +10,14 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 import threading
 
+import json as _json
+
 from data_processor import save_uploaded_file, analyze_dataset, prepare_dataset
 from training_engine import (
     create_model, train_model, stop_training, MODEL_REGISTRY,
     parse_weight_filename, WEIGHTS_DIR,
 )
-from models import db, User
+from models import db, User, Project
 
 app = Flask(__name__)
 # Enable CORS with credentials support for session cookies pointing to the frontend
@@ -309,6 +311,10 @@ def start_training():
 
     config = _state["model_config"]
 
+    # Capture the session user_id BEFORE entering the background thread —
+    # the Flask session is request-scoped and won't be reachable from run().
+    owner_user_id = session.get("user_id")
+
     try:
         # Prepare data
         data = prepare_dataset(
@@ -340,16 +346,48 @@ def start_training():
             "early_stopping": config.get("early_stopping", {}),
         }
 
-        # Start training in background
-        from training_engine import _build_weight_filename
-
         def run():
-            train_model(
+            result = train_model(
                 model, data["train_loader"], data["val_loader"],
-                data["task_type"], config, socketio
+                data["task_type"], config, socketio,
+                input_dim=data["input_dim"], output_dim=data["output_dim"],
             )
-            # Store the weight filename for download
-            _state["last_weights_file"] = _build_weight_filename(config)
+            # `result` is None if training was stopped before completion.
+            if not result:
+                return
+
+            _state["last_weights_file"] = result["weight_filename"]
+
+            # Persist a Project record if the run was started by a logged-in user.
+            if owner_user_id is not None:
+                with app.app_context():
+                    user = User.query.get(owner_user_id)
+                    if user is None:
+                        return  # user deleted mid-train; drop the record
+                    proj = Project(
+                        user_id=owner_user_id,
+                        name=config.get("project_name", "VortexProject"),
+                        arch_type=config["arch_type"],
+                        layer_sizes=_json.dumps(config["layer_sizes"]),
+                        epochs=config["epochs"],
+                        lr=float(config["lr"]),
+                        batch_size=config["batch_size"],
+                        optimizer=config.get("optimizer", "adam"),
+                        activation=config.get("activation", "relu"),
+                        early_stopping=_json.dumps(config.get("early_stopping") or {}),
+                        task_type=result["task_type"],
+                        input_dim=result["input_dim"],
+                        output_dim=result["output_dim"],
+                        final_train_loss=result["final_train_loss"],
+                        final_val_loss=result["final_val_loss"],
+                        final_val_acc=result.get("final_val_acc"),
+                        early_stopped=result["early_stopped"],
+                        stopped_epoch=result.get("stopped_epoch"),
+                        history=_json.dumps(result["history"]),
+                        weight_filename=result["weight_filename"],
+                    )
+                    db.session.add(proj)
+                    db.session.commit()
 
         thread = socketio.start_background_task(run)
         _state["training_thread"] = thread
@@ -364,6 +402,32 @@ def start_training():
 def stop_training_route():
     stop_training()
     return jsonify({"status": "stopped"})
+
+
+@app.route("/api/state/reset", methods=["POST"])
+def reset_state():
+    """
+    Clear in-memory app state. Accepts JSON body {"scope": "dataset"|"model"|"all"}.
+    Default scope is "all". Uploaded files on disk are left untouched.
+    """
+    data = request.get_json(silent=True) or {}
+    scope = data.get("scope", "all")
+    if scope not in ("dataset", "model", "all"):
+        return jsonify({"error": "scope must be one of: dataset, model, all"}), 400
+
+    if scope in ("dataset", "all"):
+        _state["dataset_file"] = None
+        _state["dataset_path"] = None
+        _state["dataset_info"] = None
+        _state["feature_cols"] = []
+        _state["target_col"] = None
+
+    if scope in ("model", "all"):
+        _state["model_config"] = None
+        _state["project_name"] = "VortexProject"
+        _state["last_weights_file"] = None
+
+    return jsonify({"status": "ok", "scope": scope})
 
 
 @app.route("/api/state", methods=["GET"])
@@ -448,6 +512,98 @@ def upload_weights():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Failed to parse weights: {str(e)}"}), 500
+
+
+# ─────────────────────────────────────────────────────────
+# Projects API (logged-in user only)
+# ─────────────────────────────────────────────────────────
+def _require_user():
+    """Return the current logged-in User or (None, error response)."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return None, (jsonify({"error": "Not authenticated"}), 401)
+    user = User.query.get(user_id)
+    if not user:
+        session.pop("user_id", None)
+        return None, (jsonify({"error": "User not found"}), 404)
+    return user, None
+
+
+@app.route("/api/projects", methods=["GET"])
+def list_projects():
+    user, err = _require_user()
+    if err:
+        return err
+    projs = (Project.query
+             .filter_by(user_id=user.id)
+             .order_by(Project.created_at.desc())
+             .all())
+    return jsonify({"projects": [p.to_dict() for p in projs]})
+
+
+@app.route("/api/projects/<int:project_id>", methods=["GET"])
+def get_project(project_id):
+    user, err = _require_user()
+    if err:
+        return err
+    proj = Project.query.filter_by(id=project_id, user_id=user.id).first()
+    if not proj:
+        return jsonify({"error": "Project not found"}), 404
+    return jsonify({"project": proj.to_dict(include_history=True)})
+
+
+@app.route("/api/projects/<int:project_id>", methods=["DELETE"])
+def delete_project(project_id):
+    user, err = _require_user()
+    if err:
+        return err
+    proj = Project.query.filter_by(id=project_id, user_id=user.id).first()
+    if not proj:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Remove the weight file if no other project references it.
+    filename = proj.weight_filename
+    db.session.delete(proj)
+    db.session.commit()
+
+    still_referenced = Project.query.filter_by(weight_filename=filename).first()
+    if not still_referenced:
+        filepath = os.path.join(WEIGHTS_DIR, filename)
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass  # ignore disk errors — record is gone, file can be cleaned later
+
+    return jsonify({"status": "deleted"})
+
+
+@app.route("/api/projects/<int:project_id>/load", methods=["POST"])
+def load_project(project_id):
+    """Restore a project's config + weights as the current in-memory state."""
+    user, err = _require_user()
+    if err:
+        return err
+    proj = Project.query.filter_by(id=project_id, user_id=user.id).first()
+    if not proj:
+        return jsonify({"error": "Project not found"}), 404
+
+    cfg = {
+        "arch_type": proj.arch_type,
+        "layer_sizes": _json.loads(proj.layer_sizes),
+        "epochs": proj.epochs,
+        "lr": proj.lr,
+        "batch_size": proj.batch_size,
+        "optimizer": proj.optimizer,
+        "activation": proj.activation,
+        "project_name": proj.name,
+        "early_stopping": _json.loads(proj.early_stopping) if proj.early_stopping else {},
+    }
+    _state["model_config"] = cfg
+    _state["project_name"] = proj.name
+    _state["last_weights_file"] = proj.weight_filename
+
+    return jsonify({"status": "ok", "config": cfg, "weight_filename": proj.weight_filename})
 
 
 # ─────────────────────────────────────────────────────────

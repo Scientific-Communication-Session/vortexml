@@ -11,6 +11,7 @@ import Learn from './pages/Learn';
 import Signin from './pages/Signin';
 import Signup from './pages/Signup';
 import Survey from './pages/Survey';
+import Profile from './pages/Profile';
 import { AuthProvider } from './context/AuthContext';
 
 const App: React.FC = () => {
@@ -22,6 +23,7 @@ const App: React.FC = () => {
           <Route path="signin" element={<Signin />} />
           <Route path="signup" element={<Signup />} />
           <Route path="survey" element={<Survey />} />
+          <Route path="profile" element={<Profile />} />
           <Route path="learn" element={<Learn />} />
           <Route path="courses" element={<Courses />} />
           <Route path="courses/:id" element={<CourseDetail />} />

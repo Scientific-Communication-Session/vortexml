@@ -177,13 +177,43 @@ const Dataset: React.FC = () => {
         }
     };
 
+    const handleClear = async () => {
+        if (datasetInfo && !confirm('Clear the current dataset and column selections? This cannot be undone.')) return;
+        try {
+            await apiPost('/api/state/reset', { scope: 'dataset' });
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            showToast('Failed to clear: ' + msg, 'error');
+            return;
+        }
+        setDatasetInfo(null);
+        setFilename('');
+        setSelectedFeatures(new Set());
+        setSelectedTarget(null);
+        setStep(1);
+        setUploadProgress(0);
+        setUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        showToast('Dataset cleared', 'success');
+    };
+
     const isReady = selectedFeatures.size > 0 && selectedTarget !== null;
 
     return (
         <>
-            <div className="page-header">
+            <div className="page-header" style={{ position: 'relative' }}>
                 <h1>Dataset <em>Designer.</em></h1>
                 <p>Upload your data, preview it, and select the columns for training.</p>
+                <button
+                    type="button"
+                    onClick={handleClear}
+                    disabled={!datasetInfo && step === 1}
+                    title="Reset dataset, feature/target picks, and start over"
+                    className="btn btn-secondary btn-sm"
+                    style={{ position: 'absolute', top: 0, right: 0 }}
+                >
+                    ↻ Clear
+                </button>
             </div>
 
             <div className="steps">

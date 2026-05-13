@@ -246,6 +246,33 @@ const Architect: React.FC = () => {
         setIsUploading(false);
     };
 
+    const handleClear = async () => {
+        const isDirty = selectedArch !== null || weightsLoaded;
+        if (isDirty && !confirm('Clear the current architecture and hyperparameters? This cannot be undone.')) return;
+        try {
+            await apiPost('/api/state/reset', { scope: 'model' });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast('Failed to clear: ' + msg, 'error');
+            return;
+        }
+        setSelectedArch(null);
+        setLayers([128, 64]);
+        setEpochs(50);
+        setLr(0.001);
+        setBatchSize(32);
+        setOptimizer('adam');
+        setActivation('relu');
+        setProjectName('VortexProject');
+        setEsEnabled(false);
+        setEsPatience(10);
+        setEsDelta(0.0001);
+        setWeightsLoaded(false);
+        setWeightStatus('');
+        if (weightInputRef.current) weightInputRef.current.value = '';
+        showToast('Architecture cleared', 'success');
+    };
+
     const handleAddLayer = () => {
         const last = layers[layers.length - 1] || 64;
         setLayers([...layers, Math.max(16, Math.floor(last / 2))]);
@@ -306,9 +333,19 @@ const Architect: React.FC = () => {
 
     return (
         <>
-            <div className="page-header">
+            <div className="page-header" style={{ position: 'relative' }}>
                 <h1>Architecture <em>Builder.</em></h1>
                 <p>Choose a neural network type, configure layers, and set hyperparameters.</p>
+                <button
+                    type="button"
+                    onClick={handleClear}
+                    disabled={!selectedArch && !weightsLoaded}
+                    title="Reset the architecture, hyperparameters and loaded weights"
+                    className="btn btn-secondary btn-sm"
+                    style={{ position: 'absolute', top: 0, right: 0 }}
+                >
+                    ↻ Clear
+                </button>
             </div>
 
             {/* Weight Upload Zone */}

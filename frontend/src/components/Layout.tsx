@@ -95,13 +95,28 @@ const Layout: React.FC = () => {
                 {/* ── Auth Section ── */}
                 <div className="flex items-center shrink-0">
                     {user ? (
-                        <div className="flex items-center gap-3">
-                            <span className="hidden md:inline text-[12.5px] text-white/65 font-medium tracking-[-0.005em]">
+                        <div className="flex items-center gap-2">
+                            <span className="hidden md:inline-flex items-center gap-2 text-[12.5px] text-white/65 font-medium tracking-[-0.005em]">
                                 {user.username}
-                                <span className="ml-2 px-2 py-0.5 rounded-lg bg-white/[0.07] font-mono text-[10px] tracking-[0.06em] text-white/50 border border-white/[0.06]">
+                                <span className="px-2 py-0.5 rounded-lg bg-white/[0.07] font-mono text-[10px] tracking-[0.06em] text-white/50 border border-white/[0.06]">
                                     {user.is_beginner ? '🌿 Novice' : '🔥 Expert'}
                                 </span>
                             </span>
+                            <NavLink
+                                to="/profile"
+                                title="Open your profile"
+                                className={({ isActive }) =>
+                                    [
+                                        'px-3.5 py-1.5 text-[12.5px] font-medium tracking-[-0.005em] rounded-xl border no-underline',
+                                        'transition-[color,background-color,border-color] duration-300 focus:outline-none',
+                                        isActive
+                                            ? 'border-white/25 bg-white/[0.12] text-white'
+                                            : 'border-white/10 bg-white/[0.05] text-white/90 hover:text-white hover:bg-white/[0.1]',
+                                    ].join(' ')
+                                }
+                            >
+                                Profile
+                            </NavLink>
                             <button
                                 onClick={handleLogout}
                                 className="px-3.5 py-1.5 text-[12.5px] font-medium text-white/90 hover:text-white rounded-xl border border-white/10 bg-white/[0.05] hover:bg-white/[0.1] transition-[color,background-color] duration-300 focus:outline-none"
