@@ -1,9 +1,0 @@
-﻿src/pages/Architect.tsx(1,46): error TS1484: 'DragEvent' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
-src/pages/Architect.tsx(1,46): error TS6133: 'DragEvent' is declared but its value is never read.
-src/pages/Architect.tsx(1,57): error TS1484: 'ChangeEvent' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
-src/pages/Architect.tsx(1,57): error TS6133: 'ChangeEvent' is declared but its value is never read.
-src/pages/Dataset.tsx(1,46): error TS1484: 'DragEvent' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
-src/pages/Dataset.tsx(1,57): error TS1484: 'ChangeEvent' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
-src/pages/Training.tsx(145,68): error TS6133: 'train_acc' is declared but its value is never read.
-src/pages/Training.tsx(197,80): error TS2345: Argument of type '"warning"' is not assignable to parameter of type '"info" | "success" | "error" | undefined'.
-src/pages/Training.tsx(209,44): error TS2345: Argument of type '"warning"' is not assignable to parameter of type '"info" | "success" | "error" | undefined'.

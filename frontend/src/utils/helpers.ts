@@ -16,14 +16,15 @@ export function showToast(message: string, type: 'info' | 'success' | 'error' | 
 }
 
 export async function apiGet(url: string) {
-    const res = await fetch(url);
+    const res = await fetch(url, { credentials: 'include' });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
 }
 
-export async function apiPost(url: string, body: any) {
+export async function apiPost(url: string, body: unknown) {
     const res = await fetch(url, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });

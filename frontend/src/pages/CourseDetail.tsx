@@ -11,10 +11,25 @@ const CourseTypeIcon: Record<string, string> = {
     lab: '🔬'
 };
 
+interface Course {
+    id: string;
+    title: string;
+    type: 'text' | 'video' | 'lab';
+    description: string;
+    duration: string;
+    tags?: string[];
+    content?: string;
+    transcript?: string;
+    videoUrl?: string;
+    video_url?: string;
+    notebookUrl?: string;
+    notebook_url?: string;
+}
+
 const CourseDetail: React.FC = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const [course, setCourse] = useState<any>(null);
+    const [course, setCourse] = useState<Course | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {

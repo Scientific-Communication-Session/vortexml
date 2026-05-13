@@ -39,7 +39,6 @@ const Training: React.FC = () => {
     const chartCanvasRef = useRef<HTMLCanvasElement>(null);
     const networkCanvasRef = useRef<HTMLCanvasElement>(null);
     const socketRef = useRef<Socket | null>(null);
-    const animFrameRef = useRef<number | null>(null);
 
     // State refs to share with network drawer (since it uses requestAnimationFrame)
     const isTrainingRef = useRef(false);
@@ -224,7 +223,6 @@ const Training: React.FC = () => {
         return () => {
             socketRef.current?.disconnect();
             chartRef.current?.destroy();
-            if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         };
     }, []);
 
@@ -406,7 +404,7 @@ const Training: React.FC = () => {
             setEpoch(0); setTotalEpochs(0); setTrainLoss('—'); setValLoss('—');
             setValAcc('—'); setEta('—'); setProgressPct(0); setEsInfo(null); setHasAcc(false);
 
-            const res = await fetch('/api/training/start', { method: 'POST' });
+            const res = await fetch('/api/training/start', { method: 'POST', credentials: 'include' });
             const data = await res.json();
 
             if (data.error) {
@@ -429,17 +427,19 @@ const Training: React.FC = () => {
                 }
             }
 
-        } catch (e: any) {
-            showToast('Error: ' + e.message, 'error');
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast('Error: ' + msg, 'error');
             setBtnState('idle');
         }
     };
 
     const handleStop = async () => {
         try {
-            await fetch('/api/training/stop', { method: 'POST' });
-        } catch (e: any) {
-            showToast('Error: ' + e.message, 'error');
+            await fetch('/api/training/stop', { method: 'POST', credentials: 'include' });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast('Error: ' + msg, 'error');
         }
     };
 
@@ -455,7 +455,7 @@ const Training: React.FC = () => {
     return (
         <>
             <div className="page-header">
-                <h1>⚡ Training Dashboard</h1>
+                <h1>Training <em>Dashboard.</em></h1>
                 <p>Watch your neural network learn in real-time.</p>
             </div>
 

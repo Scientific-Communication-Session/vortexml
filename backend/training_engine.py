@@ -322,10 +322,12 @@ def stop_training():
     _stop_training.set()
 
 
-def _build_weight_filename(config):
+def _build_weight_filename(config, unique_suffix=None):
     """
     Build a self-describing weight filename from the training config.
-    Format: {project}_{arch}_{layers}_{epochs}e_{lr}lr_{batch}bs_{optim}_{activation}.pt
+    Format: {project}_{arch}_{layers}_{epochs}e_{lr}lr_{batch}bs_{optim}_{activation}[_{suffix}].pt
+
+    `unique_suffix` is appended right before .pt to keep multiple runs distinct on disk.
     """
     project = config.get("project_name", "VortexProject").replace(" ", "-")
     # Strip any characters that are not alphanumeric or hyphens
@@ -338,42 +340,39 @@ def _build_weight_filename(config):
     optim_name = config.get("optimizer", "adam")
     activation = config.get("activation", "relu")
 
-    return f"{project}_{arch}_{layers}_{epochs}e_{lr}lr_{batch}bs_{optim_name}_{activation}.pt"
+    base = f"{project}_{arch}_{layers}_{epochs}e_{lr}lr_{batch}bs_{optim_name}_{activation}"
+    if unique_suffix:
+        base = f"{base}_{unique_suffix}"
+    return f"{base}.pt"
 
 
 def parse_weight_filename(filename):
     """
     Parse a weight filename back into a config dict.
-    Expected format: {project}_{arch}_{layers}_{epochs}e_{lr}lr_{batch}bs_{optim}_{activation}.pt
+    Expected format: {project}_{arch}_{layers}_{epochs}e_{lr}lr_{batch}bs_{optim}_{activation}[_{suffix}].pt
     Returns dict with keys: project_name, arch_type, layer_sizes, epochs, lr, batch_size, optimizer, activation
+    Any trailing _<suffix> (e.g. timestamp) is silently dropped.
     """
     name = filename.replace(".pt", "")
-    # Split from the right side for known-format suffixes
     parts = name.split("_")
 
     # We need at least 8 parts: project, arch, layers, epochs, lr, batch, optim, activation
     if len(parts) < 8:
         raise ValueError(f"Invalid weight filename format: {filename}")
 
-    # Activation is the last part
+    # Tolerate a trailing unique suffix: if the last part doesn't look like an
+    # activation name we recognise, treat it as the suffix and step back one.
+    KNOWN_ACTIVATIONS = {"relu", "leaky_relu", "elu", "selu", "gelu", "tanh", "sigmoid"}
+    if parts[-1] not in KNOWN_ACTIVATIONS and len(parts) >= 9:
+        parts = parts[:-1]  # drop the suffix
+
     activation = parts[-1]
-    # Optimizer is second-to-last
     optimizer = parts[-2]
-    # Batch size (e.g. "32bs")
-    batch_str = parts[-3]
-    batch_size = int(batch_str.replace("bs", ""))
-    # Learning rate (e.g. "0.001lr")
-    lr_str = parts[-4]
-    lr = float(lr_str.replace("lr", ""))
-    # Epochs (e.g. "50e")
-    epochs_str = parts[-5]
-    epochs = int(epochs_str.replace("e", ""))
-    # Layers (e.g. "128-64-32")
-    layers_str = parts[-6]
-    layer_sizes = [int(x) for x in layers_str.split("-")]
-    # Architecture type
+    batch_size = int(parts[-3].replace("bs", ""))
+    lr = float(parts[-4].replace("lr", ""))
+    epochs = int(parts[-5].replace("e", ""))
+    layer_sizes = [int(x) for x in parts[-6].split("-")]
     arch_type = parts[-7]
-    # Project name (everything before arch, may contain hyphens from spaces)
     project_name = "_".join(parts[:-7])
 
     return {
@@ -388,10 +387,14 @@ def parse_weight_filename(filename):
     }
 
 
-def train_model(model, train_loader, val_loader, task_type, config, socketio):
+def train_model(model, train_loader, val_loader, task_type, config, socketio,
+                input_dim=None, output_dim=None):
     """
     Train the model and emit live updates via SocketIO.
     Runs in the calling thread (should be spawned as a background thread).
+
+    Returns a dict with the final outcome (history, metrics, weight filename) so
+    the caller can persist a record. Returns None if training was externally stopped.
     """
     _stop_training.clear()
 
@@ -413,6 +416,7 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio):
 
     model.train()
     epoch_times = []
+    history = []
 
     # Early stopping state
     best_val_loss = float("inf")
@@ -424,7 +428,7 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio):
     for epoch in range(1, epochs + 1):
         if _stop_training.is_set():
             socketio.emit("training_stopped", {"epoch": epoch})
-            return
+            return None
 
         epoch_start = time.time()
 
@@ -516,6 +520,14 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio):
         if es_enabled:
             update["es_patience_counter"] = patience_counter
             update["es_patience"] = es_patience
+        # Record for persistence (excludes ETA — not historically meaningful)
+        history.append({
+            "epoch": epoch,
+            "train_loss": round(train_loss, 6),
+            "val_loss": round(val_loss, 6),
+            "train_acc": round(train_acc, 2) if train_acc is not None else None,
+            "val_acc": round(val_acc, 2) if val_acc is not None else None,
+        })
         socketio.emit("training_update", update)
         socketio.sleep(0)  # yield to event loop
 
@@ -529,10 +541,13 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio):
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
 
-    # ---- Save model with smart filename ----
-    weight_filename = _build_weight_filename(config)
+    # ---- Save model with smart filename (unique per run via timestamp) ----
+    unique_suffix = time.strftime("%Y%m%dT%H%M%S")
+    weight_filename = _build_weight_filename(config, unique_suffix=unique_suffix)
     model_path = os.path.join(WEIGHTS_DIR, weight_filename)
     torch.save(model.state_dict(), model_path)
+
+    final_val_acc = history[-1]["val_acc"] if history else None
 
     complete_data = {
         "message": "Training complete!" if not early_stopped
@@ -541,8 +556,14 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio):
         "weight_filename": weight_filename,
         "final_train_loss": round(train_loss, 6),
         "final_val_loss": round(val_loss, 6),
+        "final_val_acc": final_val_acc,
         "early_stopped": early_stopped,
+        "task_type": task_type,
+        "input_dim": input_dim,
+        "output_dim": output_dim,
+        "history": history,
     }
     if early_stopped:
         complete_data["stopped_epoch"] = stopped_epoch
     socketio.emit("training_complete", complete_data)
+    return complete_data

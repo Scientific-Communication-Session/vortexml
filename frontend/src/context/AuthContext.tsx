@@ -21,6 +21,7 @@ const AuthContext = createContext<AuthContextType>({
     checkAuth: async () => { }
 });
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -29,7 +30,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const checkAuth = async () => {
         try {
-            const response = await fetch('/api/auth/me');
+            const response = await fetch('/api/auth/me', { credentials: 'include' });
             if (response.ok) {
                 const data = await response.json();
                 setUser(data.user);

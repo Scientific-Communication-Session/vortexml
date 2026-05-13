@@ -43,6 +43,7 @@ const SURVEY_QUESTIONS: Question[] = [
 const Survey: React.FC = () => {
     const [answers, setAnswers] = useState<Record<number, QuestionLevel>>({});
     const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const { checkAuth } = useAuth();
     const navigate = useNavigate();
 
@@ -55,8 +56,9 @@ const Survey: React.FC = () => {
     const handleSubmit = async () => {
         if (!isComplete) return;
         setSubmitting(true);
+        setError(null);
 
-        // Simple algorithm: if more than 1 'beginner' answer, they are a beginner. 
+        // Simple algorithm: if more than 1 'beginner' answer, they are a beginner.
         // Otherwise they are advanced.
         const beginnerCount = Object.values(answers).filter(v => v === 'beginner').length;
         const isBeginner = beginnerCount > 1;
@@ -64,16 +66,20 @@ const Survey: React.FC = () => {
         try {
             const res = await fetch('/api/auth/survey', {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ is_beginner: isBeginner })
             });
 
             if (res.ok) {
-                await checkAuth(); // Update global state cache (which now has is_beginner flag)
-                navigate('/'); // Proceed to dashboard
+                await checkAuth();
+                navigate('/');
+            } else {
+                const data = await res.json().catch(() => ({}));
+                setError(data.error || `Submission failed (HTTP ${res.status}).`);
             }
-        } catch (error) {
-            console.error("Failed to submit survey", error);
+        } catch {
+            setError('Network error. Please try again.');
         } finally {
             setSubmitting(false);
         }
@@ -118,6 +124,24 @@ const Survey: React.FC = () => {
             </div>
 
             <div className={`survey-footer ${isComplete ? 'visible' : ''}`}>
+                {error && (
+                    <div
+                        role="alert"
+                        className="survey-error"
+                        style={{
+                            marginBottom: '0.75rem',
+                            padding: '0.75rem 1rem',
+                            borderRadius: '0.75rem',
+                            border: '1px solid rgba(239, 68, 68, 0.25)',
+                            background: 'rgba(239, 68, 68, 0.07)',
+                            color: '#fca5a5',
+                            fontSize: '0.85rem',
+                            fontWeight: 500,
+                        }}
+                    >
+                        {error}
+                    </div>
+                )}
                 <button
                     className="btn-primary pulse-glow btn-lg survey-submit"
                     onClick={handleSubmit}
