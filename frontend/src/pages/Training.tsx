@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import Chart from 'chart.js/auto';
-import { apiGet, formatTime, showToast } from '../utils/helpers';
+import { Plus } from 'lucide-react';
+import { apiGet, apiPost, formatTime, showToast } from '../utils/helpers';
+import { useAuth } from '../context/AuthContext';
 import HelpButton from '../components/help/HelpButton';
 import AskButton from '../components/chatbot/AskButton';
+import DeviceCard from '../components/devices/DeviceCard';
+import AddDeviceModal from '../components/devices/AddDeviceModal';
+import type { Device } from '../components/devices/types';
 
 interface LogEntry {
     id: number;
@@ -30,6 +35,13 @@ const Training: React.FC = () => {
     const [isComplete, setIsComplete] = useState(false);
     const [lastWeightFilename, setLastWeightFilename] = useState<string | null>(null);
     const [btnState, setBtnState] = useState<'idle' | 'starting' | 'training' | 'complete'>('idle');
+
+    // Compute device selection
+    const { user } = useAuth();
+    const [devices, setDevices] = useState<Device[]>([]);
+    const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
+    const [jobId, setJobId] = useState<string | null>(null);
+    const [showAddDevice, setShowAddDevice] = useState(false);
 
     // Logs
     const [logs, setLogs] = useState<LogEntry[]>([{ id: 0, html: '<span class="text-muted">Waiting to start training...</span>' }]);
@@ -195,6 +207,8 @@ const Training: React.FC = () => {
             setIsTraining(false);
             setBtnState('complete');
             setIsComplete(true);
+            setJobId(null);
+            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
 
             if (data.weight_filename) {
                 setLastWeightFilename(data.weight_filename);
@@ -210,15 +224,32 @@ const Training: React.FC = () => {
             addLog(`<span class="log-final">✅ ${data.message} — Final loss: ${data.final_train_loss.toFixed(4)} · Val loss: ${data.final_val_loss.toFixed(4)}</span>`, 'log-entry-final');
         });
 
+        socketRef.current.on('training_info', (data) => {
+            if (data.layer_sizes) {
+                layerSizesRef.current = [
+                    data.input_dim || 4,
+                    ...(data.layer_sizes || [128, 64]),
+                    data.output_dim || 2,
+                ];
+            }
+            if (data.early_stopping?.enabled) {
+                setEsInfo({ patience: data.early_stopping.patience, counter: 0 });
+            }
+        });
+
         socketRef.current.on('training_stopped', () => {
             setIsTraining(false);
             setBtnState('idle');
+            setJobId(null);
+            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
             showToast('Training stopped.', 'warning');
         });
 
         socketRef.current.on('training_error', (data) => {
             setIsTraining(false);
             setBtnState('idle');
+            setJobId(null);
+            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
             showToast('Training error: ' + data.message, 'error');
         });
 
@@ -242,6 +273,28 @@ const Training: React.FC = () => {
                 }
             })
             .catch(() => { });
+    }, []);
+
+    // Load + poll the compute-device list (keeps status / ETA fresh)
+    const loadDevices = () => {
+        apiGet('/api/devices')
+            .then((data) => {
+                const list: Device[] = data.devices || [];
+                setDevices(list);
+                setSelectedDeviceId((prev) => {
+                    if (prev != null && list.some((d) => d.id === prev)) return prev;
+                    const free = list.find((d) => d.status === 'available');
+                    return free ? free.id : prev;
+                });
+            })
+            .catch(() => { });
+    };
+
+    useEffect(() => {
+        loadDevices();
+        const timer = setInterval(loadDevices, 5000);
+        return () => clearInterval(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Network visualization
@@ -390,6 +443,10 @@ const Training: React.FC = () => {
     }, []);
 
     const handleStart = async () => {
+        if (selectedDeviceId == null) {
+            showToast('Pick a compute device first.', 'warning');
+            return;
+        }
         try {
             setBtnState('starting');
             setIsComplete(false);
@@ -406,13 +463,20 @@ const Training: React.FC = () => {
             setEpoch(0); setTotalEpochs(0); setTrainLoss('—'); setValLoss('—');
             setValAcc('—'); setEta('—'); setProgressPct(0); setEsInfo(null); setHasAcc(false);
 
-            const res = await fetch('/api/training/start', { method: 'POST', credentials: 'include' });
-            const data = await res.json();
+            const data = await apiPost('/api/training/start', {
+                device_id: selectedDeviceId,
+                socket_id: socketRef.current?.id,
+            });
 
             if (data.error) {
                 showToast(data.error, 'error');
                 setBtnState('idle');
                 return;
+            }
+
+            if (data.job_id) {
+                setJobId(data.job_id);
+                socketRef.current?.emit('subscribe_job', { job_id: data.job_id });
             }
 
             setIsTraining(true);
@@ -438,7 +502,7 @@ const Training: React.FC = () => {
 
     const handleStop = async () => {
         try {
-            await fetch('/api/training/stop', { method: 'POST', credentials: 'include' });
+            await apiPost('/api/training/stop', { job_id: jobId });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             showToast('Error: ' + msg, 'error');
@@ -454,11 +518,59 @@ const Training: React.FC = () => {
         showToast('Downloading: ' + lastWeightFilename, 'success');
     };
 
+    const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || null;
+    const deviceReady = selectedDevice?.status === 'available';
+
     return (
         <>
             <div className="page-header">
                 <h1>Training <em>Dashboard.</em></h1>
                 <p>Watch your neural network learn in real-time.</p>
+            </div>
+
+            {/* Compute Device Picker */}
+            <div className="glass-panel">
+                <div className="flex-between mb-1">
+                    <div className="panel-title mb-0"><span className="pt-icon">🖥️</span> Compute Device</div>
+                    <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                        {selectedDevice
+                            ? <>Selected: <strong>{selectedDevice.nickname}</strong></>
+                            : 'Choose where to train'}
+                    </span>
+                </div>
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))',
+                    gap: '1rem',
+                }}>
+                    {devices.map((d) => (
+                        <DeviceCard
+                            key={d.id}
+                            device={d}
+                            selected={d.id === selectedDeviceId}
+                            onSelect={setSelectedDeviceId}
+                        />
+                    ))}
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (!user) { showToast('Sign in to link your own device.', 'warning'); return; }
+                            setShowAddDevice(true);
+                        }}
+                        style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', gap: '0.4rem', minHeight: 158,
+                            borderRadius: 16, cursor: 'pointer', color: '#9d9dba',
+                            background: 'rgba(255,255,255,0.02)',
+                            border: '1.5px dashed rgba(255,255,255,0.16)',
+                            transition: 'border-color 0.2s, color 0.2s',
+                        }}
+                    >
+                        <Plus size={22} />
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Add your own device</span>
+                        <span style={{ fontSize: '0.74rem', opacity: 0.7 }}>Train on a machine you own</span>
+                    </button>
+                </div>
             </div>
 
             {/* Top Stats */}
@@ -552,14 +664,15 @@ const Training: React.FC = () => {
                             <button
                                 className="btn btn-primary btn-sm"
                                 onClick={handleStart}
-                                disabled={btnState === 'starting' || btnState === 'complete'}
+                                disabled={btnState === 'starting' || btnState === 'complete' || !deviceReady}
+                                title={!deviceReady ? 'Select an available device above' : undefined}
                             >
                                 {btnState === 'starting' ? '⏳ Starting...' : btnState === 'complete' ? '✓ Complete' : '▶ Start Training'}
                             </button>
                         )}
 
                         {btnState === 'complete' && (
-                            <button className="btn btn-primary btn-sm" onClick={() => { setBtnState('idle'); handleStart(); }}>▶ Restart</button>
+                            <button className="btn btn-primary btn-sm" onClick={() => window.location.assign('/dataset')}>＋ New Run</button>
                         )}
                     </div>
                 </div>
@@ -571,6 +684,13 @@ const Training: React.FC = () => {
                     <div ref={logEndRef} />
                 </div>
             </div>
+
+            {showAddDevice && (
+                <AddDeviceModal
+                    onClose={() => setShowAddDevice(false)}
+                    onCreated={loadDevices}
+                />
+            )}
         </>
     );
 };

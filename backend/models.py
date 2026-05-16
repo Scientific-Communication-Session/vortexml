@@ -28,6 +28,8 @@ class User(db.Model):
 
     projects = db.relationship('Project', backref='user', lazy='dynamic',
                                cascade='all, delete-orphan')
+    devices = db.relationship('Device', backref='user', lazy='dynamic',
+                              cascade='all, delete-orphan')
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -98,4 +100,51 @@ class Project(db.Model):
         }
         if include_history and self.history:
             d["history"] = json.loads(self.history)
+        return d
+
+
+class Device(db.Model):
+    """A training device the user can pick from.
+
+    Two kinds:
+      * the shared M4 Mac Mini — `is_shared=True`, `user_id=None`, visible to
+        everyone and trained on by the central server itself, and
+      * personal nodes — `is_shared=False`, owned by one user, reachable via a
+        downloaded node agent that pairs using `token`.
+    """
+    __tablename__ = 'devices'
+
+    id = db.Column(db.Integer, primary_key=True)
+    # NULL for the shared device; otherwise the owning user.
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=True, index=True)
+    nickname = db.Column(db.String(80), nullable=False)
+    # Pairing secret baked into the node agent bundle. Also acts as the
+    # device's API key — it links a node to exactly one account.
+    token = db.Column(db.String(96), unique=True, nullable=False, index=True)
+    is_shared = db.Column(db.Boolean, nullable=False, default=False)
+    # JSON: {platform, chip, ram_gb, cpu_cores, gpu_cores, accelerator, ...}
+    specs = db.Column(db.Text, nullable=True)
+    last_seen = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
+
+    def to_dict(self, runtime=None, include_token=False):
+        """Serialise for the API.
+
+        `runtime` carries live, non-persisted fields (online/status/job + ETA)
+        that the app server computes from in-memory state.
+        """
+        d = {
+            "id": self.id,
+            "nickname": self.nickname,
+            "is_shared": self.is_shared,
+            "owned": self.user_id is not None,
+            "specs": json.loads(self.specs) if self.specs else None,
+            "last_seen": self.last_seen.isoformat() + "Z" if self.last_seen else None,
+            "created_at": self.created_at.isoformat() + "Z",
+        }
+        if include_token:
+            d["token"] = self.token
+        if runtime:
+            d.update(runtime)
         return d

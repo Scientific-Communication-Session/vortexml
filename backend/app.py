@@ -4,11 +4,22 @@ Routes, API endpoints, and SocketIO event handlers.
 """
 
 import os
+# Let Metal (MPS) defer any unsupported op to the CPU instead of erroring.
+# Must be set before torch is imported (via training_engine, below).
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+import io
+import re
 import json
+import uuid
+import base64
+import zipfile
+import secrets
+import threading
+from datetime import datetime, timezone
+
 from flask import Flask, request, jsonify, session, send_file, make_response
 from flask_cors import CORS
-from flask_socketio import SocketIO
-import threading
+from flask_socketio import SocketIO, emit, join_room
 
 import json as _json
 
@@ -16,10 +27,11 @@ import anthropic
 
 from data_processor import save_uploaded_file, analyze_dataset, prepare_dataset
 from training_engine import (
-    create_model, train_model, stop_training, MODEL_REGISTRY,
-    parse_weight_filename, WEIGHTS_DIR,
+    create_model, train_model, stop_training, get_torch_device,
+    MODEL_REGISTRY, parse_weight_filename, WEIGHTS_DIR,
 )
-from models import db, User, Project
+from device_specs import detect_specs
+from models import db, User, Project, Device
 
 app = Flask(__name__)
 # Enable CORS with credentials support for session cookies pointing to the frontend
@@ -34,7 +46,7 @@ if os.environ.get("VORTEX_USE_SQLITE") == "1" or os.environ.get("SQLALCHEMY_DATA
         "sqlite:///" + os.path.join(os.path.dirname(__file__), "vortex.db"))
     app.config['SQLALCHEMY_DATABASE_URI'] = _db_uri
 else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:postgres@localhost:5432/vortex_db'
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://andrei:2006@localhost:5432/vortex_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
@@ -50,10 +62,18 @@ def inject_cache_buster():
     import time
     return {"cache_version": int(time.time())}
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+# `max_http_buffer_size` is bumped so node agents can ship datasets and
+# trained weights to/from the server as base64 payloads over the socket.
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet",
+                    max_http_buffer_size=100 * 1024 * 1024)
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Public URL the node agents dial back into. The Cloudflare tunnel for this is
+# vortexml.andreinita.com → :5173 (Vite), which proxies /api and /socket.io.
+PUBLIC_URL = os.environ.get("VORTEX_PUBLIC_URL", "https://vortexml.andreinita.com")
+NODE_BUNDLE_DIR = os.path.join(os.path.dirname(__file__), "node_bundle")
 
 # In-memory session state (for single-user simplicity)
 _state = {
@@ -67,6 +87,17 @@ _state = {
     "project_name": "VortexProject",
     "last_weights_file": None,
 }
+
+# ── Device / remote-training runtime registries (this is a single process) ──
+_nodes = {}        # device_id -> {"sid": <node socket id>}
+_node_sids = {}    # node socket id -> device_id   (reverse lookup on disconnect)
+_jobs = {}         # job_id -> live job dict (epoch/eta/room/owner/config)
+_device_busy = {}  # device_id -> job_id   (which job currently occupies it)
+
+
+def _utcnow():
+    """Naive UTC datetime, matching the db.DateTime columns in models.py."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # ─────────────────────────────────────────────────────────
@@ -325,6 +356,13 @@ def configure_model():
 # ─────────────────────────────────────────────────────────
 @app.route("/api/training/start", methods=["POST"])
 def start_training():
+    """Kick off a training run on the chosen device.
+
+    Body: {"device_id": <int|null>, "socket_id": <str>}.
+    A null/absent device_id defaults to the shared M4. When the device is the
+    shared M4 the run happens here; when it's a personal node the job is
+    dispatched to that node's agent and its updates are relayed back.
+    """
     if not _state["dataset_path"]:
         return jsonify({"error": "No dataset uploaded"}), 400
     if not _state["feature_cols"] or not _state["target_col"]:
@@ -332,30 +370,64 @@ def start_training():
     if not _state["model_config"]:
         return jsonify({"error": "Model not configured"}), 400
 
-    config = _state["model_config"]
+    body = request.get_json(silent=True) or {}
+    device_id = body.get("device_id")
+    socket_id = body.get("socket_id")
 
-    # Capture the session user_id BEFORE entering the background thread —
-    # the Flask session is request-scoped and won't be reachable from run().
+    # Resolve the target device (a null device_id means the shared M4).
+    if device_id is None:
+        device = Device.query.filter_by(is_shared=True).first()
+    else:
+        device = Device.query.get(device_id)
+    if device is None:
+        return jsonify({"error": "Device not found"}), 404
+
+    # A personal node is only usable by the account it's linked to.
     owner_user_id = session.get("user_id")
+    if not device.is_shared and device.user_id != owner_user_id:
+        return jsonify({"error": "That device is not linked to your account"}), 403
 
-    try:
-        # Prepare data
-        data = prepare_dataset(
-            _state["dataset_path"],
-            _state["feature_cols"],
-            _state["target_col"],
-            batch_size=config["batch_size"]
-        )
+    if _device_busy.get(device.id):
+        return jsonify({"error": f"'{device.nickname}' is already training. Pick another device."}), 409
 
-        # Create model
-        model = create_model(
-            config["arch_type"],
-            config["layer_sizes"],
-            data["input_dim"],
-            data["output_dim"],
-            activation=config.get("activation", "relu")
-        )
+    config = _state["model_config"]
+    job_id = uuid.uuid4().hex[:12]
+    room = f"job:{job_id}"
 
+    # Put the requesting browser into the job room *before* training starts so
+    # it cannot miss the first epochs.
+    _join_job_room(socket_id, room)
+
+    job = {
+        "job_id": job_id,
+        "device_id": device.id,
+        "is_local": device.is_shared,
+        "owner_user_id": owner_user_id,
+        "project_name": config.get("project_name", "VortexProject"),
+        "config": config,
+        "room": room,
+        "epoch": 0,
+        "total_epochs": config.get("epochs", 50),
+        "eta_seconds": None,
+        "started_at": _utcnow().isoformat() + "Z",
+    }
+
+    if device.is_shared:
+        # ── Local training on the central M4 ──
+        try:
+            data = prepare_dataset(
+                _state["dataset_path"], _state["feature_cols"],
+                _state["target_col"], batch_size=config["batch_size"],
+            )
+            model = create_model(
+                config["arch_type"], config["layer_sizes"],
+                data["input_dim"], data["output_dim"],
+                activation=config.get("activation", "relu"),
+            )
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+        torch_device = get_torch_device()
         training_info = {
             "arch_type": config["arch_type"],
             "layer_sizes": config["layer_sizes"],
@@ -367,64 +439,82 @@ def start_training():
             "test_size": data["test_size"],
             "epochs": config["epochs"],
             "early_stopping": config.get("early_stopping", {}),
+            "device": str(torch_device),
         }
 
+        _jobs[job_id] = job
+        _device_busy[device.id] = job_id
+
         def run():
-            result = train_model(
-                model, data["train_loader"], data["val_loader"],
-                data["task_type"], config, socketio,
-                input_dim=data["input_dim"], output_dim=data["output_dim"],
-            )
-            # `result` is None if training was stopped before completion.
-            if not result:
-                return
+            try:
+                result = train_model(
+                    model, data["train_loader"], data["val_loader"],
+                    data["task_type"], config, socketio,
+                    input_dim=data["input_dim"], output_dim=data["output_dim"],
+                    device=torch_device, room=room,
+                )
+            except Exception as e:
+                socketio.emit("training_error", {"message": str(e)}, room=room)
+                result = None
+            if result:
+                _state["last_weights_file"] = result["weight_filename"]
+                _persist_project(owner_user_id, config, result)
+            _finish_job(job_id)
+            _cleanup_dataset()
 
-            _state["last_weights_file"] = result["weight_filename"]
-
-            # Persist a Project record if the run was started by a logged-in user.
-            if owner_user_id is not None:
-                with app.app_context():
-                    user = User.query.get(owner_user_id)
-                    if user is None:
-                        return  # user deleted mid-train; drop the record
-                    proj = Project(
-                        user_id=owner_user_id,
-                        name=config.get("project_name", "VortexProject"),
-                        arch_type=config["arch_type"],
-                        layer_sizes=_json.dumps(config["layer_sizes"]),
-                        epochs=config["epochs"],
-                        lr=float(config["lr"]),
-                        batch_size=config["batch_size"],
-                        optimizer=config.get("optimizer", "adam"),
-                        activation=config.get("activation", "relu"),
-                        early_stopping=_json.dumps(config.get("early_stopping") or {}),
-                        task_type=result["task_type"],
-                        input_dim=result["input_dim"],
-                        output_dim=result["output_dim"],
-                        final_train_loss=result["final_train_loss"],
-                        final_val_loss=result["final_val_loss"],
-                        final_val_acc=result.get("final_val_acc"),
-                        early_stopped=result["early_stopped"],
-                        stopped_epoch=result.get("stopped_epoch"),
-                        history=_json.dumps(result["history"]),
-                        weight_filename=result["weight_filename"],
-                    )
-                    db.session.add(proj)
-                    db.session.commit()
-
+        socketio.emit("training_info", training_info, room=room)
         thread = socketio.start_background_task(run)
         _state["training_thread"] = thread
+        return jsonify({"status": "started", "job_id": job_id, "mode": "local",
+                        "device": device.to_dict(), "info": training_info})
 
-        return jsonify({"status": "started", "info": training_info})
+    # ── Remote training on the user's own node ──
+    node = _nodes.get(device.id)
+    if not node:
+        return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent and try again."}), 409
 
+    try:
+        with open(_state["dataset_path"], "rb") as f:
+            csv_b64 = base64.b64encode(f.read()).decode()
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Could not read dataset: {e}"}), 500
+
+    _jobs[job_id] = job
+    _device_busy[device.id] = job_id
+
+    socketio.emit("node_run_job", {
+        "job_id": job_id,
+        "config": config,
+        "feature_cols": _state["feature_cols"],
+        "target_col": _state["target_col"],
+        "dataset_name": _state["dataset_file"],
+        "csv_b64": csv_b64,
+    }, room=node["sid"])
+
+    return jsonify({"status": "started", "job_id": job_id, "mode": "remote",
+                    "device": device.to_dict()})
 
 
 @app.route("/api/training/stop", methods=["POST"])
 def stop_training_route():
-    stop_training()
-    return jsonify({"status": "stopped"})
+    body = request.get_json(silent=True) or {}
+    job_id = body.get("job_id")
+    job = _jobs.get(job_id) if job_id else None
+    # If the caller didn't say which job, and exactly one is running, stop that.
+    if job is None and len(_jobs) == 1:
+        job = next(iter(_jobs.values()))
+
+    if job is None:
+        stop_training()  # nothing tracked — still poke the local stop flag
+        return jsonify({"status": "stopped"})
+
+    if job["is_local"]:
+        stop_training()
+    else:
+        node = _nodes.get(job["device_id"])
+        if node:
+            socketio.emit("node_stop", {"job_id": job["job_id"]}, room=node["sid"])
+    return jsonify({"status": "stopping"})
 
 
 @app.route("/api/state/reset", methods=["POST"])
@@ -627,6 +717,334 @@ def load_project(project_id):
     _state["last_weights_file"] = proj.weight_filename
 
     return jsonify({"status": "ok", "config": cfg, "weight_filename": proj.weight_filename})
+
+
+# ─────────────────────────────────────────────────────────
+# Devices & Remote Training
+# ─────────────────────────────────────────────────────────
+def _join_job_room(socket_id, room):
+    """Add a browser's socket to a job room so it receives that run's events."""
+    if not socket_id:
+        return False
+    try:
+        socketio.server.enter_room(socket_id, room, namespace="/")
+        return True
+    except Exception as e:
+        print(f"[devices] enter_room failed for {socket_id}: {e}")
+        return False
+
+
+def _cleanup_dataset():
+    """Delete the uploaded dataset once a run ends.
+
+    Datasets are never persisted — only the trained weights and the run's
+    stats are kept. This wipes the file from the central M4 and clears state.
+    """
+    path = _state.get("dataset_path")
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    _state["dataset_file"] = None
+    _state["dataset_path"] = None
+    _state["dataset_info"] = None
+    _state["feature_cols"] = []
+    _state["target_col"] = None
+
+
+def _finish_job(job_id):
+    """Drop a finished job and free its device."""
+    job = _jobs.pop(job_id, None)
+    if job:
+        _device_busy.pop(job["device_id"], None)
+
+
+def _persist_project(owner_user_id, config, result):
+    """Save a completed run as a Project row (weights + stats, no dataset)."""
+    if owner_user_id is None:
+        return
+    with app.app_context():
+        user = User.query.get(owner_user_id)
+        if user is None:
+            return  # user deleted mid-train; drop the record
+        proj = Project(
+            user_id=owner_user_id,
+            name=config.get("project_name", "VortexProject"),
+            arch_type=config["arch_type"],
+            layer_sizes=_json.dumps(config["layer_sizes"]),
+            epochs=config["epochs"],
+            lr=float(config["lr"]),
+            batch_size=config["batch_size"],
+            optimizer=config.get("optimizer", "adam"),
+            activation=config.get("activation", "relu"),
+            early_stopping=_json.dumps(config.get("early_stopping") or {}),
+            task_type=result["task_type"],
+            input_dim=result["input_dim"],
+            output_dim=result["output_dim"],
+            final_train_loss=result["final_train_loss"],
+            final_val_loss=result["final_val_loss"],
+            final_val_acc=result.get("final_val_acc"),
+            early_stopped=result["early_stopped"],
+            stopped_epoch=result.get("stopped_epoch"),
+            history=_json.dumps(result["history"]),
+            weight_filename=result["weight_filename"],
+        )
+        db.session.add(proj)
+        db.session.commit()
+
+
+def _device_runtime(device):
+    """Live, non-persisted status for a device: online / available / busy."""
+    busy_job_id = _device_busy.get(device.id)
+    job = _jobs.get(busy_job_id) if busy_job_id else None
+
+    online = True if device.is_shared else (device.id in _nodes)
+    status = "busy" if job else ("available" if online else "offline")
+
+    rt = {"online": online, "status": status, "job": None}
+    if job:
+        rt["job"] = {
+            "project_name": job.get("project_name"),
+            "epoch": job.get("epoch", 0),
+            "total_epochs": job.get("total_epochs", 0),
+            "eta_seconds": job.get("eta_seconds"),
+            "started_at": job.get("started_at"),
+        }
+    return rt
+
+
+@app.route("/api/devices", methods=["GET"])
+def list_devices():
+    """The shared M4 (always) plus any nodes linked to the signed-in account."""
+    user_id = session.get("user_id")
+    devices = [d.to_dict(runtime=_device_runtime(d))
+               for d in Device.query.filter_by(is_shared=True).all()]
+    if user_id:
+        owned = (Device.query.filter_by(user_id=user_id)
+                 .order_by(Device.created_at).all())
+        devices += [d.to_dict(runtime=_device_runtime(d)) for d in owned]
+    return jsonify({"devices": devices})
+
+
+@app.route("/api/devices", methods=["POST"])
+def create_device():
+    """Register a new personal node and mint its pairing token."""
+    user, err = _require_user()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    nickname = ((data.get("nickname") or "").strip() or "My Device")[:80]
+    dev = Device(
+        user_id=user.id,
+        nickname=nickname,
+        token="vtx-" + secrets.token_urlsafe(32),
+        is_shared=False,
+    )
+    db.session.add(dev)
+    db.session.commit()
+    return jsonify({"device": dev.to_dict(runtime=_device_runtime(dev))}), 201
+
+
+@app.route("/api/devices/<int:device_id>", methods=["PATCH"])
+def update_device(device_id):
+    """Rename a personal node."""
+    user, err = _require_user()
+    if err:
+        return err
+    dev = Device.query.filter_by(id=device_id, user_id=user.id).first()
+    if not dev:
+        return jsonify({"error": "Device not found"}), 404
+    data = request.get_json(silent=True) or {}
+    nickname = (data.get("nickname") or "").strip()
+    if nickname:
+        dev.nickname = nickname[:80]
+        db.session.commit()
+    return jsonify({"device": dev.to_dict(runtime=_device_runtime(dev))})
+
+
+@app.route("/api/devices/<int:device_id>", methods=["DELETE"])
+def delete_device(device_id):
+    """Unlink a personal node from the account."""
+    user, err = _require_user()
+    if err:
+        return err
+    dev = Device.query.filter_by(id=device_id, user_id=user.id).first()
+    if not dev:
+        return jsonify({"error": "Device not found"}), 404
+    if _device_busy.get(dev.id):
+        return jsonify({"error": "Device is busy training — stop the run first."}), 409
+    node = _nodes.pop(dev.id, None)
+    if node:
+        _node_sids.pop(node["sid"], None)
+    db.session.delete(dev)
+    db.session.commit()
+    return jsonify({"status": "deleted"})
+
+
+@app.route("/api/devices/<int:device_id>/agent.zip", methods=["GET"])
+def download_agent(device_id):
+    """Download the node agent bundle for a personal device.
+
+    The zip carries the device's pairing token in node_config.json, so it
+    links that machine to this account and no other.
+    """
+    user, err = _require_user()
+    if err:
+        return err
+    dev = Device.query.filter_by(id=device_id, user_id=user.id).first()
+    if not dev:
+        return jsonify({"error": "Device not found"}), 404
+    if dev.is_shared:
+        return jsonify({"error": "The shared device has no downloadable agent"}), 400
+
+    backend_dir = os.path.dirname(__file__)
+    node_config = {
+        "central_url": PUBLIC_URL,
+        "device_token": dev.token,
+        "device_id": dev.id,
+        "nickname": dev.nickname,
+    }
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        # Static bundle files (agent script, launcher, deps, readme).
+        for fn in ("node_agent.py", "run.sh", "requirements.txt", "README.txt"):
+            p = os.path.join(NODE_BUNDLE_DIR, fn)
+            if os.path.exists(p):
+                z.write(p, arcname=fn)
+        # Backend modules the agent reuses verbatim.
+        for fn in ("training_engine.py", "data_processor.py", "device_specs.py"):
+            z.write(os.path.join(backend_dir, fn), arcname=fn)
+        # Per-device config — the API key that pairs this machine to the account.
+        z.writestr("node_config.json", _json.dumps(node_config, indent=2))
+
+    buf.seek(0)
+    safe_nick = re.sub(r"[^A-Za-z0-9_-]+", "-", dev.nickname).strip("-") or "device"
+    resp = make_response(buf.read())
+    resp.headers["Content-Type"] = "application/zip"
+    resp.headers["Content-Disposition"] = (
+        f'attachment; filename="vortexml-node-{safe_nick}.zip"')
+    return resp
+
+
+# ── Node-agent SocketIO protocol ──────────────────────────
+@socketio.on("subscribe_job")
+def on_subscribe_job(data):
+    """A browser asks to receive a specific job's live events."""
+    job_id = (data or {}).get("job_id")
+    if job_id:
+        join_room(f"job:{job_id}")
+
+
+@socketio.on("node_register")
+def on_node_register(data):
+    """A node agent identifies itself with its pairing token + specs."""
+    data = data or {}
+    token = data.get("token")
+    specs = data.get("specs") or {}
+    dev = (Device.query.filter_by(token=token, is_shared=False).first()
+           if token else None)
+    if dev is None:
+        emit("node_register_failed", {"error": "Unknown or revoked device token"})
+        return
+    _nodes[dev.id] = {"sid": request.sid}
+    _node_sids[request.sid] = dev.id
+    dev.specs = _json.dumps(specs)
+    dev.last_seen = _utcnow()
+    db.session.commit()
+    print(f"[node] registered: device #{dev.id} '{dev.nickname}' (sid={request.sid})")
+    emit("node_registered", {
+        "device_id": dev.id,
+        "nickname": dev.nickname,
+        "accelerator_label": specs.get("accelerator_label", ""),
+    })
+
+
+@socketio.on("node_relay")
+def on_node_relay(data):
+    """Relay a node's training event to the browser watching that job."""
+    data = data or {}
+    job = _jobs.get(data.get("job_id"))
+    if not job:
+        return
+    event = data.get("event")
+    payload = data.get("data") or {}
+    if event == "training_update":
+        job["epoch"] = payload.get("epoch", job["epoch"])
+        job["total_epochs"] = payload.get("total_epochs", job["total_epochs"])
+        job["eta_seconds"] = payload.get("eta_seconds")
+    socketio.emit(event, payload, room=job["room"])
+
+
+@socketio.on("node_complete")
+def on_node_complete(data):
+    """A node finished a run: save the weights it shipped back, persist stats."""
+    data = data or {}
+    job = _jobs.get(data.get("job_id"))
+    if not job:
+        return
+    meta = data.get("meta") or {}
+    weight_filename = meta.get("weight_filename")
+    weights_b64 = data.get("weights_b64")
+    if weight_filename and weights_b64:
+        try:
+            with open(os.path.join(WEIGHTS_DIR, weight_filename), "wb") as f:
+                f.write(base64.b64decode(weights_b64))
+        except Exception as e:
+            print(f"[node] failed to save weights {weight_filename}: {e}")
+    _state["last_weights_file"] = weight_filename
+    _persist_project(job["owner_user_id"], job["config"], meta)
+    socketio.emit("training_complete", meta, room=job["room"])
+    _finish_job(job["job_id"])
+    _cleanup_dataset()
+
+
+@socketio.on("node_stopped")
+def on_node_stopped(data):
+    job = _jobs.get((data or {}).get("job_id"))
+    if not job:
+        return
+    socketio.emit("training_stopped", {}, room=job["room"])
+    _finish_job(job["job_id"])
+    _cleanup_dataset()
+
+
+@socketio.on("node_error")
+def on_node_error(data):
+    data = data or {}
+    job = _jobs.get(data.get("job_id"))
+    if not job:
+        return
+    socketio.emit("training_error",
+                  {"message": data.get("error", "Remote training failed")},
+                  room=job["room"])
+    _finish_job(job["job_id"])
+    _cleanup_dataset()
+
+
+def _seed_shared_device():
+    """Ensure the shared M4 Mac Mini exists and its specs are up to date."""
+    dev = Device.query.filter_by(is_shared=True).first()
+    specs = detect_specs()
+    if dev is None:
+        dev = Device(
+            nickname="VortexML M4 Mac Mini",
+            token="vtx-shared-" + secrets.token_urlsafe(16),
+            is_shared=True,
+            user_id=None,
+            specs=_json.dumps(specs),
+        )
+        db.session.add(dev)
+    else:
+        dev.specs = _json.dumps(specs)
+    db.session.commit()
+    print(f"[devices] shared device ready: '{dev.nickname}' "
+          f"({specs.get('accelerator_label')})")
+
+
+with app.app_context():
+    _seed_shared_device()
 
 
 # ─────────────────────────────────────────────────────────
@@ -1699,7 +2117,24 @@ def on_connect():
 
 @socketio.on("disconnect")
 def on_disconnect():
-    print("Client disconnected")
+    # If a node agent dropped, mark it offline and fail any run it was doing.
+    dev_id = _node_sids.pop(request.sid, None)
+    if dev_id is None:
+        print("Client disconnected")
+        return
+    node = _nodes.get(dev_id)
+    if node and node.get("sid") == request.sid:
+        _nodes.pop(dev_id, None)
+    busy_job_id = _device_busy.get(dev_id)
+    if busy_job_id:
+        job = _jobs.get(busy_job_id)
+        if job:
+            socketio.emit("training_error",
+                          {"message": "Node disconnected during training"},
+                          room=job["room"])
+        _finish_job(busy_job_id)
+        _cleanup_dataset()
+    print(f"[node] disconnected: device #{dev_id}")
 
 
 # ─────────────────────────────────────────────────────────

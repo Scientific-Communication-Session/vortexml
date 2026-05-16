@@ -311,6 +311,22 @@ def get_optimizer(model, name="adam", lr=0.001):
     return opt_cls(model.parameters(), lr=lr)
 
 
+def get_torch_device():
+    """Pick the best available torch device.
+
+    Apple Silicon → Metal (MPS); NVIDIA → CUDA; otherwise CPU. Probing is
+    wrapped in try/except so an exotic build never crashes training.
+    """
+    try:
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+    except Exception:
+        pass
+    return torch.device("cpu")
+
+
 # ─────────────────────────────────────────────────────────
 # Training Loop (runs in background thread)
 # ─────────────────────────────────────────────────────────
@@ -388,15 +404,26 @@ def parse_weight_filename(filename):
 
 
 def train_model(model, train_loader, val_loader, task_type, config, socketio,
-                input_dim=None, output_dim=None):
+                input_dim=None, output_dim=None, device=None, room=None):
     """
     Train the model and emit live updates via SocketIO.
     Runs in the calling thread (should be spawned as a background thread).
+
+    `device` selects the torch device (auto-detected when None — Metal/CUDA/CPU).
+    `room` scopes every emit to a single SocketIO room so concurrent runs from
+    different users don't bleed into each other. When None, emits broadcast.
+
+    `socketio` only needs `.emit(event, data, room=...)` and `.sleep(n)`, so a
+    node agent can pass a thin relay adapter instead of a real server.
 
     Returns a dict with the final outcome (history, metrics, weight filename) so
     the caller can persist a record. Returns None if training was externally stopped.
     """
     _stop_training.clear()
+
+    if device is None:
+        device = get_torch_device()
+    model = model.to(device)
 
     epochs = config.get("epochs", 50)
     lr = config.get("lr", 0.001)
@@ -427,7 +454,7 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
 
     for epoch in range(1, epochs + 1):
         if _stop_training.is_set():
-            socketio.emit("training_stopped", {"epoch": epoch})
+            socketio.emit("training_stopped", {"epoch": epoch}, room=room)
             return None
 
         epoch_start = time.time()
@@ -438,6 +465,7 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
         train_total = 0
 
         for X_batch, y_batch in train_loader:
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
             output = model(X_batch)
 
@@ -468,6 +496,7 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
 
         with torch.no_grad():
             for X_batch, y_batch in val_loader:
+                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 output = model(X_batch)
                 if task_type == "regression":
                     output = output.squeeze(-1)
@@ -528,7 +557,7 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
             "train_acc": round(train_acc, 2) if train_acc is not None else None,
             "val_acc": round(val_acc, 2) if val_acc is not None else None,
         })
-        socketio.emit("training_update", update)
+        socketio.emit("training_update", update, room=room)
         socketio.sleep(0)  # yield to event loop
 
         # ---- Trigger early stop ----
@@ -545,7 +574,10 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
     unique_suffix = time.strftime("%Y%m%dT%H%M%S")
     weight_filename = _build_weight_filename(config, unique_suffix=unique_suffix)
     model_path = os.path.join(WEIGHTS_DIR, weight_filename)
-    torch.save(model.state_dict(), model_path)
+    # Save a CPU-mapped state dict so the .pt file is portable regardless of
+    # whether training ran on Metal, CUDA, or CPU.
+    cpu_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+    torch.save(cpu_state, model_path)
 
     final_val_acc = history[-1]["val_acc"] if history else None
 
@@ -565,5 +597,6 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
     }
     if early_stopped:
         complete_data["stopped_epoch"] = stopped_epoch
-    socketio.emit("training_complete", complete_data)
+    complete_data["device"] = str(device)
+    socketio.emit("training_complete", complete_data, room=room)
     return complete_data
