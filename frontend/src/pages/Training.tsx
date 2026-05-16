@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import Chart from 'chart.js/auto';
-import { apiGet, formatTime, showToast } from '../utils/helpers';
+import { Plus } from 'lucide-react';
+import { apiGet, apiPost, formatTime, showToast } from '../utils/helpers';
+import { useAuth } from '../context/AuthContext';
 import HelpButton from '../components/help/HelpButton';
 import AskButton from '../components/chatbot/AskButton';
+import DeviceCard, { DEVICE_CARD_HEIGHT } from '../components/devices/DeviceCard';
+import AddDeviceModal from '../components/devices/AddDeviceModal';
+import type { Device } from '../components/devices/types';
 
 interface LogEntry {
     id: number;
@@ -31,6 +36,20 @@ const Training: React.FC = () => {
     const [lastWeightFilename, setLastWeightFilename] = useState<string | null>(null);
     const [btnState, setBtnState] = useState<'idle' | 'starting' | 'training' | 'complete'>('idle');
 
+    // Compute device selection
+    const { user } = useAuth();
+    const [devices, setDevices] = useState<Device[]>([]);
+    const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
+    const [jobId, setJobId] = useState<string | null>(null);
+    const [showAddDevice, setShowAddDevice] = useState(false);
+
+    // Live system metrics (from whichever machine is training)
+    const [cpuPct, setCpuPct] = useState<number | null>(null);
+    const [gpuPct, setGpuPct] = useState<number | null>(null);
+    const [ramPct, setRamPct] = useState<number | null>(null);
+    const [cpuTemp, setCpuTemp] = useState<number | null>(null);
+    const [gpuTemp, setGpuTemp] = useState<number | null>(null);
+
     // Logs
     const [logs, setLogs] = useState<LogEntry[]>([{ id: 0, html: '<span class="text-muted">Waiting to start training...</span>' }]);
     const logCounter = useRef(1);
@@ -41,6 +60,12 @@ const Training: React.FC = () => {
     const chartCanvasRef = useRef<HTMLCanvasElement>(null);
     const networkCanvasRef = useRef<HTMLCanvasElement>(null);
     const socketRef = useRef<Socket | null>(null);
+
+    // System-monitor charts (temperature + utilization)
+    const tempChartRef = useRef<Chart | null>(null);
+    const tempCanvasRef = useRef<HTMLCanvasElement>(null);
+    const utilChartRef = useRef<Chart | null>(null);
+    const utilCanvasRef = useRef<HTMLCanvasElement>(null);
 
     // State refs to share with network drawer (since it uses requestAnimationFrame)
     const isTrainingRef = useRef(false);
@@ -147,6 +172,72 @@ const Training: React.FC = () => {
             });
         }
 
+        // Temperature chart — CPU + GPU on one graph
+        const tctx = tempCanvasRef.current?.getContext('2d');
+        if (tctx) {
+            tempChartRef.current = new Chart(tctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'CPU °C', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.10)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, spanGaps: true },
+                        { label: 'GPU °C', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.07)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, spanGaps: true },
+                    ],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: { duration: 200 },
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { labels: { color: '#9d9dba', font: { family: "'Space Grotesk', sans-serif", size: 11 } } },
+                        tooltip: {
+                            mode: 'index', intersect: false,
+                            callbacks: {
+                                title: () => '',
+                                label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(1) + ' °C'}`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { display: false },
+                        y: { min: 0, max: 100, ticks: { color: '#5a5a7a', font: { family: "'JetBrains Mono'", size: 10 } }, grid: { color: 'rgba(100,100,200,0.07)' } },
+                    },
+                },
+            });
+        }
+
+        // Utilization chart — CPU + GPU on one graph
+        const uctx = utilCanvasRef.current?.getContext('2d');
+        if (uctx) {
+            utilChartRef.current = new Chart(uctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'CPU %', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.12)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4 },
+                        { label: 'GPU %', data: [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.09)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4 },
+                    ],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: { duration: 200 },
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { labels: { color: '#9d9dba', font: { family: "'Space Grotesk', sans-serif", size: 11 } } },
+                        tooltip: {
+                            mode: 'index', intersect: false,
+                            callbacks: {
+                                title: () => '',
+                                label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(1) + ' %'}`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { display: false },
+                        y: { min: 0, max: 100, ticks: { color: '#5a5a7a', font: { family: "'JetBrains Mono'", size: 10 } }, grid: { color: 'rgba(100,100,200,0.07)' } },
+                    },
+                },
+            });
+        }
+
         // Socket listeners
         socketRef.current.on('training_update', (data) => {
             const { epoch: ep, total_epochs, train_loss, val_loss, val_acc, eta_seconds } = data;
@@ -195,6 +286,8 @@ const Training: React.FC = () => {
             setIsTraining(false);
             setBtnState('complete');
             setIsComplete(true);
+            setJobId(null);
+            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
 
             if (data.weight_filename) {
                 setLastWeightFilename(data.weight_filename);
@@ -210,21 +303,64 @@ const Training: React.FC = () => {
             addLog(`<span class="log-final">✅ ${data.message} — Final loss: ${data.final_train_loss.toFixed(4)} · Val loss: ${data.final_val_loss.toFixed(4)}</span>`, 'log-entry-final');
         });
 
+        socketRef.current.on('training_info', (data) => {
+            if (data.layer_sizes) {
+                layerSizesRef.current = [
+                    data.input_dim || 4,
+                    ...(data.layer_sizes || [128, 64]),
+                    data.output_dim || 2,
+                ];
+            }
+            if (data.early_stopping?.enabled) {
+                setEsInfo({ patience: data.early_stopping.patience, counter: 0 });
+            }
+        });
+
         socketRef.current.on('training_stopped', () => {
             setIsTraining(false);
             setBtnState('idle');
+            setJobId(null);
+            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
             showToast('Training stopped.', 'warning');
         });
 
         socketRef.current.on('training_error', (data) => {
             setIsTraining(false);
             setBtnState('idle');
+            setJobId(null);
+            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
             showToast('Training error: ' + data.message, 'error');
+        });
+
+        // Live hardware telemetry from the training machine
+        socketRef.current.on('system_stats', (data) => {
+            const { cpu_percent, gpu_percent, ram_percent, cpu_temp, gpu_temp } = data;
+            setCpuPct(cpu_percent ?? null);
+            setGpuPct(gpu_percent ?? null);
+            setRamPct(ram_percent ?? null);
+            setCpuTemp(cpu_temp ?? null);
+            setGpuTemp(gpu_temp ?? null);
+
+            const pushPair = (chart: Chart | null, a: number | null, b: number | null) => {
+                if (!chart) return;
+                chart.data.labels?.push('');
+                chart.data.datasets[0].data.push(a);
+                chart.data.datasets[1].data.push(b);
+                if ((chart.data.labels?.length ?? 0) > 60) {
+                    chart.data.labels?.shift();
+                    chart.data.datasets.forEach((ds) => ds.data.shift());
+                }
+                chart.update('none');
+            };
+            pushPair(utilChartRef.current, cpu_percent ?? null, gpu_percent ?? null);
+            pushPair(tempChartRef.current, cpu_temp ?? null, gpu_temp ?? null);
         });
 
         return () => {
             socketRef.current?.disconnect();
             chartRef.current?.destroy();
+            tempChartRef.current?.destroy();
+            utilChartRef.current?.destroy();
         };
     }, []);
 
@@ -242,6 +378,28 @@ const Training: React.FC = () => {
                 }
             })
             .catch(() => { });
+    }, []);
+
+    // Load + poll the compute-device list (keeps status / ETA fresh)
+    const loadDevices = () => {
+        apiGet('/api/devices')
+            .then((data) => {
+                const list: Device[] = data.devices || [];
+                setDevices(list);
+                setSelectedDeviceId((prev) => {
+                    if (prev != null && list.some((d) => d.id === prev)) return prev;
+                    const free = list.find((d) => d.status === 'available');
+                    return free ? free.id : prev;
+                });
+            })
+            .catch(() => { });
+    };
+
+    useEffect(() => {
+        loadDevices();
+        const timer = setInterval(loadDevices, 5000);
+        return () => clearInterval(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Network visualization
@@ -390,6 +548,10 @@ const Training: React.FC = () => {
     }, []);
 
     const handleStart = async () => {
+        if (selectedDeviceId == null) {
+            showToast('Pick a compute device first.', 'warning');
+            return;
+        }
         try {
             setBtnState('starting');
             setIsComplete(false);
@@ -402,17 +564,33 @@ const Training: React.FC = () => {
                 chartRef.current.data.datasets[2].hidden = true;
                 chartRef.current.update();
             }
+            [tempChartRef.current, utilChartRef.current].forEach((c) => {
+                if (c) {
+                    c.data.labels = [];
+                    c.data.datasets.forEach(ds => ds.data = []);
+                    c.update();
+                }
+            });
 
             setEpoch(0); setTotalEpochs(0); setTrainLoss('—'); setValLoss('—');
             setValAcc('—'); setEta('—'); setProgressPct(0); setEsInfo(null); setHasAcc(false);
+            setCpuPct(null); setGpuPct(null); setRamPct(null);
+            setCpuTemp(null); setGpuTemp(null);
 
-            const res = await fetch('/api/training/start', { method: 'POST', credentials: 'include' });
-            const data = await res.json();
+            const data = await apiPost('/api/training/start', {
+                device_id: selectedDeviceId,
+                socket_id: socketRef.current?.id,
+            });
 
             if (data.error) {
                 showToast(data.error, 'error');
                 setBtnState('idle');
                 return;
+            }
+
+            if (data.job_id) {
+                setJobId(data.job_id);
+                socketRef.current?.emit('subscribe_job', { job_id: data.job_id });
             }
 
             setIsTraining(true);
@@ -438,7 +616,7 @@ const Training: React.FC = () => {
 
     const handleStop = async () => {
         try {
-            await fetch('/api/training/stop', { method: 'POST', credentials: 'include' });
+            await apiPost('/api/training/stop', { job_id: jobId });
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             showToast('Error: ' + msg, 'error');
@@ -454,11 +632,70 @@ const Training: React.FC = () => {
         showToast('Downloading: ' + lastWeightFilename, 'success');
     };
 
+    const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || null;
+    const deviceReady = selectedDevice?.status === 'available';
+
+    const sysMetric = (label: string, value: number | null, suffix: string, color: string) => (
+        <div style={{ textAlign: 'center', flex: '1 1 70px', minWidth: 70 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700, color }}>
+                {value == null ? '—' : Math.round(value) + suffix}
+            </div>
+            <div className="text-muted" style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                {label}
+            </div>
+        </div>
+    );
+
     return (
         <>
             <div className="page-header">
                 <h1>Training <em>Dashboard.</em></h1>
                 <p>Watch your neural network learn in real-time.</p>
+            </div>
+
+            {/* Compute Device Picker */}
+            <div className="glass-panel">
+                <div className="flex-between mb-1">
+                    <div className="panel-title mb-0"><span className="pt-icon">🖥️</span> Compute Device</div>
+                    <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                        {selectedDevice
+                            ? <>Selected: <strong>{selectedDevice.nickname}</strong></>
+                            : 'Choose where to train'}
+                    </span>
+                </div>
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))',
+                    gap: '1rem',
+                }}>
+                    {devices.map((d) => (
+                        <DeviceCard
+                            key={d.id}
+                            device={d}
+                            selected={d.id === selectedDeviceId}
+                            onSelect={setSelectedDeviceId}
+                        />
+                    ))}
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (!user) { showToast('Sign in to link your own device.', 'warning'); return; }
+                            setShowAddDevice(true);
+                        }}
+                        style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', gap: '0.4rem', height: DEVICE_CARD_HEIGHT,
+                            borderRadius: 16, cursor: 'pointer', color: '#9d9dba',
+                            background: 'rgba(255,255,255,0.02)',
+                            border: '1.5px dashed rgba(255,255,255,0.16)',
+                            transition: 'border-color 0.2s, color 0.2s',
+                        }}
+                    >
+                        <Plus size={22} />
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Add your own device</span>
+                        <span style={{ fontSize: '0.74rem', opacity: 0.7 }}>Train on a machine you own</span>
+                    </button>
+                </div>
             </div>
 
             {/* Top Stats */}
@@ -480,6 +717,22 @@ const Training: React.FC = () => {
                 <div className="stat-card">
                     <div className="stat-value" style={{ color: 'var(--accent-4)' }}>{eta}</div>
                     <div className="stat-label">ETA <HelpButton topic="metric_eta" size={12} /><AskButton topic="metric_eta" size={12} /></div>
+                </div>
+            </div>
+
+            {/* Live system metrics from the training machine */}
+            <div className="glass-panel glass-panel-sm">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.9rem', flexWrap: 'wrap' }}>
+                    <span className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>
+                        ⚙ System
+                    </span>
+                    <div style={{ display: 'flex', flex: 1, gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'space-around' }}>
+                        {sysMetric('CPU', cpuPct, '%', '#8b5cf6')}
+                        {sysMetric('GPU', gpuPct, '%', '#06b6d4')}
+                        {sysMetric('RAM', ramPct, '%', '#22c55e')}
+                        {sysMetric('CPU Temp', cpuTemp, '°', '#f59e0b')}
+                        {sysMetric('GPU Temp', gpuTemp, '°', '#ef4444')}
+                    </div>
                 </div>
             </div>
 
@@ -552,14 +805,15 @@ const Training: React.FC = () => {
                             <button
                                 className="btn btn-primary btn-sm"
                                 onClick={handleStart}
-                                disabled={btnState === 'starting' || btnState === 'complete'}
+                                disabled={btnState === 'starting' || btnState === 'complete' || !deviceReady}
+                                title={!deviceReady ? 'Select an available device above' : undefined}
                             >
                                 {btnState === 'starting' ? '⏳ Starting...' : btnState === 'complete' ? '✓ Complete' : '▶ Start Training'}
                             </button>
                         )}
 
                         {btnState === 'complete' && (
-                            <button className="btn btn-primary btn-sm" onClick={() => { setBtnState('idle'); handleStart(); }}>▶ Restart</button>
+                            <button className="btn btn-primary btn-sm" onClick={() => window.location.assign('/dataset')}>＋ New Run</button>
                         )}
                     </div>
                 </div>
@@ -571,6 +825,36 @@ const Training: React.FC = () => {
                     <div ref={logEndRef} />
                 </div>
             </div>
+
+            {/* System Monitor — temperature + utilization */}
+            <div className="glass-panel">
+                <div className="panel-title"><span className="pt-icon">📊</span> System Monitor</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+                    <div>
+                        <div className="text-muted" style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                            🌡️ Temperature — CPU vs GPU
+                        </div>
+                        <div style={{ height: 220 }}>
+                            <canvas ref={tempCanvasRef}></canvas>
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-muted" style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                            ⚡ Utilization — CPU vs GPU
+                        </div>
+                        <div style={{ height: 220 }}>
+                            <canvas ref={utilCanvasRef}></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {showAddDevice && (
+                <AddDeviceModal
+                    onClose={() => setShowAddDevice(false)}
+                    onCreated={loadDevices}
+                />
+            )}
         </>
     );
 };

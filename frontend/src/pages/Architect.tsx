@@ -33,6 +33,14 @@ interface ModelConfig {
     early_stopping?: { enabled?: boolean; patience?: number; min_delta?: number };
 }
 
+interface SavedProject {
+    id: number;
+    name: string;
+    arch_type: string;
+    layer_sizes: number[];
+    final_val_acc: number | null;
+}
+
 const Architect: React.FC = () => {
     const navigate = useNavigate();
     const { user } = useAuth();
@@ -69,6 +77,10 @@ const Architect: React.FC = () => {
     const [isUploading, setIsUploading] = useState(false);
     const [weightsLoaded, setWeightsLoaded] = useState(false);
     const [weightStatus, setWeightStatus] = useState<string>('');
+
+    // Saved models from the signed-in user's account
+    const [accountProjects, setAccountProjects] = useState<SavedProject[]>([]);
+    const [loadingProject, setLoadingProject] = useState(false);
     const weightInputRef = useRef<HTMLInputElement>(null);
     const startTrainingBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -115,6 +127,14 @@ const Architect: React.FC = () => {
 
         return () => { mounted = false; };
     }, []);
+
+    // Saved models for the "load from your account" picker
+    useEffect(() => {
+        if (!user) { setAccountProjects([]); return; }
+        apiGet('/api/projects')
+            .then((d) => setAccountProjects(d.projects || []))
+            .catch(() => { });
+    }, [user]);
 
     // Canvas drawing
     useEffect(() => {
@@ -273,6 +293,52 @@ const Architect: React.FC = () => {
         setIsUploading(false);
     };
 
+    const loadFromAccount = async (projectId: number) => {
+        setLoadingProject(true);
+        try {
+            const res = await apiPost(`/api/projects/${projectId}/load`, {});
+            if (res.error) {
+                showToast(res.error, 'error');
+                return;
+            }
+            const cfg = res.config as ModelConfig;
+            setWeightsLoaded(true);
+            setSelectedArch(cfg.arch_type);
+            setLayers(cfg.layer_sizes || [128, 64]);
+            setEpochs(cfg.epochs || 50);
+            setLr(cfg.lr || 0.001);
+            setBatchSize(cfg.batch_size || 32);
+            setOptimizer(cfg.optimizer || 'adam');
+            setActivation(cfg.activation || 'relu');
+            setProjectName(cfg.project_name || 'VortexProject');
+
+            if (cfg.early_stopping?.enabled) {
+                setEsEnabled(true);
+                setEsPatience(cfg.early_stopping.patience || 10);
+                setEsDelta(cfg.early_stopping.min_delta || 0.0001);
+                if (isBeginner) setShowAdvanced(true);
+            } else {
+                setEsEnabled(false);
+            }
+            // Reveal an advanced architecture if the saved model uses one.
+            if (isBeginner) {
+                const a = architectures.find((x) => x.key === cfg.arch_type);
+                if (a && !a.beginner_friendly) setShowAllArchs(true);
+            }
+
+            setWeightStatus(
+                `Loaded from your account — ${(cfg.arch_type || '').toUpperCase()}, ` +
+                `${(cfg.layer_sizes || []).join('→')} neurons · ${res.weight_filename}`,
+            );
+            showToast('Saved model loaded ✓', 'success');
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast('Load failed: ' + msg, 'error');
+        } finally {
+            setLoadingProject(false);
+        }
+    };
+
     const handleClear = async () => {
         const isDirty = selectedArch !== null || weightsLoaded;
         if (isDirty && !confirm('Clear the current architecture and hyperparameters? This cannot be undone.')) return;
@@ -410,8 +476,43 @@ const Architect: React.FC = () => {
 
             {/* Weight Upload Zone */}
             <div className="glass-panel">
-                <div className="panel-title"><span className="pt-icon">📦</span> Load Pretrained Weights</div>
-                <p className="text-muted mb-2">Upload a <code>.pt</code> weight file to auto-restore the architecture and hyperparameters.</p>
+                <div className="panel-title"><span className="pt-icon">📦</span> Load a Model</div>
+                <p className="text-muted mb-2">Continue from a model you've trained before, or upload a <code>.pt</code> weight file — either one restores the architecture and hyperparameters.</p>
+
+                {user && (
+                    <div style={{ marginBottom: weightsLoaded ? '0.5rem' : '1rem' }}>
+                        <label className="form-label">Load a saved model from your account</label>
+                        {accountProjects.length === 0 ? (
+                            <p className="text-muted" style={{ fontSize: '0.82rem', margin: '0.3rem 0 0' }}>
+                                No saved models yet — train one and it will appear here.
+                            </p>
+                        ) : (
+                            <select
+                                className="form-select"
+                                value=""
+                                disabled={loadingProject}
+                                onChange={(e) => { if (e.target.value) loadFromAccount(parseInt(e.target.value)); }}
+                            >
+                                <option value="">
+                                    {loadingProject ? 'Loading…' : '— Select one of your saved models —'}
+                                </option>
+                                {accountProjects.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                        {p.name} · {p.arch_type.toUpperCase()} · {(p.layer_sizes || []).join('→')}
+                                        {p.final_val_acc != null ? ` · ${p.final_val_acc.toFixed(1)}% acc` : ''}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        {!weightsLoaded && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', margin: '0.95rem 0 0.1rem' }}>
+                                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
+                                <span className="text-muted" style={{ fontSize: '0.72rem' }}>or upload a file</span>
+                                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {!weightsLoaded && (
                     <div

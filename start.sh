@@ -124,7 +124,7 @@ ok "Python dependencies installed."
 
 # ── Check database connectivity ─────────────────────────
 info "Checking PostgreSQL connectivity…"
-if $PYTHON -c "import psycopg2; psycopg2.connect('postgresql://postgres:postgres@localhost:5432/vortex_db').close()" 2>/dev/null; then
+if $PYTHON -c "import psycopg2; psycopg2.connect('postgresql://andrei:2006@localhost:5432/vortex_db').close()" 2>/dev/null; then
     ok "PostgreSQL is reachable."
 else
     warn "PostgreSQL is not reachable — switching backend to SQLite."

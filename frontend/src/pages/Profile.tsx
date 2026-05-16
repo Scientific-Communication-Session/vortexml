@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles } from 'lucide-react';
+import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles, Laptop, Cpu, Pencil, Check, X, Plus } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
+import AddDeviceModal from '../components/devices/AddDeviceModal';
+import type { Device } from '../components/devices/types';
 
 interface Project {
     id: number;
@@ -54,7 +56,23 @@ const Profile: React.FC = () => {
     const [busyId, setBusyId] = useState<number | null>(null);
     const [togglingBeginner, setTogglingBeginner] = useState(false);
 
+    // Devices
+    const [devices, setDevices] = useState<Device[]>([]);
+    const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null);
+    const [editName, setEditName] = useState('');
+    const [deviceBusyId, setDeviceBusyId] = useState<number | null>(null);
+    const [showAddDevice, setShowAddDevice] = useState(false);
+
     const isBeginner = user?.is_beginner === true;
+
+    const loadDevices = () => {
+        apiGet('/api/devices')
+            .then((data) => {
+                const list: Device[] = data.devices || [];
+                setDevices(list.filter((d) => !d.is_shared));
+            })
+            .catch(() => { });
+    };
 
     useEffect(() => {
         if (authLoading) return;
@@ -62,6 +80,7 @@ const Profile: React.FC = () => {
             navigate('/signin');
             return;
         }
+        loadDevices();
         apiGet('/api/projects')
             .then((data) => setProjects(data.projects ?? []))
             .catch((e) => {
@@ -142,6 +161,56 @@ const Profile: React.FC = () => {
         } finally {
             setBusyId(null);
         }
+    };
+
+    const handleRenameDevice = async (id: number) => {
+        const name = editName.trim();
+        if (!name) { setEditingDeviceId(null); return; }
+        setDeviceBusyId(id);
+        try {
+            const res = await fetch(`/api/devices/${id}`, {
+                method: 'PATCH',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nickname: name }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast(data.error || `Rename failed (HTTP ${res.status})`, 'error');
+                return;
+            }
+            setDevices((prev) => prev.map((d) => (d.id === id ? { ...d, nickname: name } : d)));
+            setEditingDeviceId(null);
+            showToast('Device renamed', 'success');
+        } catch (e) {
+            showToast('Rename failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
+        } finally {
+            setDeviceBusyId(null);
+        }
+    };
+
+    const handleDeleteDevice = async (d: Device) => {
+        if (!confirm(`Unlink "${d.nickname}"? Its node agent will stop pairing with your account.`)) return;
+        setDeviceBusyId(d.id);
+        try {
+            const res = await fetch(`/api/devices/${d.id}`, { method: 'DELETE', credentials: 'include' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast(data.error || `Delete failed (HTTP ${res.status})`, 'error');
+                return;
+            }
+            setDevices((prev) => prev.filter((x) => x.id !== d.id));
+            showToast(`Unlinked "${d.nickname}"`, 'success');
+        } catch (e) {
+            showToast('Delete failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
+        } finally {
+            setDeviceBusyId(null);
+        }
+    };
+
+    const handleDownloadAgent = (d: Device) => {
+        window.location.href = `/api/devices/${d.id}/agent.zip`;
+        showToast(`Downloading agent for "${d.nickname}"`, 'success');
     };
 
     const stats = {
@@ -234,6 +303,131 @@ const Profile: React.FC = () => {
                     <div className="stat-value" style={{ color: 'var(--accent-4)' }}>{stats.archCount}</div>
                     <div className="stat-label">Architectures Tried</div>
                 </div>
+            </div>
+
+            {/* Your Devices */}
+            <div className="glass-panel">
+                <div className="flex-between mb-1">
+                    <div className="panel-title mb-0"><span className="pt-icon">🖥️</span> Your Devices</div>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setShowAddDevice(true)}>
+                        <Plus size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                        Link a device
+                    </button>
+                </div>
+
+                {devices.length === 0 ? (
+                    <p className="text-muted" style={{ fontSize: '0.88rem', padding: '0.4rem 0' }}>
+                        No devices linked yet. Link one of your own machines — a home Mac, a server —
+                        to train on it from anywhere, even from a laptop with no ML hardware.
+                    </p>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {devices.map((d) => {
+                            const specs = d.specs || {};
+                            const busy = deviceBusyId === d.id;
+                            const editing = editingDeviceId === d.id;
+                            const specLine = [
+                                specs.chip,
+                                specs.ram_gb != null ? `${specs.ram_gb} GB` : null,
+                                specs.cpu_cores != null ? `${specs.cpu_cores} CPU` : null,
+                                specs.gpu_cores != null ? `${specs.gpu_cores} GPU` : null,
+                                specs.accelerator_label,
+                            ].filter(Boolean).join(' · ');
+
+                            return (
+                                <div
+                                    key={d.id}
+                                    className="glass-panel"
+                                    style={{
+                                        padding: '1rem 1.2rem',
+                                        display: 'grid',
+                                        gridTemplateColumns: 'auto 1fr auto',
+                                        gap: '1rem',
+                                        alignItems: 'center',
+                                    }}
+                                >
+                                    <div style={{
+                                        position: 'relative', width: 40, height: 40, borderRadius: 10,
+                                        display: 'grid', placeItems: 'center',
+                                        background: 'rgba(139,92,246,0.14)', color: '#8b5cf6',
+                                    }}>
+                                        <Laptop size={20} />
+                                        <span
+                                            title={d.online ? 'Online' : 'Offline'}
+                                            style={{
+                                                position: 'absolute', right: -3, bottom: -3,
+                                                width: 12, height: 12, borderRadius: '50%',
+                                                border: '2px solid #0e0e1a',
+                                                background: d.online ? '#22c55e' : '#5a5a7a',
+                                            }}
+                                        />
+                                    </div>
+
+                                    <div style={{ minWidth: 0 }}>
+                                        {editing ? (
+                                            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                                <input
+                                                    value={editName}
+                                                    autoFocus
+                                                    maxLength={80}
+                                                    onChange={(e) => setEditName(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') handleRenameDevice(d.id);
+                                                        if (e.key === 'Escape') setEditingDeviceId(null);
+                                                    }}
+                                                    style={{
+                                                        padding: '0.3rem 0.5rem', borderRadius: 8,
+                                                        background: 'rgba(255,255,255,0.06)', color: 'inherit',
+                                                        border: '1px solid rgba(255,255,255,0.15)', fontSize: '0.95rem',
+                                                    }}
+                                                />
+                                                <button className="btn btn-secondary btn-sm" disabled={busy}
+                                                    onClick={() => handleRenameDevice(d.id)} style={{ padding: '0.3rem' }}>
+                                                    <Check size={14} />
+                                                </button>
+                                                <button className="btn btn-secondary btn-sm"
+                                                    onClick={() => setEditingDeviceId(null)} style={{ padding: '0.3rem' }}>
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                <strong style={{ fontSize: '1.02rem' }}>{d.nickname}</strong>
+                                                <button className="btn btn-secondary btn-sm" title="Rename device"
+                                                    onClick={() => { setEditingDeviceId(d.id); setEditName(d.nickname); }}
+                                                    style={{ padding: '0.2rem 0.35rem' }}>
+                                                    <Pencil size={12} />
+                                                </button>
+                                                <span className="bento-tag bento-tag-sm">
+                                                    {d.online ? '🟢 Online' : '⚪ Offline'}
+                                                </span>
+                                            </div>
+                                        )}
+                                        <div className="text-muted" style={{
+                                            fontSize: '0.8rem', marginTop: '0.35rem', fontFamily: 'var(--font-mono)',
+                                        }}>
+                                            <Cpu size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
+                                            {d.specs ? specLine : 'Specs appear once the node agent first connects.'}
+                                        </div>
+                                    </div>
+
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                        <button className="btn btn-secondary btn-sm" disabled={busy}
+                                            onClick={() => handleDownloadAgent(d)} title="Re-download the node agent bundle">
+                                            <Download size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                                            Agent
+                                        </button>
+                                        <button className="btn btn-danger btn-sm" disabled={busy}
+                                            onClick={() => handleDeleteDevice(d)} title="Unlink this device">
+                                            <Trash2 size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                                            Unlink
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             {projects.length === 0 ? (
@@ -335,6 +529,13 @@ const Profile: React.FC = () => {
                         })}
                     </div>
                 </div>
+            )}
+
+            {showAddDevice && (
+                <AddDeviceModal
+                    onClose={() => setShowAddDevice(false)}
+                    onCreated={loadDevices}
+                />
             )}
         </>
     );
