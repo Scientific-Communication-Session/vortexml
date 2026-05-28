@@ -514,7 +514,7 @@ def start_training():
                 _states[state_key]["last_weights_file"] = result["weight_filename"]
                 _persist_project(owner_user_id, config, result)
             _finish_job(job_id)
-            _cleanup_dataset(state_key)
+            _cleanup_dataset(state_key, ds_path)
 
         socketio.emit("training_info", training_info, room=room)
         thread = socketio.start_background_task(run)
@@ -792,15 +792,20 @@ def _join_job_room(socket_id, room):
         return False
 
 
-def _cleanup_dataset(state_key):
+def _cleanup_dataset(state_key, used_path=None):
     """Delete the finishing job's dataset and clear that owner's dataset state.
 
     Datasets are never persisted — only the trained weights and the run's
     stats are kept. Scoped to `state_key` so a job finishing for one user never
     wipes another user's in-flight setup.
+
+    `used_path` is the dataset file the job actually trained on. When given, the
+    owner's working state is only cleared if it still points at that same file —
+    so a user who has already uploaded their *next* dataset (while the previous
+    run wraps up) doesn't get it wiped out from under them.
     """
     st = _states.get(state_key)
-    path = st.get("dataset_path") if st else None
+    path = used_path or (st.get("dataset_path") if st else None)
     if path and os.path.exists(path):
         try:
             os.remove(path)
@@ -808,6 +813,8 @@ def _cleanup_dataset(state_key):
             pass
     if st is None:
         return
+    if used_path is not None and st.get("dataset_path") != used_path:
+        return  # user moved on to a different dataset — leave it alone
     st["dataset_file"] = None
     st["dataset_path"] = None
     st["dataset_info"] = None
@@ -1057,11 +1064,12 @@ def on_node_complete(data):
         except Exception as e:
             print(f"[node] failed to save weights {weight_filename}: {e}")
     state_key = job["state_key"]
+    used_path = job.get("dataset_path")
     _states[state_key]["last_weights_file"] = weight_filename
     _persist_project(job["owner_user_id"], job["config"], meta)
     socketio.emit("training_complete", meta, room=job["room"])
     _finish_job(job["job_id"])
-    _cleanup_dataset(state_key)
+    _cleanup_dataset(state_key, used_path)
 
 
 @socketio.on("node_stopped")
@@ -1070,9 +1078,10 @@ def on_node_stopped(data):
     if not job:
         return
     state_key = job["state_key"]
+    used_path = job.get("dataset_path")
     socketio.emit("training_stopped", {}, room=job["room"])
     _finish_job(job["job_id"])
-    _cleanup_dataset(state_key)
+    _cleanup_dataset(state_key, used_path)
 
 
 @socketio.on("node_error")
@@ -1082,11 +1091,12 @@ def on_node_error(data):
     if not job:
         return
     state_key = job["state_key"]
+    used_path = job.get("dataset_path")
     socketio.emit("training_error",
                   {"message": data.get("error", "Remote training failed")},
                   room=job["room"])
     _finish_job(job["job_id"])
-    _cleanup_dataset(state_key)
+    _cleanup_dataset(state_key, used_path)
 
 
 def _seed_shared_device():
@@ -2196,13 +2206,14 @@ def on_disconnect():
     if busy_job_id:
         job = _jobs.get(busy_job_id)
         state_key = job.get("state_key") if job else None
+        used_path = job.get("dataset_path") if job else None
         if job:
             socketio.emit("training_error",
                           {"message": "Node disconnected during training"},
                           room=job["room"])
         _finish_job(busy_job_id)
         if state_key:
-            _cleanup_dataset(state_key)
+            _cleanup_dataset(state_key, used_path)
     print(f"[node] disconnected: device #{dev_id}")
 
 
