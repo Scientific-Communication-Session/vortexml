@@ -9,5 +9,8 @@ numpy>=1.24
 flask-cors>=4.0
 flask-sqlalchemy>=3.1
 psycopg2-binary>=2.9
-anthropic>=0.40
+# Floor pinned to a release that supports output_config.effort, adaptive
+# thinking, and the claude-sonnet-4-6 / claude-opus-4-7 model IDs used by the
+# chatbot + auto-configure endpoints. Older SDKs raise TypeError on these.
+anthropic>=0.102
 psutil>=5.9
