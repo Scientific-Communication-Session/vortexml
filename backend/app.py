@@ -1874,6 +1874,131 @@ def auto_config_decide():
 
 
 # ─────────────────────────────────────────────────────────
+# Explain-my-results (tutor bot reviews a finished run)
+# ─────────────────────────────────────────────────────────
+EXPLAIN_RESULTS_PROMPT = (
+    "You are a friendly ML tutor in VortexML reviewing the results of a neural "
+    "network the user just trained on tabular data. Give a short, encouraging, "
+    "plain-English verdict. Cover, in 2-4 short paragraphs:\n"
+    "- How the training went overall (did the loss come down and settle?).\n"
+    "- Overfitting vs underfitting: read the gap and trend between training and "
+    "  validation loss. A validation loss that rises while training loss keeps "
+    "  falling = overfitting; both stuck high = underfitting.\n"
+    "- A readiness verdict: is this model good enough to use, or worth retraining?\n"
+    "- 1-2 concrete next steps tied to what you see (e.g. enable early stopping, "
+    "  add/reduce capacity, lower the learning rate, get more data).\n"
+    "Use simple language, define any jargon briefly, and be specific to the "
+    "numbers given — do not invent metrics that aren't provided."
+)
+
+
+def _summarize_run(name, cfg, task_type, history, final):
+    """Compact, factual summary of a finished run for the tutor to reason over."""
+    lines = [
+        f"Project: {name}",
+        f"Task type: {task_type}",
+        f"Architecture: {cfg.get('arch_type')} layers={cfg.get('layer_sizes')}",
+        f"Hyperparameters: lr={cfg.get('lr')}, batch_size={cfg.get('batch_size')}, "
+        f"optimizer={cfg.get('optimizer')}, activation={cfg.get('activation')}, "
+        f"requested_epochs={cfg.get('epochs')}",
+        f"Early stopping: {cfg.get('early_stopping')}",
+    ]
+    if history:
+        first, last = history[0], history[-1]
+        lines.append(f"Epochs actually run: {len(history)}")
+        lines.append(f"First epoch: train_loss={first.get('train_loss')}, val_loss={first.get('val_loss')}")
+        lines.append(f"Last epoch:  train_loss={last.get('train_loss')}, val_loss={last.get('val_loss')}")
+        val_losses = [h.get("val_loss") for h in history if h.get("val_loss") is not None]
+        if val_losses:
+            best = min(val_losses)
+            lines.append(f"Best validation loss: {round(best, 6)} at epoch "
+                         f"{val_losses.index(best) + 1}")
+        if task_type == "classification":
+            accs = [h.get("val_acc") for h in history if h.get("val_acc") is not None]
+            if accs:
+                lines.append(f"Validation accuracy: first={accs[0]}%, last={accs[-1]}%, best={max(accs)}%")
+    if final:
+        lines.append(f"Final metrics: {final}")
+    return "\n".join(lines)
+
+
+@app.route("/api/explain-results", methods=["POST"])
+def explain_results():
+    """Plain-English verdict on a finished run. Accepts either {project_id}
+    (loads a saved project) or the just-finished run's {config, history,
+    task_type, metrics} from the Training page."""
+    user, err = _require_user()
+    if err:
+        return err
+    reason = _auto_config_available_reason()  # needs ANTHROPIC_API_KEY
+    if reason:
+        return jsonify({"error": reason}), 503
+
+    body = request.get_json(silent=True) or {}
+    project_id = body.get("project_id")
+    if project_id is not None:
+        proj = Project.query.filter_by(id=project_id, user_id=user.id).first()
+        if not proj:
+            return jsonify({"error": "Project not found"}), 404
+        cfg = {
+            "arch_type": proj.arch_type,
+            "layer_sizes": _json.loads(proj.layer_sizes),
+            "epochs": proj.epochs, "lr": proj.lr, "batch_size": proj.batch_size,
+            "optimizer": proj.optimizer, "activation": proj.activation,
+            "early_stopping": _json.loads(proj.early_stopping) if proj.early_stopping else {},
+        }
+        history = _json.loads(proj.history) if proj.history else []
+        task_type = proj.task_type
+        name = proj.name
+        final = {"final_train_loss": proj.final_train_loss,
+                 "final_val_loss": proj.final_val_loss,
+                 "final_val_acc": proj.final_val_acc,
+                 "early_stopped": proj.early_stopped,
+                 "stopped_epoch": proj.stopped_epoch}
+    else:
+        cfg = body.get("config") or {}
+        history = body.get("history") or []
+        if not isinstance(history, list):
+            history = []
+        history = history[:500]  # cap forwarded payload
+        task_type = body.get("task_type") or "classification"
+        name = cfg.get("project_name") or "your model"
+        final = body.get("metrics") or {}
+
+    if not history and not final:
+        return jsonify({"error": "Nothing to explain — no training history provided."}), 400
+
+    summary = _summarize_run(name, cfg, task_type, history, final)
+    try:
+        client = _get_anthropic_client()
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=700,
+            thinking={"type": "disabled"},
+            output_config={"effort": "low"},
+            system=[{"type": "text", "text": EXPLAIN_RESULTS_PROMPT,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user",
+                       "content": f"Here is the training run to review:\n\n{summary}"}],
+        )
+    except anthropic.AuthenticationError:
+        return jsonify({"error": "Explain is misconfigured (invalid API key)."}), 503
+    except anthropic.RateLimitError:
+        return jsonify({"error": "Busy — please try again in a moment."}), 429
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Explain error: {e}"}), 502
+    except Exception as e:
+        return jsonify({"error": f"Explain error: {e}"}), 500
+
+    text = ""
+    for block in resp.content:
+        if getattr(block, "type", None) == "text":
+            text = block.text
+            break
+    return jsonify({"explanation": text})
+
+
+# ─────────────────────────────────────────────────────────
 # Courses API
 # ─────────────────────────────────────────────────────────
 MOCK_COURSES = [

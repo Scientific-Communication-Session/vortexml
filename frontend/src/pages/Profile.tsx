@@ -4,6 +4,7 @@ import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles, La
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import AddDeviceModal from '../components/devices/AddDeviceModal';
+import ExplainModal from '../components/explain/ExplainModal';
 import type { Device } from '../components/devices/types';
 
 interface Project {
@@ -62,6 +63,7 @@ const Profile: React.FC = () => {
     const [editName, setEditName] = useState('');
     const [deviceBusyId, setDeviceBusyId] = useState<number | null>(null);
     const [showAddDevice, setShowAddDevice] = useState(false);
+    const [explainProject, setExplainProject] = useState<Project | null>(null);
 
     const isBeginner = user?.is_beginner === true;
 
@@ -515,6 +517,15 @@ const Profile: React.FC = () => {
                                             Weights
                                         </button>
                                         <button
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => setExplainProject(p)}
+                                            disabled={isBusy}
+                                            title="Get a plain-English verdict on this run"
+                                        >
+                                            <Sparkles size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                                            Explain
+                                        </button>
+                                        <button
                                             className="btn btn-danger btn-sm"
                                             onClick={() => handleDelete(p)}
                                             disabled={isBusy}
@@ -535,6 +546,14 @@ const Profile: React.FC = () => {
                 <AddDeviceModal
                     onClose={() => setShowAddDevice(false)}
                     onCreated={loadDevices}
+                />
+            )}
+
+            {explainProject && (
+                <ExplainModal
+                    title={explainProject.name}
+                    request={{ project_id: explainProject.id }}
+                    onClose={() => setExplainProject(null)}
                 />
             )}
         </>

@@ -8,6 +8,7 @@ import HelpButton from '../components/help/HelpButton';
 import AskButton from '../components/chatbot/AskButton';
 import DeviceCard, { DEVICE_CARD_HEIGHT } from '../components/devices/DeviceCard';
 import AddDeviceModal from '../components/devices/AddDeviceModal';
+import ExplainModal from '../components/explain/ExplainModal';
 import type { Device } from '../components/devices/types';
 
 interface LogEntry {
@@ -70,6 +71,14 @@ const Training: React.FC = () => {
     // State refs to share with network drawer (since it uses requestAnimationFrame)
     const isTrainingRef = useRef(false);
     const layerSizesRef = useRef<number[]>([4, 128, 64, 2]);
+
+    // Run capture for "Explain results" (the just-finished run, sent to the tutor)
+    const runHistoryRef = useRef<Array<Record<string, number | null>>>([]);
+    const modelConfigRef = useRef<Record<string, unknown>>({});
+    const runInfoRef = useRef<{ arch_type?: string; layer_sizes?: number[]; task_type?: string }>({});
+    const completeMetaRef = useRef<Record<string, unknown>>({});
+    const [completedRun, setCompletedRun] = useState(false);
+    const [explainOpen, setExplainOpen] = useState(false);
 
     useEffect(() => {
         isTrainingRef.current = isTraining;
@@ -263,6 +272,14 @@ const Training: React.FC = () => {
                 setEsInfo({ patience: data.es_patience, counter: data.es_patience_counter });
             }
 
+            // Capture history for the post-run "Explain results" tutor review.
+            runHistoryRef.current.push({
+                epoch: ep,
+                train_loss: train_loss ?? null,
+                val_loss: val_loss ?? null,
+                val_acc: val_acc ?? null,
+            });
+
             // Update chart
             if (chartRef.current) {
                 chartRef.current.data.labels?.push(ep.toString());
@@ -293,6 +310,15 @@ const Training: React.FC = () => {
                 setLastWeightFilename(data.weight_filename);
             }
 
+            completeMetaRef.current = {
+                final_train_loss: data.final_train_loss,
+                final_val_loss: data.final_val_loss,
+                final_val_acc: data.final_val_acc ?? null,
+                early_stopped: data.early_stopped,
+                stopped_epoch: data.stopped_epoch ?? null,
+            };
+            setCompletedRun(true);
+
             if (data.early_stopped) {
                 showToast(`Early stopping at epoch ${data.stopped_epoch}! 🛑`, 'warning');
                 addLog(`<span class="log-es-msg">🛑 Early stopping triggered at epoch ${data.stopped_epoch}. Best weights restored.</span>`, 'log-entry-es');
@@ -311,6 +337,11 @@ const Training: React.FC = () => {
                     data.output_dim || 2,
                 ];
             }
+            runInfoRef.current = {
+                arch_type: data.arch_type,
+                layer_sizes: data.layer_sizes,
+                task_type: data.task_type,
+            };
             if (data.early_stopping?.enabled) {
                 setEsInfo({ patience: data.early_stopping.patience, counter: 0 });
             }
@@ -370,6 +401,7 @@ const Training: React.FC = () => {
             .then((state) => {
                 if (state.has_model && state.model_config) {
                     const cfg = state.model_config;
+                    modelConfigRef.current = cfg;
                     layerSizesRef.current = [cfg.input_dim || 4, ...(cfg.layer_sizes || [128, 64]), cfg.output_dim || 2];
                 }
                 if (state.last_weights_file) {
@@ -555,6 +587,9 @@ const Training: React.FC = () => {
         try {
             setBtnState('starting');
             setIsComplete(false);
+            setCompletedRun(false);
+            runHistoryRef.current = [];
+            completeMetaRef.current = {};
             setLogs([]);
             addLog('<span class="text-muted">Starting training...</span>');
 
@@ -631,6 +666,17 @@ const Training: React.FC = () => {
         window.location.href = `/api/weights/file/${encodeURIComponent(lastWeightFilename)}`;
         showToast('Downloading: ' + lastWeightFilename, 'success');
     };
+
+    const buildExplainRequest = () => ({
+        config: {
+            ...modelConfigRef.current,
+            arch_type: runInfoRef.current.arch_type ?? modelConfigRef.current.arch_type,
+            layer_sizes: runInfoRef.current.layer_sizes ?? modelConfigRef.current.layer_sizes,
+        },
+        history: runHistoryRef.current,
+        task_type: runInfoRef.current.task_type ?? (modelConfigRef.current.task_type as string | undefined),
+        metrics: completeMetaRef.current,
+    });
 
     const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || null;
     const deviceReady = selectedDevice?.status === 'available';
@@ -797,6 +843,12 @@ const Training: React.FC = () => {
                             <button className="btn btn-save btn-sm" onClick={handleSaveWeights}>💾 Save Weights</button>
                         )}
 
+                        {completedRun && runHistoryRef.current.length > 0 && (
+                            <button className="btn btn-secondary btn-sm" onClick={() => setExplainOpen(true)}>
+                                ✨ Explain Results
+                            </button>
+                        )}
+
                         {btnState === 'training' && (
                             <button className="btn btn-danger btn-sm" onClick={handleStop}>⏹ Stop Training</button>
                         )}
@@ -853,6 +905,14 @@ const Training: React.FC = () => {
                 <AddDeviceModal
                     onClose={() => setShowAddDevice(false)}
                     onCreated={loadDevices}
+                />
+            )}
+
+            {explainOpen && (
+                <ExplainModal
+                    title={(modelConfigRef.current.project_name as string) || 'this run'}
+                    request={buildExplainRequest()}
+                    onClose={() => setExplainOpen(false)}
                 />
             )}
         </>
