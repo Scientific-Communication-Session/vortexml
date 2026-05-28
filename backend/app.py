@@ -27,7 +27,7 @@ import json as _json
 import anthropic
 
 from data_processor import (
-    save_uploaded_file, analyze_dataset, prepare_dataset,
+    save_uploaded_file, analyze_dataset, prepare_dataset, dataset_health,
     save_preprocess, load_preprocess, apply_preprocess,
 )
 from training_engine import (
@@ -311,6 +311,31 @@ def configure_dataset():
     st["target_col"] = target_col
 
     return jsonify({"status": "ok", "features": feature_cols, "target": target_col})
+
+
+@app.route("/api/dataset/health", methods=["POST"])
+def dataset_health_route():
+    """Data-quality warnings for the current dataset.
+
+    Optional body {feature_cols, target_col} reflects the user's live (unsaved)
+    column selection so target-aware checks (imbalance, leakage) run before they
+    commit. Falls back to the saved selection in state.
+    """
+    st = _get_state()
+    if not st.get("dataset_path"):
+        return jsonify({"error": "No dataset uploaded yet"}), 404
+    body = request.get_json(silent=True) or {}
+    feature_cols = body.get("feature_cols")
+    if not isinstance(feature_cols, list):
+        feature_cols = st.get("feature_cols") or []
+    target_col = body.get("target_col")
+    if target_col is None:
+        target_col = st.get("target_col")
+    try:
+        result = dataset_health(st["dataset_path"], feature_cols, target_col)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify(result)
 
 
 # ─────────────────────────────────────────────────────────

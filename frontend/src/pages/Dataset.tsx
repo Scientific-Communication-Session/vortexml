@@ -20,6 +20,14 @@ interface DatasetInfo {
     preview: Record<string, unknown>[];
 }
 
+interface HealthWarning {
+    level: 'warning' | 'info';
+    code: string;
+    title: string;
+    detail: string;
+    columns: string[];
+}
+
 const Dataset: React.FC = () => {
     const navigate = useNavigate();
     const { user } = useAuth();
@@ -36,6 +44,7 @@ const Dataset: React.FC = () => {
 
     const [selectedFeatures, setSelectedFeatures] = useState<Set<string>>(new Set());
     const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
+    const [health, setHealth] = useState<HealthWarning[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Initial state check
@@ -64,6 +73,24 @@ const Dataset: React.FC = () => {
 
         return () => { mounted = false; };
     }, []);
+
+    // Run data-quality checks (debounced) whenever the dataset or the live
+    // feature/target selection changes.
+    useEffect(() => {
+        if (!datasetInfo) { setHealth([]); return; }
+        let cancelled = false;
+        const t = setTimeout(() => {
+            apiPost('/api/dataset/health', {
+                feature_cols: Array.from(selectedFeatures),
+                target_col: selectedTarget,
+            })
+                .then(res => {
+                    if (!cancelled && Array.isArray(res?.warnings)) setHealth(res.warnings);
+                })
+                .catch(() => { });
+        }, 350);
+        return () => { cancelled = true; clearTimeout(t); };
+    }, [datasetInfo, selectedFeatures, selectedTarget]);
 
     const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
         e.preventDefault();
@@ -299,6 +326,32 @@ const Dataset: React.FC = () => {
                             </table>
                         </div>
                     </div>
+
+                    {health.length > 0 && (
+                        <div className="glass-panel">
+                            <div className="panel-title"><span className="pt-icon">🩺</span> Dataset Health</div>
+                            <p className="text-muted mb-2">
+                                Automatic checks on your data — worth a look before training.
+                                {selectedTarget ? '' : ' Pick a target column to also check class balance and leakage.'}
+                            </p>
+                            {health.map((w, i) => (
+                                <div
+                                    key={`${w.code}-${i}`}
+                                    className="info-banner"
+                                    style={{
+                                        borderLeft: `3px solid ${w.level === 'warning' ? '#f5a623' : '#6ab0ff'}`,
+                                        marginBottom: 8,
+                                    }}
+                                >
+                                    <span className="info-banner-icon">{w.level === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                                    <div>
+                                        <strong>{w.title}</strong>
+                                        <div className="text-muted">{w.detail}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
 
                     <div className="glass-panel">
                         <div className="panel-title">

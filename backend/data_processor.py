@@ -86,6 +86,112 @@ def _split(X, y, test_size, stratify):
     return train_test_split(X, y, test_size=test_size, random_state=42)
 
 
+def dataset_health(csv_path, feature_cols=None, target_col=None):
+    """Surface data-quality risks before training.
+
+    Checks (column-level always; target-aware when a target is given):
+      - tiny dataset, high-null columns, constant / near-constant features,
+        ID-like and high-cardinality categoricals,
+      - class imbalance (classification target),
+      - likely target leakage (a feature that perfectly determines the target).
+
+    Returns {"rows", "warnings": [{level, code, title, detail, columns}], "ok"}.
+    Everything is best-effort and read-only.
+    """
+    df = pd.read_csv(csv_path)
+    n = len(df)
+    feature_cols = [c for c in (feature_cols or []) if c in df.columns]
+    warnings = []
+
+    def add(level, code, title, detail, columns=None):
+        warnings.append({"level": level, "code": code, "title": title,
+                         "detail": detail, "columns": columns or []})
+
+    if n < 200:
+        add("warning", "tiny_dataset", "Very small dataset",
+            f"Only {n} rows. Models overfit easily here — prefer a simple "
+            f"architecture (MLP) and keep early stopping on.")
+
+    cols_to_check = feature_cols or [c for c in df.columns if c != target_col]
+    for col in cols_to_check:
+        s = df[col]
+        nn = int(s.notna().sum())
+        null_frac = (1 - nn / n) if n else 0
+        nunique = int(s.nunique(dropna=True))
+
+        if null_frac > 0.3:
+            add("warning", "high_null", f"'{col}' is mostly empty",
+                f"{round(null_frac * 100)}% of '{col}' is missing; it will be "
+                f"filled in, which can mislead the model.", [col])
+
+        if nunique <= 1:
+            add("warning", "constant", f"'{col}' is constant",
+                f"'{col}' has a single value — no signal. Consider removing it.", [col])
+        elif nn:
+            top_frac = float(s.value_counts(normalize=True, dropna=True).iloc[0])
+            if top_frac > 0.99:
+                add("info", "near_constant", f"'{col}' is nearly constant",
+                    f"{round(top_frac * 100)}% of '{col}' is one value — little signal.", [col])
+
+        if not pd.api.types.is_numeric_dtype(s):
+            if nunique == n and n > 0:
+                add("warning", "id_like", f"'{col}' looks like an identifier",
+                    f"'{col}' is unique on every row — likely an ID that can't "
+                    f"generalize. Consider excluding it.", [col])
+            elif nunique > 50 and nn and (nunique / nn) > 0.5:
+                add("warning", "high_cardinality", f"'{col}' is high-cardinality",
+                    f"'{col}' has {nunique} distinct text values; encoding it adds "
+                    f"noise. Consider grouping rare values or dropping it.", [col])
+
+    if target_col and target_col in df.columns:
+        tgt = df[target_col]
+        t_unique = int(tgt.nunique(dropna=True))
+        task = "regression" if (pd.api.types.is_numeric_dtype(tgt) and t_unique > 10) else "classification"
+
+        if task == "classification":
+            counts = tgt.value_counts(normalize=True, dropna=True)
+            if len(counts) and counts.min() < 0.1 and len(counts) <= 50:
+                add("warning", "class_imbalance", "Imbalanced target classes",
+                    f"Class '{counts.idxmin()}' is only {round(float(counts.min()) * 100, 1)}% "
+                    f"of rows (largest is {round(float(counts.max()) * 100)}%). Accuracy can "
+                    f"be misleading — watch the per-class results.", [target_col])
+            leaky = []
+            for col in feature_cols:
+                if col == target_col:
+                    continue
+                fu = int(df[col].nunique(dropna=True))
+                if 1 < fu <= 50:
+                    grp = df.groupby(col, dropna=True)[target_col].nunique()
+                    if len(grp) and (grp <= 1).all():
+                        leaky.append(col)
+            if leaky:
+                add("warning", "leakage", "Possible target leakage",
+                    f"{', '.join(leaky)} perfectly predict '{target_col}' in this data. "
+                    f"If they wouldn't be known before the outcome, training on them "
+                    f"inflates accuracy unrealistically.", leaky)
+        else:
+            leaky = []
+            for col in feature_cols:
+                if col == target_col or not pd.api.types.is_numeric_dtype(df[col]):
+                    continue
+                try:
+                    pair = df[[col, target_col]].dropna()
+                    if len(pair) > 2 and abs(float(pair.corr().iloc[0, 1])) > 0.98:
+                        leaky.append(col)
+                except Exception:
+                    pass
+            if leaky:
+                add("warning", "leakage", "Possible target leakage",
+                    f"{', '.join(leaky)} are almost perfectly correlated with "
+                    f"'{target_col}' — likely leakage.", leaky)
+
+    return {
+        "rows": n,
+        "warnings": warnings,
+        "ok": not any(w["level"] == "warning" for w in warnings),
+    }
+
+
 def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size=0.2, val_size=0.1):
     """
     Prepare a dataset for training.
