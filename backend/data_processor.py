@@ -68,6 +68,23 @@ def analyze_dataset(csv_path):
     }
 
 
+def _split(X, y, test_size, stratify):
+    """train_test_split that uses stratification when possible.
+
+    Stratifying keeps the class balance identical across train/val/test, which
+    matters for imbalanced classification. It requires >= 2 samples per class in
+    the split, so we fall back to an unstratified split if a class is too rare
+    (otherwise sklearn raises and training never starts).
+    """
+    if stratify is not None:
+        try:
+            return train_test_split(X, y, test_size=test_size,
+                                    random_state=42, stratify=stratify)
+        except ValueError:
+            pass
+    return train_test_split(X, y, test_size=test_size, random_state=42)
+
+
 def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size=0.2, val_size=0.1):
     """
     Prepare a dataset for training.
@@ -108,8 +125,10 @@ def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size
     # Split FIRST, then fit the scaler on the training split only. Fitting on
     # the full matrix leaks validation/test statistics (mean, std) into the
     # training distribution and inflates reported metrics.
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
-    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=val_size, random_state=42)
+    strat = y if task_type == "classification" else None
+    X_train, X_test, y_train, y_test = _split(X, y, test_size, strat)
+    strat_train = y_train if task_type == "classification" else None
+    X_train, X_val, y_train, y_val = _split(X_train, y_train, val_size, strat_train)
 
     # Scale features — fit on train, apply the same transform to val/test.
     scaler = StandardScaler()
