@@ -15,6 +15,7 @@ import base64
 import zipfile
 import secrets
 import threading
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from flask import Flask, request, jsonify, session, send_file, make_response
@@ -76,18 +77,47 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 PUBLIC_URL = os.environ.get("VORTEX_PUBLIC_URL", "https://vortexml.andreinita.com")
 NODE_BUNDLE_DIR = os.path.join(os.path.dirname(__file__), "node_bundle")
 
-# In-memory session state (for single-user simplicity)
-_state = {
-    "dataset_file": None,
-    "dataset_path": None,
-    "dataset_info": None,
-    "feature_cols": [],
-    "target_col": None,
-    "model_config": None,
-    "training_thread": None,
-    "project_name": "VortexProject",
-    "last_weights_file": None,
-}
+# ── Per-user / per-session working state ──────────────────
+# This is one process serving many users. The working state (uploaded dataset,
+# column selection, model config) is keyed per user — or per anonymous session
+# for not-logged-in visitors — so one person's upload can't clobber another's
+# in-flight setup, and a finishing job can't wipe an unrelated user's state.
+def _default_state():
+    return {
+        "dataset_file": None,
+        "dataset_path": None,
+        "dataset_info": None,
+        "feature_cols": [],
+        "target_col": None,
+        "model_config": None,
+        "training_thread": None,
+        "project_name": "VortexProject",
+        "last_weights_file": None,
+    }
+
+
+_states = defaultdict(_default_state)
+
+
+def _state_key():
+    """Stable key for the caller's working state. Must run in a request context.
+
+    Logged-in users key by user id; anonymous visitors get a per-session uuid
+    persisted in the (signed) session cookie.
+    """
+    uid = session.get("user_id")
+    if uid is not None:
+        return f"user:{uid}"
+    anon = session.get("anon_id")
+    if not anon:
+        anon = uuid.uuid4().hex
+        session["anon_id"] = anon
+    return f"anon:{anon}"
+
+
+def _get_state():
+    """The caller's working-state dict. Must run in a request context."""
+    return _states[_state_key()]
 
 # ── Device / remote-training runtime registries (this is a single process) ──
 _nodes = {}        # device_id -> {"sid": <node socket id>}
@@ -237,9 +267,10 @@ def upload_file():
     try:
         filename, filepath = save_uploaded_file(file)
         info = analyze_dataset(filepath)
-        _state["dataset_file"] = filename
-        _state["dataset_path"] = filepath
-        _state["dataset_info"] = info
+        st = _get_state()
+        st["dataset_file"] = filename
+        st["dataset_path"] = filepath
+        st["dataset_info"] = info
         return jsonify({"filename": filename, "info": info})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -247,11 +278,12 @@ def upload_file():
 
 @app.route("/api/dataset/analyze", methods=["GET"])
 def get_dataset_info():
-    if _state["dataset_info"] is None:
+    st = _get_state()
+    if st["dataset_info"] is None:
         return jsonify({"error": "No dataset uploaded yet"}), 404
     return jsonify({
-        "filename": _state["dataset_file"],
-        "info": _state["dataset_info"],
+        "filename": st["dataset_file"],
+        "info": st["dataset_info"],
     })
 
 
@@ -269,8 +301,9 @@ def configure_dataset():
     if not target_col:
         return jsonify({"error": "Select a target column"}), 400
 
-    _state["feature_cols"] = feature_cols
-    _state["target_col"] = target_col
+    st = _get_state()
+    st["feature_cols"] = feature_cols
+    st["target_col"] = target_col
 
     return jsonify({"status": "ok", "features": feature_cols, "target": target_col})
 
@@ -336,8 +369,9 @@ def configure_model():
     if arch_type not in MODEL_REGISTRY:
         return jsonify({"error": f"Unknown architecture: {arch_type}"}), 400
 
-    _state["project_name"] = project_name
-    _state["model_config"] = {
+    st = _get_state()
+    st["project_name"] = project_name
+    st["model_config"] = {
         "arch_type": arch_type,
         "layer_sizes": layer_sizes,
         "epochs": epochs,
@@ -349,7 +383,7 @@ def configure_model():
         "early_stopping": early_stopping,
     }
 
-    return jsonify({"status": "ok", "config": _state["model_config"]})
+    return jsonify({"status": "ok", "config": st["model_config"]})
 
 
 # ─────────────────────────────────────────────────────────
@@ -364,11 +398,12 @@ def start_training():
     shared M4 the run happens here; when it's a personal node the job is
     dispatched to that node's agent and its updates are relayed back.
     """
-    if not _state["dataset_path"]:
+    st = _get_state()
+    if not st["dataset_path"]:
         return jsonify({"error": "No dataset uploaded"}), 400
-    if not _state["feature_cols"] or not _state["target_col"]:
+    if not st["feature_cols"] or not st["target_col"]:
         return jsonify({"error": "Dataset not configured (features/target)"}), 400
-    if not _state["model_config"]:
+    if not st["model_config"]:
         return jsonify({"error": "Model not configured"}), 400
 
     body = request.get_json(silent=True) or {}
@@ -391,7 +426,15 @@ def start_training():
     if _device_busy.get(device.id):
         return jsonify({"error": f"'{device.nickname}' is already training. Pick another device."}), 409
 
-    config = _state["model_config"]
+    # Snapshot everything this run needs out of the per-user state, so the
+    # background task and socket relays don't depend on state another request
+    # might mutate while it runs.
+    state_key = _state_key()
+    config = st["model_config"]
+    ds_path = st["dataset_path"]
+    feature_cols = st["feature_cols"]
+    target_col = st["target_col"]
+    dataset_file = st["dataset_file"]
     job_id = uuid.uuid4().hex[:12]
     room = f"job:{job_id}"
 
@@ -404,6 +447,8 @@ def start_training():
         "device_id": device.id,
         "is_local": device.is_shared,
         "owner_user_id": owner_user_id,
+        "state_key": state_key,
+        "dataset_path": ds_path,
         "project_name": config.get("project_name", "VortexProject"),
         "config": config,
         "room": room,
@@ -417,8 +462,8 @@ def start_training():
         # ── Local training on the central M4 ──
         try:
             data = prepare_dataset(
-                _state["dataset_path"], _state["feature_cols"],
-                _state["target_col"], batch_size=config["batch_size"],
+                ds_path, feature_cols, target_col,
+                batch_size=config["batch_size"],
             )
             model = create_model(
                 config["arch_type"], config["layer_sizes"],
@@ -466,14 +511,14 @@ def start_training():
             finally:
                 monitor.stop()
             if result:
-                _state["last_weights_file"] = result["weight_filename"]
+                _states[state_key]["last_weights_file"] = result["weight_filename"]
                 _persist_project(owner_user_id, config, result)
             _finish_job(job_id)
-            _cleanup_dataset()
+            _cleanup_dataset(state_key)
 
         socketio.emit("training_info", training_info, room=room)
         thread = socketio.start_background_task(run)
-        _state["training_thread"] = thread
+        st["training_thread"] = thread
         return jsonify({"status": "started", "job_id": job_id, "mode": "local",
                         "device": device.to_dict(), "info": training_info})
 
@@ -483,7 +528,7 @@ def start_training():
         return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent and try again."}), 409
 
     try:
-        with open(_state["dataset_path"], "rb") as f:
+        with open(ds_path, "rb") as f:
             csv_b64 = base64.b64encode(f.read()).decode()
     except Exception as e:
         return jsonify({"error": f"Could not read dataset: {e}"}), 500
@@ -494,9 +539,9 @@ def start_training():
     socketio.emit("node_run_job", {
         "job_id": job_id,
         "config": config,
-        "feature_cols": _state["feature_cols"],
-        "target_col": _state["target_col"],
-        "dataset_name": _state["dataset_file"],
+        "feature_cols": feature_cols,
+        "target_col": target_col,
+        "dataset_name": dataset_file,
         "csv_b64": csv_b64,
     }, room=node["sid"])
 
@@ -537,17 +582,18 @@ def reset_state():
     if scope not in ("dataset", "model", "all"):
         return jsonify({"error": "scope must be one of: dataset, model, all"}), 400
 
+    st = _get_state()
     if scope in ("dataset", "all"):
-        _state["dataset_file"] = None
-        _state["dataset_path"] = None
-        _state["dataset_info"] = None
-        _state["feature_cols"] = []
-        _state["target_col"] = None
+        st["dataset_file"] = None
+        st["dataset_path"] = None
+        st["dataset_info"] = None
+        st["feature_cols"] = []
+        st["target_col"] = None
 
     if scope in ("model", "all"):
-        _state["model_config"] = None
-        _state["project_name"] = "VortexProject"
-        _state["last_weights_file"] = None
+        st["model_config"] = None
+        st["project_name"] = "VortexProject"
+        st["last_weights_file"] = None
 
     return jsonify({"status": "ok", "scope": scope})
 
@@ -555,15 +601,16 @@ def reset_state():
 @app.route("/api/state", methods=["GET"])
 def get_state():
     """Return current app state for page resumption."""
+    st = _get_state()
     return jsonify({
-        "has_dataset": _state["dataset_path"] is not None,
-        "dataset_file": _state["dataset_file"],
-        "has_features": len(_state["feature_cols"]) > 0,
-        "feature_cols": _state["feature_cols"],
-        "target_col": _state["target_col"],
-        "has_model": _state["model_config"] is not None,
-        "model_config": _state["model_config"],
-        "last_weights_file": _state["last_weights_file"],
+        "has_dataset": st["dataset_path"] is not None,
+        "dataset_file": st["dataset_file"],
+        "has_features": len(st["feature_cols"]) > 0,
+        "feature_cols": st["feature_cols"],
+        "target_col": st["target_col"],
+        "has_model": st["model_config"] is not None,
+        "model_config": st["model_config"],
+        "last_weights_file": st["last_weights_file"],
     })
 
 
@@ -573,7 +620,7 @@ def get_state():
 @app.route("/api/weights/download", methods=["GET"])
 def download_weights_redirect():
     """Redirect to the named download URL."""
-    filename = _state.get("last_weights_file")
+    filename = _get_state().get("last_weights_file")
     if not filename:
         return jsonify({"error": "No weights file available"}), 404
     return jsonify({"redirect": f"/api/weights/file/{filename}", "filename": filename})
@@ -621,9 +668,10 @@ def upload_weights():
             return jsonify({"error": f"Unknown architecture in weights: {config['arch_type']}"}), 400
 
         # Store in state
-        _state["last_weights_file"] = file.filename
-        _state["project_name"] = config.get("project_name", "VortexProject")
-        _state["model_config"] = config
+        st = _get_state()
+        st["last_weights_file"] = file.filename
+        st["project_name"] = config.get("project_name", "VortexProject")
+        st["model_config"] = config
 
         return jsonify({
             "status": "ok",
@@ -721,9 +769,10 @@ def load_project(project_id):
         "project_name": proj.name,
         "early_stopping": _json.loads(proj.early_stopping) if proj.early_stopping else {},
     }
-    _state["model_config"] = cfg
-    _state["project_name"] = proj.name
-    _state["last_weights_file"] = proj.weight_filename
+    st = _get_state()
+    st["model_config"] = cfg
+    st["project_name"] = proj.name
+    st["last_weights_file"] = proj.weight_filename
 
     return jsonify({"status": "ok", "config": cfg, "weight_filename": proj.weight_filename})
 
@@ -743,23 +792,27 @@ def _join_job_room(socket_id, room):
         return False
 
 
-def _cleanup_dataset():
-    """Delete the uploaded dataset once a run ends.
+def _cleanup_dataset(state_key):
+    """Delete the finishing job's dataset and clear that owner's dataset state.
 
     Datasets are never persisted — only the trained weights and the run's
-    stats are kept. This wipes the file from the central M4 and clears state.
+    stats are kept. Scoped to `state_key` so a job finishing for one user never
+    wipes another user's in-flight setup.
     """
-    path = _state.get("dataset_path")
+    st = _states.get(state_key)
+    path = st.get("dataset_path") if st else None
     if path and os.path.exists(path):
         try:
             os.remove(path)
         except OSError:
             pass
-    _state["dataset_file"] = None
-    _state["dataset_path"] = None
-    _state["dataset_info"] = None
-    _state["feature_cols"] = []
-    _state["target_col"] = None
+    if st is None:
+        return
+    st["dataset_file"] = None
+    st["dataset_path"] = None
+    st["dataset_info"] = None
+    st["feature_cols"] = []
+    st["target_col"] = None
 
 
 def _finish_job(job_id):
@@ -1003,11 +1056,12 @@ def on_node_complete(data):
                 f.write(base64.b64decode(weights_b64))
         except Exception as e:
             print(f"[node] failed to save weights {weight_filename}: {e}")
-    _state["last_weights_file"] = weight_filename
+    state_key = job["state_key"]
+    _states[state_key]["last_weights_file"] = weight_filename
     _persist_project(job["owner_user_id"], job["config"], meta)
     socketio.emit("training_complete", meta, room=job["room"])
     _finish_job(job["job_id"])
-    _cleanup_dataset()
+    _cleanup_dataset(state_key)
 
 
 @socketio.on("node_stopped")
@@ -1015,9 +1069,10 @@ def on_node_stopped(data):
     job = _jobs.get((data or {}).get("job_id"))
     if not job:
         return
+    state_key = job["state_key"]
     socketio.emit("training_stopped", {}, room=job["room"])
     _finish_job(job["job_id"])
-    _cleanup_dataset()
+    _cleanup_dataset(state_key)
 
 
 @socketio.on("node_error")
@@ -1026,11 +1081,12 @@ def on_node_error(data):
     job = _jobs.get(data.get("job_id"))
     if not job:
         return
+    state_key = job["state_key"]
     socketio.emit("training_error",
                   {"message": data.get("error", "Remote training failed")},
                   room=job["room"])
     _finish_job(job["job_id"])
-    _cleanup_dataset()
+    _cleanup_dataset(state_key)
 
 
 def _seed_shared_device():
@@ -1388,15 +1444,16 @@ def _format_float(v):
 
 def _build_dataset_context():
     """Compose a compact text summary of the current dataset for the AI bots."""
-    info = _state.get("dataset_info")
+    st = _get_state()
+    info = st.get("dataset_info")
     if not info:
         return "(No dataset has been uploaded yet.)"
 
-    feature_cols = _state.get("feature_cols") or []
-    target_col = _state.get("target_col")
+    feature_cols = st.get("feature_cols") or []
+    target_col = st.get("target_col")
 
     lines = [
-        f"Filename: {_state.get('dataset_file')}",
+        f"Filename: {st.get('dataset_file')}",
         f"Rows: {info.get('rows')}, Columns: {info.get('cols')}",
         f"User-selected target column: {target_col or '(not yet picked)'}",
         f"User-selected feature columns: {feature_cols if feature_cols else '(not yet picked)'}",
@@ -1429,7 +1486,7 @@ def auto_config_status():
     reason = _auto_config_available_reason()
     if reason:
         return jsonify({"available": False, "reason": reason})
-    return jsonify({"available": True, "has_dataset": _state["dataset_path"] is not None})
+    return jsonify({"available": True, "has_dataset": _get_state()["dataset_path"] is not None})
 
 
 @app.route("/api/auto-config/chat", methods=["POST"])
@@ -1497,7 +1554,7 @@ def auto_config_decide():
     if reason:
         return jsonify({"error": reason}), 503
 
-    if not _state["dataset_path"]:
+    if not _get_state()["dataset_path"]:
         return jsonify({"error": "Upload a dataset before using Auto-Configure."}), 400
 
     data = request.get_json(silent=True) or {}
@@ -2138,12 +2195,14 @@ def on_disconnect():
     busy_job_id = _device_busy.get(dev_id)
     if busy_job_id:
         job = _jobs.get(busy_job_id)
+        state_key = job.get("state_key") if job else None
         if job:
             socketio.emit("training_error",
                           {"message": "Node disconnected during training"},
                           room=job["room"])
         _finish_job(busy_job_id)
-        _cleanup_dataset()
+        if state_key:
+            _cleanup_dataset(state_key)
     print(f"[node] disconnected: device #{dev_id}")
 
 
