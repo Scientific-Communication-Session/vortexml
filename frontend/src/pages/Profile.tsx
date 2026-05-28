@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles, Laptop, Cpu, Pencil, Check, X, Plus } from 'lucide-react';
+import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles, Laptop, Cpu, Pencil, Check, X, Plus, Wand2 } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import AddDeviceModal from '../components/devices/AddDeviceModal';
 import ExplainModal from '../components/explain/ExplainModal';
+import PredictModal from '../components/inference/PredictModal';
 import type { Device } from '../components/devices/types';
 
 interface Project {
@@ -64,6 +65,7 @@ const Profile: React.FC = () => {
     const [deviceBusyId, setDeviceBusyId] = useState<number | null>(null);
     const [showAddDevice, setShowAddDevice] = useState(false);
     const [explainProject, setExplainProject] = useState<Project | null>(null);
+    const [predictProject, setPredictProject] = useState<Project | null>(null);
 
     const isBeginner = user?.is_beginner === true;
 
@@ -518,6 +520,15 @@ const Profile: React.FC = () => {
                                         </button>
                                         <button
                                             className="btn btn-secondary btn-sm"
+                                            onClick={() => setPredictProject(p)}
+                                            disabled={isBusy}
+                                            title="Run this model on new data"
+                                        >
+                                            <Wand2 size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                                            Predict
+                                        </button>
+                                        <button
+                                            className="btn btn-secondary btn-sm"
                                             onClick={() => setExplainProject(p)}
                                             disabled={isBusy}
                                             title="Get a plain-English verdict on this run"
@@ -554,6 +565,14 @@ const Profile: React.FC = () => {
                     title={explainProject.name}
                     request={{ project_id: explainProject.id }}
                     onClose={() => setExplainProject(null)}
+                />
+            )}
+
+            {predictProject && (
+                <PredictModal
+                    projectId={predictProject.id}
+                    projectName={predictProject.name}
+                    onClose={() => setPredictProject(null)}
                 />
             )}
         </>
