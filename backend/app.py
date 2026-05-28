@@ -14,6 +14,7 @@ import uuid
 import base64
 import zipfile
 import secrets
+import shutil
 import threading
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -129,6 +130,8 @@ _nodes = {}        # device_id -> {"sid": <node socket id>}
 _node_sids = {}    # node socket id -> device_id   (reverse lookup on disconnect)
 _jobs = {}         # job_id -> live job dict (epoch/eta/room/owner/config)
 _device_busy = {}  # device_id -> job_id   (which job currently occupies it)
+_queues = defaultdict(list)  # device_id -> [pending job dicts] (FIFO)
+_MAX_RESUME_ATTEMPTS = 1     # auto-restart an interrupted remote job this many times
 
 
 def _utcnow():
@@ -453,23 +456,17 @@ def start_training():
     if not device.is_shared and device.user_id != owner_user_id:
         return jsonify({"error": "That device is not linked to your account"}), 403
 
-    if _device_busy.get(device.id):
-        return jsonify({"error": f"'{device.nickname}' is already training. Pick another device."}), 409
-
     # Snapshot everything this run needs out of the per-user state, so the
-    # background task and socket relays don't depend on state another request
-    # might mutate while it runs.
+    # background task, the queue, and socket relays don't depend on state
+    # another request might mutate (or clean up) while it runs/waits.
     state_key = _state_key()
     config = st["model_config"]
     ds_path = st["dataset_path"]
-    feature_cols = st["feature_cols"]
-    target_col = st["target_col"]
-    dataset_file = st["dataset_file"]
     job_id = uuid.uuid4().hex[:12]
     room = f"job:{job_id}"
 
     # Put the requesting browser into the job room *before* training starts so
-    # it cannot miss the first epochs.
+    # it cannot miss the first epochs (or queued→running transition).
     _join_job_room(socket_id, room)
 
     job = {
@@ -479,111 +476,52 @@ def start_training():
         "owner_user_id": owner_user_id,
         "state_key": state_key,
         "dataset_path": ds_path,
+        "feature_cols": st["feature_cols"],
+        "target_col": st["target_col"],
+        "dataset_file": st["dataset_file"],
         "project_name": config.get("project_name", "VortexProject"),
         "config": config,
         "room": room,
         "epoch": 0,
         "total_epochs": config.get("epochs", 50),
         "eta_seconds": None,
-        "started_at": _utcnow().isoformat() + "Z",
+        "started_at": None,
+        "attempts": 0,
     }
 
+    # The device is occupied (running or has a queue) → enqueue behind it.
+    # Remote jobs and queued jobs get a private dataset copy so neither a
+    # finishing run's cleanup nor a new upload can pull the data out from under
+    # them; immediate local runs read the live file (cleaned when they finish).
+    busy = bool(_device_busy.get(device.id)) or bool(_queues.get(device.id))
+    if busy or not device.is_shared:
+        job["dataset_path"] = _snapshot_dataset(job_id, ds_path)
+
+    if busy:
+        _queues[device.id].append(job)
+        return jsonify({"status": "queued", "job_id": job_id,
+                        "position": len(_queues[device.id]),
+                        "device": device.to_dict()})
+
     if device.is_shared:
-        # ── Local training on the central M4 ──
         try:
-            data = prepare_dataset(
-                ds_path, feature_cols, target_col,
-                batch_size=config["batch_size"],
-            )
-            model = create_model(
-                config["arch_type"], config["layer_sizes"],
-                data["input_dim"], data["output_dim"],
-                activation=config.get("activation", "relu"),
-            )
+            training_info = _start_local_job(job)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-
-        torch_device = get_torch_device()
-        training_info = {
-            "arch_type": config["arch_type"],
-            "layer_sizes": config["layer_sizes"],
-            "input_dim": data["input_dim"],
-            "output_dim": data["output_dim"],
-            "task_type": data["task_type"],
-            "train_size": data["train_size"],
-            "val_size": data["val_size"],
-            "test_size": data["test_size"],
-            "epochs": config["epochs"],
-            "early_stopping": config.get("early_stopping", {}),
-            "device": str(torch_device),
-        }
-
-        _jobs[job_id] = job
-        _device_busy[device.id] = job_id
-
-        def run():
-            # Stream CPU/GPU/RAM + temps for this machine while it trains.
-            monitor = SystemMonitor(
-                emit_fn=lambda s: socketio.emit("system_stats", s, room=room),
-                sleep_fn=socketio.sleep,
-            )
-            socketio.start_background_task(monitor.loop)
-            try:
-                result = train_model(
-                    model, data["train_loader"], data["val_loader"],
-                    data["task_type"], config, socketio,
-                    input_dim=data["input_dim"], output_dim=data["output_dim"],
-                    device=torch_device, room=room,
-                )
-            except Exception as e:
-                socketio.emit("training_error", {"message": str(e)}, room=room)
-                result = None
-            finally:
-                monitor.stop()
-            if result:
-                _states[state_key]["last_weights_file"] = result["weight_filename"]
-                # Persist preprocessing next to the weights so the model can be
-                # used for inference later (see /api/projects/<id>/predict).
-                try:
-                    save_preprocess(
-                        os.path.join(WEIGHTS_DIR, result["weight_filename"]),
-                        data["preprocess"],
-                    )
-                except Exception as e:
-                    print(f"[train] failed to save preprocess sidecar: {e}")
-                _persist_project(owner_user_id, config, result)
-            _finish_job(job_id)
-            _cleanup_dataset(state_key, ds_path)
-
-        socketio.emit("training_info", training_info, room=room)
-        thread = socketio.start_background_task(run)
-        st["training_thread"] = thread
+        st["training_thread"] = True
         return jsonify({"status": "started", "job_id": job_id, "mode": "local",
                         "device": device.to_dict(), "info": training_info})
 
     # ── Remote training on the user's own node ──
     node = _nodes.get(device.id)
     if not node:
+        _delete_job_snapshot(job)
         return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent and try again."}), 409
-
     try:
-        with open(ds_path, "rb") as f:
-            csv_b64 = base64.b64encode(f.read()).decode()
+        _start_remote_job(job, node["sid"])
     except Exception as e:
+        _delete_job_snapshot(job)
         return jsonify({"error": f"Could not read dataset: {e}"}), 500
-
-    _jobs[job_id] = job
-    _device_busy[device.id] = job_id
-
-    socketio.emit("node_run_job", {
-        "job_id": job_id,
-        "config": config,
-        "feature_cols": feature_cols,
-        "target_col": target_col,
-        "dataset_name": dataset_file,
-        "csv_b64": csv_b64,
-    }, room=node["sid"])
-
     return jsonify({"status": "started", "job_id": job_id, "mode": "remote",
                     "device": device.to_dict()})
 
@@ -608,6 +546,37 @@ def stop_training_route():
         if node:
             socketio.emit("node_stop", {"job_id": job["job_id"]}, room=node["sid"])
     return jsonify({"status": "stopping"})
+
+
+@app.route("/api/training/queue", methods=["GET"])
+def list_queue():
+    """The caller's running + queued jobs (across all their devices)."""
+    key = _state_key()
+    jobs = []
+    for j in _jobs.values():
+        if j.get("state_key") == key:
+            jobs.append(_queue_view(j, "running", 0))
+    for q in _queues.values():
+        for pos, j in enumerate(q):
+            if j.get("state_key") == key:
+                jobs.append(_queue_view(j, "queued", pos + 1))
+    return jsonify({"jobs": jobs})
+
+
+@app.route("/api/training/queue/<job_id>", methods=["DELETE"])
+def cancel_queued(job_id):
+    """Remove a job that is still waiting in a device queue (not yet running)."""
+    key = _state_key()
+    for q in _queues.values():
+        for i, j in enumerate(q):
+            if j["job_id"] == job_id:
+                if j.get("state_key") != key:
+                    return jsonify({"error": "Not your job"}), 403
+                q.pop(i)
+                _delete_job_snapshot(j)
+                socketio.emit("training_stopped", {}, room=j["room"])
+                return jsonify({"status": "cancelled"})
+    return jsonify({"error": "Queued job not found (it may have already started)"}), 404
 
 
 @app.route("/api/state/reset", methods=["POST"])
@@ -1012,10 +981,157 @@ def _cleanup_dataset(state_key, used_path=None):
 
 
 def _finish_job(job_id):
-    """Drop a finished job and free its device."""
+    """Drop a finished job, free its device, and start the next queued run."""
     job = _jobs.pop(job_id, None)
     if job:
         _device_busy.pop(job["device_id"], None)
+        _drain_queue(job["device_id"])
+
+
+# ── Job launch + queue plumbing ───────────────────────────
+def _snapshot_dataset(job_id, src_path):
+    """Copy a dataset to a job-private file so it survives other runs' cleanup
+    and the user uploading a new dataset while this job waits in the queue."""
+    dst = os.path.join(UPLOAD_DIR, f"queued_{job_id}.csv")
+    shutil.copy(src_path, dst)
+    return dst
+
+
+def _delete_job_snapshot(job):
+    """Remove a job's private dataset copy, if it has one."""
+    p = job.get("dataset_path")
+    if p and "queued_" in os.path.basename(p) and os.path.exists(p):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def _start_local_job(job):
+    """Begin a local (shared-M4) run NOW. Raises on setup error so the immediate
+    caller can return 500; the queue drainer catches and reports to the room."""
+    config = job["config"]
+    data = prepare_dataset(job["dataset_path"], job["feature_cols"],
+                           job["target_col"], batch_size=config["batch_size"])
+    model = create_model(config["arch_type"], config["layer_sizes"],
+                         data["input_dim"], data["output_dim"],
+                         activation=config.get("activation", "relu"))
+    torch_device = get_torch_device()
+    room = job["room"]
+    state_key = job["state_key"]
+    owner_user_id = job["owner_user_id"]
+    ds_path = job["dataset_path"]
+    job_id = job["job_id"]
+
+    training_info = {
+        "arch_type": config["arch_type"],
+        "layer_sizes": config["layer_sizes"],
+        "input_dim": data["input_dim"],
+        "output_dim": data["output_dim"],
+        "task_type": data["task_type"],
+        "train_size": data["train_size"],
+        "val_size": data["val_size"],
+        "test_size": data["test_size"],
+        "epochs": config["epochs"],
+        "early_stopping": config.get("early_stopping", {}),
+        "device": str(torch_device),
+    }
+
+    job["started_at"] = _utcnow().isoformat() + "Z"
+    _jobs[job_id] = job
+    _device_busy[job["device_id"]] = job_id
+
+    def run():
+        monitor = SystemMonitor(
+            emit_fn=lambda s: socketio.emit("system_stats", s, room=room),
+            sleep_fn=socketio.sleep,
+        )
+        socketio.start_background_task(monitor.loop)
+        try:
+            result = train_model(
+                model, data["train_loader"], data["val_loader"],
+                data["task_type"], config, socketio,
+                input_dim=data["input_dim"], output_dim=data["output_dim"],
+                device=torch_device, room=room,
+            )
+        except Exception as e:
+            socketio.emit("training_error", {"message": str(e)}, room=room)
+            result = None
+        finally:
+            monitor.stop()
+        if result:
+            _states[state_key]["last_weights_file"] = result["weight_filename"]
+            try:
+                save_preprocess(os.path.join(WEIGHTS_DIR, result["weight_filename"]),
+                                data["preprocess"])
+            except Exception as e:
+                print(f"[train] failed to save preprocess sidecar: {e}")
+            _persist_project(owner_user_id, config, result)
+        _finish_job(job_id)
+        _cleanup_dataset(state_key, ds_path)
+
+    socketio.emit("training_info", training_info, room=room)
+    socketio.start_background_task(run)
+    return training_info
+
+
+def _start_remote_job(job, node_sid):
+    """Dispatch a job to a node agent NOW. Raises if the dataset can't be read."""
+    with open(job["dataset_path"], "rb") as f:
+        csv_b64 = base64.b64encode(f.read()).decode()
+    job["started_at"] = _utcnow().isoformat() + "Z"
+    _jobs[job["job_id"]] = job
+    _device_busy[job["device_id"]] = job["job_id"]
+    socketio.emit("node_run_job", {
+        "job_id": job["job_id"],
+        "config": job["config"],
+        "feature_cols": job["feature_cols"],
+        "target_col": job["target_col"],
+        "dataset_name": job["dataset_file"],
+        "csv_b64": csv_b64,
+    }, room=node_sid)
+
+
+def _drain_queue(device_id):
+    """If the device is free and has a queued job, start the next one (FIFO)."""
+    if _device_busy.get(device_id):
+        return
+    q = _queues.get(device_id)
+    if not q:
+        return
+    job = q.pop(0)
+    if job["is_local"]:
+        try:
+            _start_local_job(job)
+        except Exception as e:
+            socketio.emit("training_error", {"message": str(e)}, room=job["room"])
+            _delete_job_snapshot(job)
+            _drain_queue(device_id)  # skip the broken one, try the next
+    else:
+        node = _nodes.get(device_id)
+        if not node:
+            q.insert(0, job)  # node offline — wait for it to reconnect
+            return
+        try:
+            _start_remote_job(job, node["sid"])
+        except Exception as e:
+            socketio.emit("training_error", {"message": str(e)}, room=job["room"])
+            _delete_job_snapshot(job)
+            _drain_queue(device_id)
+
+
+def _queue_view(job, status, position):
+    return {
+        "job_id": job["job_id"],
+        "device_id": job["device_id"],
+        "is_local": job["is_local"],
+        "project_name": job.get("project_name"),
+        "status": status,
+        "position": position,
+        "epoch": job.get("epoch", 0),
+        "total_epochs": job.get("total_epochs", 0),
+        "started_at": job.get("started_at"),
+    }
 
 
 def _persist_project(owner_user_id, config, result):
@@ -1218,6 +1334,9 @@ def on_node_register(data):
         "nickname": dev.nickname,
         "accelerator_label": specs.get("accelerator_label", ""),
     })
+    # Resume any jobs that were queued (or interrupted by a disconnect) while
+    # this node was offline.
+    _drain_queue(dev.id)
 
 
 @socketio.on("node_relay")
@@ -2577,15 +2696,27 @@ def on_disconnect():
     busy_job_id = _device_busy.get(dev_id)
     if busy_job_id:
         job = _jobs.get(busy_job_id)
-        state_key = job.get("state_key") if job else None
-        used_path = job.get("dataset_path") if job else None
-        if job:
-            socketio.emit("training_error",
-                          {"message": "Node disconnected during training"},
+        if job and not job["is_local"] and job.get("attempts", 0) < _MAX_RESUME_ATTEMPTS:
+            # Resume: re-queue the interrupted run (it keeps its dataset snapshot)
+            # so it restarts automatically when the node reconnects.
+            job["attempts"] = job.get("attempts", 0) + 1
+            job["started_at"] = None
+            _jobs.pop(busy_job_id, None)
+            _device_busy.pop(dev_id, None)
+            _queues[dev_id].insert(0, job)
+            socketio.emit("training_requeued",
+                          {"message": "Node disconnected — will resume when it reconnects."},
                           room=job["room"])
-        _finish_job(busy_job_id)
-        if state_key:
-            _cleanup_dataset(state_key, used_path)
+        else:
+            state_key = job.get("state_key") if job else None
+            used_path = job.get("dataset_path") if job else None
+            if job:
+                socketio.emit("training_error",
+                              {"message": "Node disconnected during training"},
+                              room=job["room"])
+            _finish_job(busy_job_id)
+            if state_key:
+                _cleanup_dataset(state_key, used_path)
     print(f"[node] disconnected: device #{dev_id}")
 
 

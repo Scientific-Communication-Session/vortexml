@@ -77,7 +77,7 @@ const Dataset: React.FC = () => {
     // Run data-quality checks (debounced) whenever the dataset or the live
     // feature/target selection changes.
     useEffect(() => {
-        if (!datasetInfo) { setHealth([]); return; }
+        if (!datasetInfo) return;
         let cancelled = false;
         const t = setTimeout(() => {
             apiPost('/api/dataset/health', {
@@ -222,6 +222,7 @@ const Dataset: React.FC = () => {
         setFilename('');
         setSelectedFeatures(new Set());
         setSelectedTarget(null);
+        setHealth([]);
         setStep(1);
         setUploadProgress(0);
         setUploading(false);

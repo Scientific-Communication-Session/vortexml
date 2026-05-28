@@ -17,6 +17,17 @@ interface LogEntry {
     type?: string;
 }
 
+interface QueueJob {
+    job_id: string;
+    device_id: number;
+    is_local: boolean;
+    project_name: string;
+    status: 'running' | 'queued';
+    position: number;
+    epoch: number;
+    total_epochs: number;
+}
+
 const Training: React.FC = () => {
     // Top Stats
     const [epoch, setEpoch] = useState(0);
@@ -43,6 +54,7 @@ const Training: React.FC = () => {
     const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
     const [jobId, setJobId] = useState<string | null>(null);
     const [showAddDevice, setShowAddDevice] = useState(false);
+    const [queueJobs, setQueueJobs] = useState<QueueJob[]>([]);
 
     // Live system metrics (from whichever machine is training)
     const [cpuPct, setCpuPct] = useState<number | null>(null);
@@ -299,12 +311,15 @@ const Training: React.FC = () => {
             addLog(logLine);
         });
 
+        const refreshQueue = () => apiGet('/api/training/queue').then((d) => setQueueJobs(d.jobs || [])).catch(() => { });
+
         socketRef.current.on('training_complete', (data) => {
             setIsTraining(false);
             setBtnState('complete');
             setIsComplete(true);
             setJobId(null);
             apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
+            refreshQueue();
 
             if (data.weight_filename) {
                 setLastWeightFilename(data.weight_filename);
@@ -352,6 +367,7 @@ const Training: React.FC = () => {
             setBtnState('idle');
             setJobId(null);
             apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
+            refreshQueue();
             showToast('Training stopped.', 'warning');
         });
 
@@ -360,7 +376,17 @@ const Training: React.FC = () => {
             setBtnState('idle');
             setJobId(null);
             apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
+            refreshQueue();
             showToast('Training error: ' + data.message, 'error');
+        });
+
+        // A remote run was interrupted (node dropped) — it will auto-resume when
+        // the node reconnects.
+        socketRef.current.on('training_requeued', (data) => {
+            setIsTraining(false);
+            setBtnState('idle');
+            refreshQueue();
+            showToast(data?.message || 'Run requeued — will resume when the device reconnects.', 'warning');
         });
 
         // Live hardware telemetry from the training machine
@@ -427,12 +453,31 @@ const Training: React.FC = () => {
             .catch(() => { });
     };
 
+    const loadQueue = () => {
+        apiGet('/api/training/queue')
+            .then((data) => setQueueJobs(data.jobs || []))
+            .catch(() => { });
+    };
+
     useEffect(() => {
         loadDevices();
-        const timer = setInterval(loadDevices, 5000);
+        loadQueue();
+        const timer = setInterval(() => { loadDevices(); loadQueue(); }, 5000);
         return () => clearInterval(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    const cancelQueued = async (id: string) => {
+        try {
+            const res = await fetch(`/api/training/queue/${id}`, { method: 'DELETE', credentials: 'include' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { showToast(data.error || 'Could not cancel', 'error'); return; }
+            showToast('Queued run cancelled', 'success');
+            loadQueue();
+        } catch (e) {
+            showToast('Cancel failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
+        }
+    };
 
     // Network visualization
     useEffect(() => {
@@ -628,6 +673,15 @@ const Training: React.FC = () => {
                 socketRef.current?.emit('subscribe_job', { job_id: data.job_id });
             }
 
+            // The device was busy — the run was queued and will start (and emit
+            // live updates) automatically when the device frees.
+            if (data.status === 'queued') {
+                showToast(`Device busy — queued at position ${data.position}.`, 'info');
+                setBtnState('idle');
+                loadQueue();
+                return;
+            }
+
             setIsTraining(true);
             setBtnState('training');
 
@@ -743,6 +797,44 @@ const Training: React.FC = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Training Queue */}
+            {queueJobs.length > 0 && (
+                <div className="glass-panel">
+                    <div className="panel-title"><span className="pt-icon">📋</span> Training Queue</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {queueJobs
+                            .slice()
+                            .sort((a, b) => (a.status === b.status ? a.position - b.position : a.status === 'running' ? -1 : 1))
+                            .map((j) => {
+                                const dev = devices.find((d) => d.id === j.device_id);
+                                return (
+                                    <div key={j.job_id} style={{
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                        gap: '0.75rem', padding: '0.6rem 0.85rem', borderRadius: 10,
+                                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0 }}>
+                                            <span className="bento-tag bento-tag-sm">
+                                                {j.status === 'running' ? '▶ Running' : `#${j.position} Queued`}
+                                            </span>
+                                            <strong style={{ fontSize: '0.92rem' }}>{j.project_name}</strong>
+                                            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+                                                on {dev ? dev.nickname : (j.is_local ? 'Shared M4' : `device #${j.device_id}`)}
+                                                {j.status === 'running' && j.total_epochs ? ` · epoch ${j.epoch}/${j.total_epochs}` : ''}
+                                            </span>
+                                        </div>
+                                        {j.status === 'queued' && (
+                                            <button className="btn btn-danger btn-sm" onClick={() => cancelQueued(j.job_id)}>
+                                                Cancel
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                    </div>
+                </div>
+            )}
 
             {/* Top Stats */}
             <div className="training-top-bar">
