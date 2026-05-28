@@ -750,6 +750,30 @@ def list_projects():
     return jsonify({"projects": [p.to_dict() for p in projs]})
 
 
+@app.route("/api/projects/compare", methods=["POST"])
+def compare_projects():
+    """Return full configs + per-epoch histories for several of the user's
+    projects in one request, for the leaderboard's overlaid curves."""
+    user, err = _require_user()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    raw_ids = body.get("ids") or []
+    ids = []
+    for i in raw_ids:
+        try:
+            ids.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    ids = ids[:8]  # cap overlay
+    if not ids:
+        return jsonify({"projects": []})
+    projs = (Project.query
+             .filter(Project.user_id == user.id, Project.id.in_(ids))
+             .all())
+    return jsonify({"projects": [p.to_dict(include_history=True) for p in projs]})
+
+
 @app.route("/api/projects/<int:project_id>", methods=["GET"])
 def get_project(project_id):
     user, err = _require_user()
