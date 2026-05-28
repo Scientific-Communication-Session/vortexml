@@ -311,6 +311,38 @@ def get_optimizer(model, name="adam", lr=0.001):
     return opt_cls(model.parameters(), lr=lr)
 
 
+def load_weights_for_inference(weights_path, arch_type, layer_sizes,
+                               input_dim, output_dim, activation="relu"):
+    """Rebuild a model from a Project's stored config and load its weights.
+
+    `weights_only=True` keeps this safe: the .pt is a plain dict of tensors, so
+    no arbitrary pickle is executed.
+    """
+    model = create_model(arch_type, layer_sizes, input_dim, output_dim,
+                         activation=activation)
+    state = torch.load(weights_path, map_location="cpu", weights_only=True)
+    model.load_state_dict(state)
+    model.eval()
+    return model
+
+
+def predict(model, X, task_type):
+    """Run a forward pass on a preprocessed float32 matrix `X` (N, input_dim).
+
+    Returns indices+probabilities for classification, or raw values for
+    regression. The model is assumed to already be in eval mode on CPU.
+    """
+    with torch.no_grad():
+        xt = torch.tensor(np.asarray(X, dtype=np.float32))
+        out = model(xt)
+        if task_type == "classification":
+            probs = torch.softmax(out, dim=1).cpu().numpy()
+            return {"indices": probs.argmax(axis=1).tolist(),
+                    "probs": probs.tolist()}
+        out = out.squeeze(-1)
+        return {"values": out.cpu().numpy().reshape(-1).tolist()}
+
+
 def get_torch_device():
     """Pick the best available torch device.
 

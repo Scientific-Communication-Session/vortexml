@@ -4,6 +4,7 @@ Handles file uploads, Excel→CSV conversion, dataset analysis, and data prepara
 """
 
 import os
+import json
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -99,15 +100,22 @@ def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size
     else:
         task_type = "classification"
 
-    # Encode categorical feature columns
+    # Encode categorical feature columns. `features_meta` records exactly how
+    # each column was transformed so the same mapping can be replayed at
+    # inference time (see apply_preprocess).
     label_encoders = {}
+    features_meta = {}
     for col in feature_cols:
         if not pd.api.types.is_numeric_dtype(df[col]):
             le = LabelEncoder()
             df[col] = le.fit_transform(df[col].astype(str).fillna("__MISSING__"))
             label_encoders[col] = le
+            features_meta[col] = {"kind": "categorical",
+                                  "classes": [str(c) for c in le.classes_]}
         else:
-            df[col] = df[col].fillna(df[col].median())
+            median = float(df[col].median()) if not df[col].isna().all() else 0.0
+            df[col] = df[col].fillna(median)
+            features_meta[col] = {"kind": "numeric", "median": median}
 
     # Prepare features
     X = df[feature_cols].values.astype(np.float32)
@@ -118,9 +126,11 @@ def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size
         y = le_target.fit_transform(target_series.astype(str).fillna("__MISSING__"))
         output_dim = len(le_target.classes_)
         y = y.astype(np.int64)
+        target_classes = [str(c) for c in le_target.classes_]
     else:
         y = target_series.fillna(target_series.median()).values.astype(np.float32)
         output_dim = 1
+        target_classes = None
 
     # Split FIRST, then fit the scaler on the training split only. Fitting on
     # the full matrix leaks validation/test statistics (mean, std) into the
@@ -149,6 +159,18 @@ def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size
 
     input_dim = len(feature_cols)
 
+    # Everything needed to reproduce this exact preprocessing on new rows.
+    preprocess = {
+        "feature_cols": list(feature_cols),
+        "target_col": target_col,
+        "task_type": task_type,
+        "input_dim": input_dim,
+        "output_dim": output_dim,
+        "scaler": {"mean": scaler.mean_.tolist(), "scale": scaler.scale_.tolist()},
+        "features": features_meta,
+        "target_classes": target_classes,
+    }
+
     return {
         "train_loader": train_loader,
         "val_loader": val_loader,
@@ -159,4 +181,70 @@ def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size
         "train_size": len(X_train),
         "val_size": len(X_val),
         "test_size": len(X_test),
+        "preprocess": preprocess,
     }
+
+
+# ─────────────────────────────────────────────────────────
+# Inference — replay the training preprocessing on new rows
+# ─────────────────────────────────────────────────────────
+def preprocess_sidecar_path(weights_path):
+    """The JSON sidecar path for a given .pt weights file (same base name)."""
+    base = weights_path[:-3] if weights_path.endswith(".pt") else weights_path
+    return base + ".preprocess.json"
+
+
+def save_preprocess(weights_path, preprocess):
+    """Persist preprocessing metadata next to the weights file."""
+    with open(preprocess_sidecar_path(weights_path), "w", encoding="utf-8") as f:
+        json.dump(preprocess, f)
+
+
+def load_preprocess(weights_path):
+    """Load preprocessing metadata for a weights file, or None if absent."""
+    path = preprocess_sidecar_path(weights_path)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def apply_preprocess(preprocess, rows):
+    """Turn a list of {col: value} dicts into a scaled float32 feature matrix,
+    replaying the exact transforms recorded at training time.
+
+    Unknown categorical values fall back to the '__MISSING__' bucket (or 0);
+    missing/non-numeric numeric values fall back to the stored training median.
+    """
+    feature_cols = preprocess["feature_cols"]
+    feats = preprocess["features"]
+    mean = np.array(preprocess["scaler"]["mean"], dtype=np.float32)
+    scale = np.array(preprocess["scaler"]["scale"], dtype=np.float32)
+
+    matrix = []
+    for row in rows:
+        encoded = []
+        for col in feature_cols:
+            meta = feats.get(col, {"kind": "numeric", "median": 0.0})
+            raw = row.get(col)
+            if meta["kind"] == "categorical":
+                classes = meta["classes"]
+                key = "__MISSING__" if raw is None else str(raw)
+                if key in classes:
+                    encoded.append(float(classes.index(key)))
+                elif "__MISSING__" in classes:
+                    encoded.append(float(classes.index("__MISSING__")))
+                else:
+                    encoded.append(0.0)
+            else:
+                try:
+                    val = float(raw)
+                    if np.isnan(val):
+                        val = meta["median"]
+                except (TypeError, ValueError):
+                    val = meta["median"]
+                encoded.append(val)
+        matrix.append(encoded)
+
+    X = np.array(matrix, dtype=np.float32)
+    return (X - mean) / scale

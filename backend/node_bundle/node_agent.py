@@ -148,7 +148,8 @@ def _run_job(payload):
                 weights_b64 = base64.b64encode(f.read()).decode()
             meta = {k: v for k, v in result.items() if k != "model_path"}
             sio.emit("node_complete", {"job_id": job_id, "meta": meta,
-                                       "weights_b64": weights_b64})
+                                       "weights_b64": weights_b64,
+                                       "preprocess": data.get("preprocess")})
             print(f"[node] job {job_id}: complete ✓ ({result['weight_filename']})")
     except Exception as e:
         traceback.print_exc()

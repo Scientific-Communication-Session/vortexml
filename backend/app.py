@@ -26,10 +26,14 @@ import json as _json
 
 import anthropic
 
-from data_processor import save_uploaded_file, analyze_dataset, prepare_dataset
+from data_processor import (
+    save_uploaded_file, analyze_dataset, prepare_dataset,
+    save_preprocess, load_preprocess, apply_preprocess,
+)
 from training_engine import (
     create_model, train_model, stop_training, get_torch_device,
     MODEL_REGISTRY, parse_weight_filename, WEIGHTS_DIR,
+    load_weights_for_inference, predict,
 )
 from device_specs import detect_specs
 from system_stats import SystemMonitor
@@ -512,6 +516,15 @@ def start_training():
                 monitor.stop()
             if result:
                 _states[state_key]["last_weights_file"] = result["weight_filename"]
+                # Persist preprocessing next to the weights so the model can be
+                # used for inference later (see /api/projects/<id>/predict).
+                try:
+                    save_preprocess(
+                        os.path.join(WEIGHTS_DIR, result["weight_filename"]),
+                        data["preprocess"],
+                    )
+                except Exception as e:
+                    print(f"[train] failed to save preprocess sidecar: {e}")
                 _persist_project(owner_user_id, config, result)
             _finish_job(job_id)
             _cleanup_dataset(state_key, ds_path)
@@ -739,11 +752,12 @@ def delete_project(project_id):
     still_referenced = Project.query.filter_by(weight_filename=filename).first()
     if not still_referenced:
         filepath = os.path.join(WEIGHTS_DIR, filename)
-        if os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-            except OSError:
-                pass  # ignore disk errors — record is gone, file can be cleaned later
+        for p in (filepath, filepath[:-3] + ".preprocess.json" if filepath.endswith(".pt") else None):
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass  # ignore disk errors — record is gone, file can be cleaned later
 
     return jsonify({"status": "deleted"})
 
@@ -775,6 +789,131 @@ def load_project(project_id):
     st["last_weights_file"] = proj.weight_filename
 
     return jsonify({"status": "ok", "config": cfg, "weight_filename": proj.weight_filename})
+
+
+# ─────────────────────────────────────────────────────────
+# Inference — run a saved model on new rows
+# ─────────────────────────────────────────────────────────
+def _project_preprocess(proj):
+    """Load a project's preprocessing sidecar, or None if it predates this feature."""
+    return load_preprocess(os.path.join(WEIGHTS_DIR, proj.weight_filename))
+
+
+@app.route("/api/projects/<int:project_id>/inference", methods=["GET"])
+def inference_schema(project_id):
+    """Describe the inputs a saved model expects, so the UI can build a form."""
+    user, err = _require_user()
+    if err:
+        return err
+    proj = Project.query.filter_by(id=project_id, user_id=user.id).first()
+    if not proj:
+        return jsonify({"error": "Project not found"}), 404
+
+    pp = _project_preprocess(proj)
+    weights_exist = os.path.exists(os.path.join(WEIGHTS_DIR, proj.weight_filename))
+    if pp is None or not weights_exist:
+        return jsonify({
+            "ready": False,
+            "reason": ("This model was trained before prediction support was added — "
+                       "retrain it to enable predictions."
+                       if weights_exist else "Weights file is missing on the server."),
+            "task_type": proj.task_type,
+        })
+
+    fields = []
+    for col in pp["feature_cols"]:
+        meta = pp["features"].get(col, {"kind": "numeric"})
+        field = {"name": col, "kind": meta.get("kind", "numeric")}
+        if meta.get("kind") == "categorical":
+            field["options"] = [c for c in meta.get("classes", []) if c != "__MISSING__"]
+        fields.append(field)
+
+    return jsonify({
+        "ready": True,
+        "task_type": pp["task_type"],
+        "target_col": pp.get("target_col"),
+        "target_classes": pp.get("target_classes"),
+        "fields": fields,
+    })
+
+
+@app.route("/api/projects/<int:project_id>/predict", methods=["POST"])
+def predict_project(project_id):
+    """Run the saved model on submitted rows.
+
+    Accepts either JSON {"rows": [{col: value, ...}, ...]} or a multipart CSV
+    upload (field name 'file'). Returns one prediction per row.
+    """
+    user, err = _require_user()
+    if err:
+        return err
+    proj = Project.query.filter_by(id=project_id, user_id=user.id).first()
+    if not proj:
+        return jsonify({"error": "Project not found"}), 404
+
+    pp = _project_preprocess(proj)
+    weights_path = os.path.join(WEIGHTS_DIR, proj.weight_filename)
+    if pp is None or not os.path.exists(weights_path):
+        return jsonify({"error": "This model can't be used for prediction "
+                                 "(missing weights or preprocessing). Retrain it."}), 409
+
+    # Collect input rows from a CSV upload or a JSON body.
+    rows = []
+    if "file" in request.files and request.files["file"].filename:
+        f = request.files["file"]
+        if not f.filename.lower().endswith((".csv", ".xlsx", ".xls")):
+            return jsonify({"error": "Only CSV/Excel files are supported"}), 400
+        try:
+            import pandas as pd
+            if f.filename.lower().endswith(".csv"):
+                df = pd.read_csv(f)
+            else:
+                df = pd.read_excel(f, engine="openpyxl")
+            rows = df.to_dict(orient="records")
+        except Exception as e:
+            return jsonify({"error": f"Could not read file: {e}"}), 400
+    else:
+        body = request.get_json(silent=True) or {}
+        rows = body.get("rows") or []
+        if isinstance(rows, dict):
+            rows = [rows]
+
+    if not rows:
+        return jsonify({"error": "No input rows provided"}), 400
+    if len(rows) > 5000:
+        return jsonify({"error": "Too many rows (max 5000 per request)"}), 400
+
+    try:
+        X = apply_preprocess(pp, rows)
+        model = load_weights_for_inference(
+            weights_path, proj.arch_type, _json.loads(proj.layer_sizes),
+            pp["input_dim"], pp["output_dim"], activation=proj.activation,
+        )
+        out = predict(model, X, pp["task_type"])
+    except Exception as e:
+        return jsonify({"error": f"Prediction failed: {e}"}), 500
+
+    predictions = []
+    if pp["task_type"] == "classification":
+        classes = pp.get("target_classes") or [str(i) for i in range(pp["output_dim"])]
+        for idx, probs in zip(out["indices"], out["probs"]):
+            label = classes[idx] if 0 <= idx < len(classes) else str(idx)
+            predictions.append({
+                "prediction": label,
+                "confidence": round(float(probs[idx]), 4),
+                "probabilities": {classes[i] if i < len(classes) else str(i): round(float(p), 4)
+                                  for i, p in enumerate(probs)},
+            })
+    else:
+        for v in out["values"]:
+            predictions.append({"prediction": round(float(v), 6)})
+
+    return jsonify({
+        "task_type": pp["task_type"],
+        "target_col": pp.get("target_col"),
+        "count": len(predictions),
+        "predictions": predictions,
+    })
 
 
 # ─────────────────────────────────────────────────────────
@@ -1061,6 +1200,9 @@ def on_node_complete(data):
         try:
             with open(os.path.join(WEIGHTS_DIR, weight_filename), "wb") as f:
                 f.write(base64.b64decode(weights_b64))
+            pp = data.get("preprocess")
+            if pp:
+                save_preprocess(os.path.join(WEIGHTS_DIR, weight_filename), pp)
         except Exception as e:
             print(f"[node] failed to save weights {weight_filename}: {e}")
     state_key = job["state_key"]
