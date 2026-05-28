@@ -36,6 +36,7 @@ from training_engine import (
     load_weights_for_inference, predict,
 )
 from device_specs import detect_specs
+from auto_config_rules import recommend_config, guard_config
 from system_stats import SystemMonitor
 from models import db, User, Project, Device
 
@@ -1443,59 +1444,72 @@ AUTO_CONFIG_QUESTIONER_PROMPT = (
 AUTO_CONFIG_PICKER_PROMPT = (
     "You are a senior ML engineer choosing the BEST neural network configuration "
     "for a user's dataset and stated problem in VortexML. Quality matters: the "
-    "user will train this model and judge VortexML by the result. Reason carefully "
-    "before you commit to a configuration — do NOT make a snap decision.\n\n"
+    "user will train this model and judge VortexML by the result. Work the "
+    "decision tree below in order, in the extended-thinking block, before you "
+    "call the tool. Do NOT make a snap decision and do NOT skip a step.\n\n"
     "Available architectures (use EXACTLY one of these keys): mlp, dnn, cnn1d, "
     "rnn, lstm, gru, autoencoder, resnet, transformer, wide_deep.\n\n"
-    "Your reasoning process MUST cover these steps, in order, before you call the "
-    "tool. Use the extended-thinking block to work through them. Do not skip a step.\n\n"
-    "1. TASK TYPE — Decide whether this is classification, regression, anomaly "
-    "   detection, or unsupervised representation learning. Anchor your answer to "
-    "   concrete dataset facts: the target column's dtype and unique-value count. "
-    "   A numeric target with many unique values → regression. A non-numeric or "
-    "   low-cardinality numeric target → classification. If the user said anomaly / "
-    "   fraud / outlier detection, lean autoencoder.\n\n"
-    "2. STRUCTURE — Is there sequential / temporal structure (time-series, ordered "
-    "   rows, columns with names like 'date', 'time', 't', 'timestamp', 'lag_*', "
-    "   'step')? If yes → RNN family (lstm for long deps, gru for short and faster). "
-    "   Are features otherwise independent and tabular? Then a feedforward family.\n\n"
-    "3. ARCHITECTURE CANDIDATES — List 2-3 architectures that could fit, then rule "
-    "   each one out or in based on dataset size, feature count, and the structure "
-    "   above. Pick the survivor. Never pick transformer or resnet on tiny datasets "
-    "   (< 2k rows) — they overfit. Never pick rnn/lstm/gru on clearly non-sequential "
-    "   tabular data. Wide & Deep is for sparse categorical-heavy data with both "
-    "   memorization and generalization needs (rare for typical user datasets).\n\n"
-    "4. CAPACITY — Choose layer_sizes based on dataset size and feature count:\n"
-    "   - < 1k rows:    [32, 16]      (small — overfitting is the risk)\n"
-    "   - 1k-10k rows:  [64, 32]      (modest)\n"
-    "   - 10k-50k rows: [128, 64]     (standard)\n"
-    "   - > 50k rows:   [256, 128, 64] (deeper allowed)\n"
-    "   For LSTM/GRU/Transformer, layer_sizes encode hidden/d_model dims — keep "
-    "   the FIRST value ≥ 32. For Wide & Deep, treat layer_sizes as the deep arm.\n\n"
-    "5. EPOCHS — Anchor to dataset size:\n"
-    "   - < 1k rows:    20-40 epochs, ALWAYS enable early_stopping (patience 5-8).\n"
-    "   - 1k-50k rows:  40-80 epochs, early_stopping recommended (patience 8-12).\n"
-    "   - > 50k rows:   80-150 epochs, early_stopping optional (patience 10-15).\n\n"
-    "6. LEARNING RATE — Default 0.001 for adam. For transformer/resnet/deeper "
-    "   stacks (3+ layers) → 0.0001. For very small datasets → 0.001 still fine.\n\n"
-    "7. BATCH SIZE — 32 default. Bump to 64 for > 10k rows, 128 for > 100k rows. "
-    "   Drop to 16 only if rows < 500.\n\n"
-    "8. OPTIMIZER & ACTIVATION — Default optimizer 'adam', activation 'relu'. "
-    "   Use 'adamw' on transformer/resnet. Use 'gelu' for transformer. Use 'tanh' "
-    "   inside rnn/lstm/gru only if the user mentioned bounded outputs.\n\n"
-    "9. SANITY CHECK — Before you commit, re-read your choices: does each one "
-    "   match a CONCRETE fact in the dataset summary (rows, dtype, cardinality, "
-    "   user message)? If a hyperparameter feels arbitrary, fix it.\n\n"
-    "JUSTIFICATION — When you finally call the tool, your `justification` string "
-    "MUST cite specific facts from THIS dataset: the row count, the target "
-    "column's name and characteristics, and ONE other property that drove your "
-    "architecture choice. Avoid generic platitudes like 'this is a flexible "
-    "architecture'. 2-4 sentences.\n\n"
-    "OUTPUT CONTRACT — Reason through every step above in the extended-thinking "
-    "block. Then your visible response MUST be a single call to the "
-    "`set_model_config` tool. Do NOT respond with plain text instead of a tool "
-    "call. Do NOT ask the user follow-up questions. Do NOT call the tool more "
-    "than once. The tool call IS your answer."
+    "STEP 1 — TASK TYPE, from concrete target facts.\n"
+    "  Look at the target column's dtype and unique-value count.\n"
+    "  - numeric target with > 10 unique values → regression.\n"
+    "  - non-numeric, or numeric with <= 10 unique values → classification.\n"
+    "  - user said anomaly / fraud / outlier / 'find unusual' → treat as anomaly.\n\n"
+    "STEP 2 — STRUCTURE, from feature facts.\n"
+    "  - SEQUENTIAL? Time-series / ordered rows, or columns named like 'date', "
+    "    'time', 'timestamp', 't', 'lag_*', 'step', 'year', 'month'.\n"
+    "  - HETEROGENEITY? Count categorical vs numeric features. 'Sparse-categorical-"
+    "    heavy' means >= 3 categorical features and at least as many categorical as "
+    "    numeric.\n"
+    "  - SIZE BAND from row count: <1k, 1k-10k, 10k-50k, >50k.\n\n"
+    "STEP 3 — ARCHITECTURE DECISION TREE. Evaluate these rules top-to-bottom and "
+    "take the FIRST that matches. Name the rule you used in the justification.\n"
+    "  (R1 anomaly)        anomaly/unsupervised framing            → autoencoder.\n"
+    "  (R2 sequential_long)  sequential AND >= 2k rows             → lstm.\n"
+    "  (R3 sequential_short) sequential AND < 2k rows              → gru.\n"
+    "  (R4 mixed_sparse_dense) sparse-categorical-heavy tabular    → wide_deep.\n"
+    "  (R5 large_depth)     non-sequential AND > 50k rows          → resnet.\n"
+    "  (R6 tiny_safe)       non-sequential tabular AND < 2k rows   → mlp.\n"
+    "  (R7 medium_reg)      non-sequential tabular, 2k-50k rows    → dnn.\n"
+    "  cnn1d only for genuinely ordered/local-structure features (signals); rnn is "
+    "  almost never preferred over lstm/gru.\n\n"
+    "  USE-WHEN / AVOID-WHEN guardrails (do not violate):\n"
+    "  - transformer & resnet: only for large data (> 50k rows). NEVER on < 2k rows "
+    "    — they overfit catastrophically.\n"
+    "  - lstm/gru/rnn: ONLY when Step 2 found sequential structure. NEVER on plain "
+    "    independent tabular rows.\n"
+    "  - wide_deep: when there is a real mix of sparse categorical + dense numeric.\n"
+    "  - autoencoder: anomaly detection / representation learning, not ordinary "
+    "    supervised tasks.\n"
+    "  - mlp: the safe default for small tabular; dnn adds BatchNorm+Dropout for "
+    "    medium tabular.\n\n"
+    "STEP 4 — CAPACITY by size band (the deep arm for wide_deep; hidden/d_model "
+    "  for recurrent/transformer, first value >= 32):\n"
+    "  - <1k:    [32, 16]      - 1k-10k:  [64, 32]\n"
+    "  - 10k-50k:[128, 64]     - >50k:    [256, 128, 64]\n"
+    "  OVER-PARAMETERIZATION GUARD: on < 2k rows, never exceed depth 3 or width "
+    "  128, and ALWAYS enable early stopping.\n\n"
+    "STEP 5 — EPOCHS by band: <1k → 20-40 (early stop, patience 5-8); 1k-50k → "
+    "  40-80 (early stop, patience 8-12); >50k → 80-150 (early stop optional).\n\n"
+    "STEP 6 — LEARNING RATE: 0.001 default; 0.0001 for transformer/resnet or "
+    "  stacks with 3+ layers.\n\n"
+    "STEP 7 — BATCH SIZE: 32 default; 64 for > 10k rows; 128 for > 100k rows; 16 "
+    "  for < 500 rows.\n\n"
+    "STEP 8 — OPTIMIZER & ACTIVATION: adam + relu by default; adamw for "
+    "  transformer/resnet; gelu for transformer; tanh inside rnn/lstm/gru only if "
+    "  the user mentioned bounded outputs.\n\n"
+    "STEP 9 — SANITY CHECK: re-read every choice against a CONCRETE dataset fact "
+    "  (rows, target dtype/cardinality, feature mix, user message). Fix anything "
+    "  arbitrary, and re-verify the guardrails in Step 3/4.\n\n"
+    "JUSTIFICATION (required) — 2-4 sentences that (a) NAME which decision-tree "
+    "rule fired (e.g. 'R6 tiny_safe'), and (b) cite specific facts from THIS "
+    "dataset: row count, the target column's name + key characteristic "
+    "(dtype/cardinality/range), and one more property (feature count or mix, "
+    "sequential structure) that drove the choice. No generic platitudes.\n\n"
+    "OUTPUT CONTRACT — Reason through every step in the extended-thinking block. "
+    "Then your visible response MUST be a single call to the `set_model_config` "
+    "tool. Do NOT respond with plain text instead of a tool call. Do NOT ask "
+    "follow-up questions. Do NOT call the tool more than once. The tool call IS "
+    "your answer."
 )
 
 _AUTO_CONFIG_TOOL = {
@@ -1630,6 +1644,45 @@ def _build_dataset_context():
     return "\n".join(lines)
 
 
+_SEQ_HINTS = ("date", "time", "timestamp", "lag", "step", "year", "month", "day", "seq")
+
+
+def _dataset_facts(transcript_text=""):
+    """Structured dataset facts for the rule engine (auto_config_rules).
+
+    Derived from the analysed dataset + the user's column selection, mirroring
+    the task-type rule in data_processor.prepare_dataset so the guard agrees
+    with how training will actually treat the data.
+    """
+    st = _get_state()
+    info = st.get("dataset_info") or {}
+    feature_cols = st.get("feature_cols") or []
+    target_col = st.get("target_col")
+    columns = {c.get("name"): c for c in (info.get("columns") or [])}
+
+    task_type = "classification"
+    tinfo = columns.get(target_col)
+    if tinfo and tinfo.get("is_numeric") and (tinfo.get("unique") or 0) > 10:
+        task_type = "regression"
+
+    n_numeric = sum(1 for c in feature_cols if columns.get(c, {}).get("is_numeric"))
+    n_categorical = len(feature_cols) - n_numeric
+    sequential = any(
+        any(h in (c or "").lower() for h in _SEQ_HINTS) for c in feature_cols)
+    anomaly = any(w in (transcript_text or "").lower()
+                  for w in ("anomaly", "anomalies", "fraud", "outlier", "unusual"))
+
+    return {
+        "rows": info.get("rows") or 0,
+        "task_type": task_type,
+        "n_features": len(feature_cols),
+        "n_numeric": n_numeric,
+        "n_categorical": n_categorical,
+        "sequential": sequential,
+        "anomaly": anomaly,
+    }
+
+
 @app.route("/api/auto-config/status", methods=["GET"])
 def auto_config_status():
     user, err = _require_user()
@@ -1720,6 +1773,9 @@ def auto_config_decide():
         "(no conversation — user clicked Generate Configuration without describing their problem)"
     )
 
+    # Structured facts for the rule engine: used to guard the LLM's pick and as
+    # a deterministic fallback if it fails to emit a config.
+    facts = _dataset_facts(transcript)
     ds_context = _build_dataset_context()
 
     picker_messages = [
@@ -1773,23 +1829,23 @@ def auto_config_decide():
         return jsonify({"error": f"Auto-Configure error: {e}"}), 500
 
     config = None
-    fallback_text = ""
     for block in resp.content:
         btype = getattr(block, "type", None)
         if btype == "tool_use" and getattr(block, "name", None) == "set_model_config":
             config = block.input
             break
-        if btype == "text" and not fallback_text:
-            fallback_text = getattr(block, "text", "") or ""
 
+    source = "picker"
     if not config or not isinstance(config, dict):
-        hint = (
-            f' (The picker replied with text instead: "{fallback_text[:200]}")'
-            if fallback_text else ""
-        )
-        return jsonify({"error": f"Picker did not produce a configuration.{hint}"}), 502
+        # The picker failed to emit a tool call — fall back to the deterministic
+        # decision tree instead of erroring out.
+        config = recommend_config(facts)
+        source = "rules"
 
-    return jsonify({"config": config})
+    # Always run the over-parameterization guard so the final config can't be
+    # too heavy for the dataset, no matter which path produced it.
+    config, adjustments = guard_config(config, facts)
+    return jsonify({"config": config, "source": source, "adjustments": adjustments})
 
 
 # ─────────────────────────────────────────────────────────
