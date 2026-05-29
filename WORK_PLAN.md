@@ -485,3 +485,45 @@ Fixes (kept the node agent working, avoided a risky global monkey-patch):
   to a `sid`/room-join nuance of the test client (the real browser socket joins
   correctly); behavioural smoothness was therefore proven by the hub-block
   measurement above rather than by re-driving the 3-page Train UI.
+
+## Inference on any device + resource stats + new cloud models
+
+Three requests, batched:
+
+- **Cloud models** (`feat(cloud): …`): the cloud backend now offers **Claude
+  Opus 4.8 (1M context, default)**, Sonnet 4.6, and Haiku 4.5. `_cloud_kwargs`
+  gates `thinking`/`output_config.effort` by model — Opus/Sonnet get adaptive
+  thinking + effort, Haiku omits both (sending either to Haiku 4.5 returns 400).
+  Friendly labels flow through `list_backends()` to the Chat + Assistant pickers.
+  Verified live: real calls to `claude-opus-4-8` and `claude-haiku-4-5` succeed.
+
+- **Inference on your hardware** (`feat(inference): …`): `/api/projects/<id>/
+  predict` is now device-aware, mirroring remote training/RAG. The shared device
+  runs the forward pass locally and returns `device` + `resource` (inference_ms,
+  rows/sec, and a CPU/GPU/RAM/temp snapshot sampled off the eventlet loop via
+  tpool). A personal node receives the weights + preprocessing + rows over
+  `node_predict`, runs the pass on its own hardware, samples its stats, and
+  relays `predict_result`/`predict_stats`/`predict_error` back. Row payloads are
+  coerced to plain Python (numpy scalars from CSV uploads) before the socket
+  emit. `training_engine.format_predictions`/`evaluate_predictions` are shared so
+  local and remote produce byte-identical output (the server-only duplicate was
+  removed).
+
+- **Node storage layout**: the node agent now lays its data out as `weights/`
+  (trained NN `.pt`), `llms/` (downloaded RAG/chat LLMs — `HF_HOME` points here
+  so model downloads land in the folder, set before any model import), and
+  `models/` (exports). Chat history is **not** stored on the device — it stays in
+  the central PostgreSQL database.
+
+- **Frontend**: the Playground gained a device picker (expert view, when >1
+  device) and a "Resource consumption" panel showing where inference ran, how
+  long it took, throughput, and the hardware snapshot; remote results arrive over
+  the socket with a live CPU/GPU/temp indicator.
+
+- **Verified**: smoke suite green, incl. new assertions "predict reports device +
+  resource consumption" and "predict on missing device → 404/409"; the numpy-safe
+  row round-trip; frontend typecheck/lint/build clean; real Opus 4.8 + Haiku
+  calls. The remote-node forward pass mirrors the proven RAG remote path exactly;
+  a full live-node round-trip needs a paired node to exercise end-to-end. (The
+  in-browser click-through wasn't run this session — the preview tool can't share
+  the live tunnel's port 5173 and no Chrome was connected.)
