@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Plus, Send, Trash2, Loader2, MessageSquare, Cpu, Pencil } from 'lucide-react';
+import { Plus, Send, Trash2, Loader2, MessageSquare, Cpu, Pencil, Square, RotateCcw } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
@@ -14,6 +14,8 @@ interface Conversation { id: number; title: string; backend: string; model: stri
 interface Citation { n: number; doc_name: string; score: number; preview: string; }
 interface Msg { id?: number; role: string; content: string; tokens_per_second?: number | null; model?: string | null; citations?: Citation[] | null; streaming?: boolean; }
 interface LiveStats { cpu_percent?: number; gpu_percent?: number; ram_percent?: number; cpu_temp?: number; gpu_temp?: number; }
+interface CatalogModel { id: string; downloaded: boolean; size_bytes: number | null; }
+interface CatalogEntry { backend: string; models: CatalogModel[]; }
 
 const inputStyle: React.CSSProperties = {
     padding: '0.45rem 0.6rem', borderRadius: 8, background: 'rgba(255,255,255,0.05)',
@@ -40,11 +42,13 @@ const Chat: React.FC = () => {
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
+    const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editTitle, setEditTitle] = useState('');
 
     const socketRef = useRef<Socket | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const jobIdRef = useRef<string | null>(null);  // in-flight stream job (for Stop)
 
     useEffect(() => {
         if (authLoading) return;
@@ -62,6 +66,15 @@ const Chat: React.FC = () => {
             .finally(() => setLoading(false));
         if (!isBeginner) apiGet('/api/rag/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
     }, [user, authLoading, navigate, isBeginner]);
+
+    // Load the chosen device's model catalog so the model dropdown can show
+    // what's available + which are already downloaded.
+    useEffect(() => {
+        if (isBeginner) return;
+        const id = settings.deviceId ?? devices.find((d) => d.is_shared)?.id;
+        if (id == null) return;
+        apiGet(`/api/rag/devices/${id}/models`).then((d) => setCatalog(d.catalog || [])).catch(() => setCatalog([]));
+    }, [settings.deviceId, devices, isBeginner]);
 
     // Socket: remote answers + live hardware stats.
     useEffect(() => {
@@ -83,11 +96,16 @@ const Chat: React.FC = () => {
                 if (last && last.streaming) { const copy = m.slice(); copy[copy.length - 1] = d.message; return copy; }
                 return [...m, d.message];
             });
-            setSending(false); setLiveStats(null);
+            setSending(false); setLiveStats(null); jobIdRef.current = null;
+        });
+        s.on('chat_stopped', () => {
+            // stopped before any output → drop the empty placeholder
+            setMessages((m) => (m[m.length - 1]?.streaming && !m[m.length - 1].content ? m.slice(0, -1) : m.map((x) => ({ ...x, streaming: false }))));
+            setSending(false); setLiveStats(null); jobIdRef.current = null;
         });
         s.on('chat_error', (d: { error: string }) => {
-            setMessages((m) => (m[m.length - 1]?.streaming ? m.slice(0, -1) : m));
-            setSending(false); setLiveStats(null); showToast(d.error, 'error');
+            setMessages((m) => (m[m.length - 1]?.streaming && !m[m.length - 1].content ? m.slice(0, -1) : m));
+            setSending(false); setLiveStats(null); jobIdRef.current = null; showToast(d.error, 'error');
         });
         s.on('rag_stats', (d: LiveStats) => setLiveStats(d));
         return () => { s.disconnect(); socketRef.current = null; };
@@ -150,6 +168,7 @@ const Chat: React.FC = () => {
         const text = input.trim();
         if (!text || sending) return;
         let convId = activeId;
+        const firstMessage = messages.length === 0;
         if (convId == null) {  // first message → create the conversation
             const d = await apiPost('/api/conversations', {
                 backend: settings.backend, model: settings.model || undefined,
@@ -160,6 +179,7 @@ const Chat: React.FC = () => {
             setConversations((c) => [d.conversation, ...c]);
             setActiveId(convId);
         }
+        if (firstMessage) setConversations((c) => c.map((x) => (x.id === convId ? { ...x, title: text.slice(0, 60) } : x)));
         setInput('');
         // optimistic user bubble + an empty assistant placeholder that fills as
         // tokens stream in (chat_token), then is finalized by chat_answer.
@@ -168,7 +188,7 @@ const Chat: React.FC = () => {
         try {
             const res = await fetch(`/api/conversations/${convId}/message`, {
                 method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: text, socket_id: socketRef.current?.id }),
+                body: JSON.stringify({ content: text, socket_id: socketRef.current?.id, temperature: 0.7 }),
             });
             const data = await res.json();
             if (!res.ok || data.error) {
@@ -176,7 +196,7 @@ const Chat: React.FC = () => {
                 setMessages((m) => (m[m.length - 1]?.streaming ? m.slice(0, -1) : m));
                 setSending(false); return;
             }
-            if (data.title) setConversations((c) => c.map((x) => (x.id === convId ? { ...x, title: data.title } : x)));
+            jobIdRef.current = data.job_id || null;
             // The reply (streamed or whole) arrives over the socket.
         } catch (e) {
             showToast('Chat failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
@@ -185,9 +205,46 @@ const Chat: React.FC = () => {
         }
     };
 
+    const stop = () => {
+        if (jobIdRef.current) socketRef.current?.emit('chat_stop', { job_id: jobIdRef.current });
+    };
+
+    const regenerate = async () => {
+        if (sending || activeId == null) return;
+        // drop the last assistant bubble, add a fresh streaming placeholder
+        setMessages((m) => {
+            const trimmed = m[m.length - 1]?.role === 'assistant' ? m.slice(0, -1) : m;
+            return [...trimmed, { role: 'assistant', content: '', streaming: true }];
+        });
+        setSending(true); setLiveStats(null);
+        try {
+            const res = await fetch(`/api/conversations/${activeId}/regenerate`, {
+                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ socket_id: socketRef.current?.id, temperature: 0.7 }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                showToast(data.error || `Regenerate failed (HTTP ${res.status})`, 'error');
+                setMessages((m) => (m[m.length - 1]?.streaming ? m.slice(0, -1) : m));
+                setSending(false); return;
+            }
+            jobIdRef.current = data.job_id || null;
+        } catch (e) {
+            showToast('Regenerate failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
+            setMessages((m) => (m[m.length - 1]?.streaming ? m.slice(0, -1) : m));
+            setSending(false);
+        }
+    };
+
     if (authLoading || loading) return <div className="page-header"><h1>Loading chat…</h1></div>;
 
     const activeBackend = backends.find((b) => b.key === settings.backend);
+    // Models for the dropdown: prefer the device catalog (so we can flag which
+    // are downloaded), else fall back to the backend's curated list.
+    const catEntry = catalog.find((c) => c.backend === settings.backend);
+    const modelOptions: CatalogModel[] = catEntry
+        ? catEntry.models
+        : (activeBackend?.models || []).map((id) => ({ id, downloaded: false, size_bytes: null }));
 
     return (
         <>
@@ -245,8 +302,16 @@ const Chat: React.FC = () => {
                                 <select value={settings.backend} onChange={(e) => { const b = backends.find((x) => x.key === e.target.value); patchSettings({ backend: e.target.value, model: b?.default_model || '' }); }} style={inputStyle}>
                                     {backends.map((b) => <option key={b.key} value={b.key} disabled={!b.available}>{b.label}{b.available ? '' : ' (not installed)'}</option>)}
                                 </select>
-                                <input value={settings.model} onChange={(e) => patchSettings({ model: e.target.value })} list="chat-models" placeholder="model" style={{ ...inputStyle, width: 200 }} />
-                                <datalist id="chat-models">{(activeBackend?.models || []).map((m) => <option key={m} value={m} />)}</datalist>
+                                <select value={settings.model} onChange={(e) => patchSettings({ model: e.target.value })}
+                                    style={{ ...inputStyle, maxWidth: 300 }} title="Model">
+                                    <option value="">Default{activeBackend?.default_model ? ` (${activeBackend.default_model.split('/').pop()})` : ''}</option>
+                                    {modelOptions.map((m) => (
+                                        <option key={m.id} value={m.id}>{m.id}{m.downloaded ? ' ✓ downloaded' : (catEntry ? ' (downloads on first use)' : '')}</option>
+                                    ))}
+                                    {settings.model && !modelOptions.some((m) => m.id === settings.model) && (
+                                        <option value={settings.model}>{settings.model}</option>
+                                    )}
+                                </select>
                                 {devices.length > 1 && (
                                     <select value={settings.deviceId ?? ''} onChange={(e) => patchSettings({ deviceId: e.target.value ? Number(e.target.value) : null })} style={inputStyle} title="Run on">
                                         <option value="">🖥️ Shared M4</option>
@@ -310,15 +375,30 @@ const Chat: React.FC = () => {
                         )}
                     </div>
 
+                    {/* regenerate (when the last turn is an assistant reply) */}
+                    {!sending && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+                        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.6rem' }}>
+                            <button className="btn btn-secondary btn-sm" onClick={regenerate}>
+                                <RotateCcw size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} /> Regenerate
+                            </button>
+                        </div>
+                    )}
+
                     {/* composer */}
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem' }}>
                         <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1}
                             placeholder="Message your model…  (Enter to send, Shift+Enter for newline)"
                             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
                             style={{ ...inputStyle, flex: 1, resize: 'none', fontSize: '0.92rem' }} />
-                        <button className="btn btn-primary" onClick={send} disabled={sending || !input.trim()}>
-                            {sending ? <Loader2 size={16} className="chat-msg__spinner" /> : <Send size={16} />}
-                        </button>
+                        {sending ? (
+                            <button className="btn btn-danger" onClick={stop} title="Stop generating">
+                                <Square size={15} style={{ verticalAlign: 'middle' }} />
+                            </button>
+                        ) : (
+                            <button className="btn btn-primary" onClick={send} disabled={!input.trim()}>
+                                <Send size={16} />
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
