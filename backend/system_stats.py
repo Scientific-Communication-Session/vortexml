@@ -217,12 +217,20 @@ class SystemMonitor:
 
     Call `loop()` from a greenlet (eventlet — pass socketio.sleep) or a daemon
     thread (the node agent — pass time.sleep).
+
+    `run_blocking` optionally runs the (blocking) hardware sampling off the
+    caller's thread — pass `eventlet.tpool.execute` on the eventlet server so a
+    slow `ioreg`/`nvidia-smi` subprocess or ctypes read never stalls the single
+    event loop (which would otherwise freeze live training updates and chat
+    tokens). It defaults to calling inline, which is what the node agent wants
+    since it already samples from its own daemon thread.
     """
 
-    def __init__(self, emit_fn, sleep_fn, interval=1.5):
+    def __init__(self, emit_fn, sleep_fn, interval=1.5, run_blocking=None):
         self.emit_fn = emit_fn
         self.sleep_fn = sleep_fn
         self.interval = interval
+        self.run_blocking = run_blocking or (lambda fn: fn())
         self._running = False
 
     def loop(self):
@@ -233,7 +241,7 @@ class SystemMonitor:
         self.sleep_fn(min(0.6, self.interval))
         while self._running:
             try:
-                self.emit_fn(sample())
+                self.emit_fn(self.run_blocking(sample))
             except Exception:
                 pass
             self.sleep_fn(self.interval)

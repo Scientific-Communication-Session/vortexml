@@ -528,6 +528,12 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
             return None
 
         epoch_start = time.time()
+        # The training loop is CPU/GPU-bound and, on the eventlet server, runs on
+        # the same single thread that flushes WebSocket frames. Without a yield
+        # inside the batch loop the hub is starved for a whole epoch, so live
+        # metrics and hardware stats freeze. Yield cooperatively at most ~10×/sec
+        # (negligible overhead) to keep updates streaming during long epochs.
+        last_yield = time.time()
 
         # ---- Training ----
         train_loss = 0.0
@@ -555,6 +561,11 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
                 preds = output.argmax(dim=1)
                 train_correct += (preds == y_batch).sum().item()
 
+            now = time.time()
+            if now - last_yield >= 0.1:
+                socketio.sleep(0)
+                last_yield = now
+
         train_loss /= train_total
         train_acc = (train_correct / train_total * 100) if task_type == "classification" else None
 
@@ -580,6 +591,11 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
                 if task_type == "classification":
                     preds = output.argmax(dim=1)
                     val_correct += (preds == y_batch).sum().item()
+
+                now = time.time()
+                if now - last_yield >= 0.1:
+                    socketio.sleep(0)
+                    last_yield = now
 
         val_loss /= val_total if val_total > 0 else 1
         val_acc = (val_correct / val_total * 100) if task_type == "classification" else None

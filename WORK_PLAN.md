@@ -446,3 +446,42 @@ and an in-page `console.error` hook recorded **0** errors during a streamed turn
   streamed a separate "💭 Reasoning" chain-of-thought (ball = $0.05) that
   collapsed when the answer arrived, distinct from the answer body; 0 console
   errors.
+
+## Off-the-event-loop refactor (#13 — smooth live training + stats)
+
+The server runs Flask-SocketIO in eventlet mode with **no** `monkey_patch()`, so
+two things froze the single event loop:
+
+1. **Hardware sampling.** `SystemMonitor.sample()` shells out to `ioreg`/
+   `nvidia-smi` and reads IOKit ctypes sensors — ~85 ms of *blocking* work every
+   tick that stalls the hub, hitching training updates and chat tokens.
+2. **The training loop.** A CPU/GPU-bound PyTorch epoch yielded to the hub only
+   *once per epoch*, so during a long epoch live metrics and the stats monitor
+   green-thread were starved.
+
+Fixes (kept the node agent working, avoided a risky global monkey-patch):
+
+- **`SystemMonitor`** gained an injectable `run_blocking` executor. The eventlet
+  server passes `eventlet.tpool.execute` so each sample runs in a real OS thread
+  while the hub stays free; the node agent omits it (samples inline from its own
+  daemon thread). Wired into all three monitor sites (training, RAG query, chat).
+- **`train_model`** now yields cooperatively *inside* the train and val batch
+  loops, throttled to ~10×/sec (`socketio.sleep(0)` when ≥0.1 s elapsed) — same
+  proven pattern as the chat per-token yield. Backend-agnostic, so the node's
+  relay adapter is unaffected.
+- **Migration safety:** `app.py` imports `eventlet.tpool` once at module load
+  (`_run_blocking`).
+
+**Verified:**
+- Offline smoke suite still fully green (training, inference, export, RAG,
+  conversations) — no regression from the loop yields.
+- Direct hub-responsiveness measurement: with a heartbeat green-thread on a 50 ms
+  cadence during live sampling, **without** tpool the hub stalled (max gap
+  113 ms ≈ one blocking sample, 49/60 beats); **with** tpool it stayed smooth
+  (max gap 60 ms = normal cadence, 58/60 beats).
+- End-to-end training (signup→upload→configure→train on the shared M4) ran to
+  completion repeatedly with the new yields and persisted valid projects.
+- Note: a scripted python-socketio client couldn't observe room-scoped emits due
+  to a `sid`/room-join nuance of the test client (the real browser socket joins
+  correctly); behavioural smoothness was therefore proven by the hub-block
+  measurement above rather than by re-driving the 3-page Train UI.

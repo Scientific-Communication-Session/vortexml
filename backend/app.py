@@ -42,6 +42,12 @@ from device_specs import detect_specs
 from auto_config_rules import recommend_config, guard_config
 import rag
 from system_stats import SystemMonitor
+
+# Run blocking hardware sampling (ioreg/nvidia-smi subprocesses, IOKit ctypes)
+# in a real OS thread so it never stalls the single eventlet hub that also
+# streams training updates and chat tokens.
+from eventlet import tpool
+_run_blocking = tpool.execute
 from models import (db, User, Project, Device, KnowledgeBase, Document,
                     Conversation, ChatMessage)
 
@@ -1354,7 +1360,7 @@ def query_kb(kb_id):
     # ── Local: generate on the shared M4, streaming hardware stats ──
     monitor = SystemMonitor(
         emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
-        sleep_fn=socketio.sleep,
+        sleep_fn=socketio.sleep, run_blocking=_run_blocking,
     )
     socketio.start_background_task(monitor.loop)
     try:
@@ -1496,7 +1502,7 @@ def _launch_chat_stream(cid, backend, model, resolved_model, messages, cit_json,
     it and emit the final chat_answer."""
     def run():
         monitor = SystemMonitor(emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
-                                sleep_fn=socketio.sleep)
+                                sleep_fn=socketio.sleep, run_blocking=_run_blocking)
         socketio.start_background_task(monitor.loop)
         t0 = time.time()
         answer_parts, reasoning_parts, stopped = [], [], False
@@ -1815,7 +1821,7 @@ def _start_local_job(job):
     def run():
         monitor = SystemMonitor(
             emit_fn=lambda s: socketio.emit("system_stats", s, room=room),
-            sleep_fn=socketio.sleep,
+            sleep_fn=socketio.sleep, run_blocking=_run_blocking,
         )
         socketio.start_background_task(monitor.loop)
         try:
