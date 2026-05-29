@@ -246,7 +246,7 @@ class Conversation(db.Model):
         }
         if include_messages:
             d["messages"] = [m.to_dict() for m in
-                             self.messages.order_by(ChatMessage.created_at).all()]
+                             self.messages.order_by(ChatMessage.id).all()]
         return d
 
 

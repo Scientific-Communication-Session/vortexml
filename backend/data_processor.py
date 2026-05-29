@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from werkzeug.utils import secure_filename
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -16,9 +17,19 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+def safe_filename(name, default="upload.csv"):
+    """Strip any path components / unsafe characters from an uploaded filename
+    so it can never be joined into a path that escapes its target directory."""
+    base = secure_filename(name or "")
+    if not base:
+        ext = os.path.splitext(name or "")[1]
+        base = default if not ext else "upload" + ext
+    return base
+
+
 def save_uploaded_file(file_storage):
     """Save an uploaded file. If Excel, convert to CSV automatically."""
-    filename = file_storage.filename
+    filename = safe_filename(file_storage.filename)
     filepath = os.path.join(UPLOAD_DIR, filename)
     file_storage.save(filepath)
 

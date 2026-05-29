@@ -20,6 +20,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from flask import Flask, request, jsonify, session, send_file, make_response
+from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room
 
@@ -640,10 +641,21 @@ def download_weights_redirect():
 
 @app.route("/api/weights/file/<filename>", methods=["GET"])
 def download_weights_file(filename):
-    """Download a specific weights file by name."""
-    # Ensure it ends with .pt for safety
+    """Download a weights file — only the caller's own (their current run, or a
+    project they own). Prevents downloading arbitrary files by guessed name."""
+    filename = os.path.basename(filename)  # never trust the path component
     if not filename.endswith(".pt"):
         return jsonify({"error": "Invalid filename"}), 400
+
+    # Authorize: the caller's current weights, or a project they own.
+    owned = _get_state().get("last_weights_file") == filename
+    if not owned:
+        uid = session.get("user_id")
+        if uid is not None:
+            owned = Project.query.filter_by(user_id=uid, weight_filename=filename).first() is not None
+    if not owned:
+        return jsonify({"error": "Weights file not found"}), 404
+
     filepath = os.path.join(WEIGHTS_DIR, filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "Weights file not found on disk"}), 404
@@ -667,13 +679,18 @@ def upload_weights():
     if file.filename == "" or not file.filename.endswith(".pt"):
         return jsonify({"error": "Only .pt weight files are supported"}), 400
 
+    # Strip any path component so the upload can't be written outside WEIGHTS_DIR.
+    safe = secure_filename(file.filename)
+    if not safe.endswith(".pt"):
+        return jsonify({"error": "Invalid weights filename"}), 400
+
     try:
         # Save the file
-        filepath = os.path.join(WEIGHTS_DIR, file.filename)
+        filepath = os.path.join(WEIGHTS_DIR, safe)
         file.save(filepath)
 
         # Parse config from filename
-        config = parse_weight_filename(file.filename)
+        config = parse_weight_filename(safe)
 
         # Validate architecture exists
         if config["arch_type"] not in MODEL_REGISTRY:
@@ -681,13 +698,13 @@ def upload_weights():
 
         # Store in state
         st = _get_state()
-        st["last_weights_file"] = file.filename
+        st["last_weights_file"] = safe
         st["project_name"] = config.get("project_name", "VortexProject")
         st["model_config"] = config
 
         return jsonify({
             "status": "ok",
-            "filename": file.filename,
+            "filename": safe,
             "config": config,
         })
     except ValueError as e:
@@ -1185,6 +1202,8 @@ def rag_download_model(device_id):
     socket_id = data.get("socket_id")
     if backend not in rag.BACKENDS or not model:
         return jsonify({"error": "backend and model are required"}), 400
+    if not rag.BACKENDS[backend].get("local"):
+        return jsonify({"error": f"'{backend}' has no downloadable local model."}), 400
 
     job_id = uuid.uuid4().hex[:12]
     room = f"rag:{job_id}"
@@ -1393,7 +1412,7 @@ def _build_chat_messages(conv, user, content):
                                for h in ctx["hits"]))
                 citations = ctx["citations"]
     messages = [{"role": "system", "content": "\n\n".join(system_parts)}]
-    history = (conv.messages.order_by(ChatMessage.created_at.desc())
+    history = (conv.messages.order_by(ChatMessage.id.desc())
                .limit(_CHAT_HISTORY_LIMIT).all())[::-1]
     for m in history:
         messages.append({"role": m.role, "content": m.content})
@@ -2068,7 +2087,10 @@ def on_node_complete(data):
     if not job:
         return
     meta = data.get("meta") or {}
-    weight_filename = meta.get("weight_filename")
+    # A node's reported filename is data from the wire — strip any path part so
+    # it can only ever land inside WEIGHTS_DIR.
+    weight_filename = os.path.basename(meta.get("weight_filename") or "")
+    meta["weight_filename"] = weight_filename
     weights_b64 = data.get("weights_b64")
     if weight_filename and weights_b64:
         try:
