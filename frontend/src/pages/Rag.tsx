@@ -21,6 +21,8 @@ interface QueryResult { answer: string; citations: Citation[]; chunks: Chunk[]; 
 interface RagDevice { id: number; nickname: string; is_shared: boolean; online?: boolean; status?: string; }
 interface CatalogModel { id: string; downloaded: boolean; size_bytes: number | null; }
 interface CatalogEntry { backend: string; label: string; available: boolean; default_model: string; models: CatalogModel[]; }
+interface InstalledModel { id: string; size_bytes: number | null; }
+interface Installed { hf: InstalledModel[]; ollama: InstalledModel[]; }
 interface LiveStats { cpu_percent?: number; gpu_percent?: number; ram_percent?: number; cpu_temp?: number; gpu_temp?: number; }
 
 const fmtSize = (b: number | null) => (b ? `${(b / 1e9).toFixed(1)} GB` : '');
@@ -65,8 +67,12 @@ const Rag: React.FC = () => {
     const [deviceId, setDeviceId] = useState<number | null>(null); // null = shared M4
     const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
     const [catalogOnline, setCatalogOnline] = useState(true);
+    const [installed, setInstalled] = useState<Installed>({ hf: [], ollama: [] });
     const [downloading, setDownloading] = useState<string | null>(null);
     const [downloadStatus, setDownloadStatus] = useState<string>('');
+    const [deleting, setDeleting] = useState<string | null>(null);
+    const [customBackend, setCustomBackend] = useState('mlx');
+    const [customModel, setCustomModel] = useState('');
 
     // live hardware stats (streamed during a query / download)
     const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
@@ -96,9 +102,10 @@ const Rag: React.FC = () => {
         socketRef.current = s;
         s.on('rag_stats', (d: LiveStats) => setLiveStats(d));
         s.on('rag_download', (d: { status: string }) => setDownloadStatus(d.status));
-        s.on('rag_download_complete', (d: { catalog?: CatalogEntry[] }) => {
+        s.on('rag_download_complete', (d: { catalog?: CatalogEntry[]; installed?: Installed }) => {
             setDownloading(null); setDownloadStatus('');
             if (d.catalog) setCatalog(d.catalog);
+            if (d.installed) setInstalled(d.installed);
             showToast('Model downloaded', 'success');
         });
         s.on('rag_download_error', (d: { error: string }) => { setDownloading(null); setDownloadStatus(''); showToast(d.error, 'error'); });
@@ -118,8 +125,8 @@ const Rag: React.FC = () => {
         const id = deviceId ?? devices.find((d) => d.is_shared)?.id;
         if (id == null) return;
         apiGet(`/api/rag/devices/${id}/models`)
-            .then((d) => { setCatalog(d.catalog || []); setCatalogOnline(d.online !== false); })
-            .catch(() => { setCatalog([]); setCatalogOnline(false); });
+            .then((d) => { setCatalog(d.catalog || []); setInstalled(d.installed || { hf: [], ollama: [] }); setCatalogOnline(d.online !== false); })
+            .catch(() => { setCatalog([]); setInstalled({ hf: [], ollama: [] }); setCatalogOnline(false); });
     }, [deviceId, devices, isBeginner]);
 
     const refreshKbs = () => apiGet('/api/rag/kb').then((d) => setKbs(d.knowledge_bases || [])).catch(() => { });
@@ -186,12 +193,34 @@ const Rag: React.FC = () => {
         }
     };
 
+    const resolvedDeviceId = () => deviceId ?? devices.find((d) => d.is_shared)?.id ?? null;
+
     const downloadModel = async (be: string, mdl: string) => {
-        const id = deviceId ?? devices.find((d) => d.is_shared)?.id;
-        if (id == null) return;
+        const id = resolvedDeviceId();
+        if (id == null || !mdl.trim()) return;
         setDownloading(mdl); setDownloadStatus('Starting…');
-        const d = await apiPost(`/api/rag/devices/${id}/models/download`, { backend: be, model: mdl, socket_id: socketRef.current?.id });
+        const d = await apiPost(`/api/rag/devices/${id}/models/download`, { backend: be, model: mdl.trim(), socket_id: socketRef.current?.id });
         if (d.error) { setDownloading(null); showToast(d.error, 'error'); }
+    };
+
+    const deleteModel = async (be: string, mdl: string) => {
+        const id = resolvedDeviceId();
+        if (id == null) return;
+        if (!confirm(`Delete ${mdl} from this device? You can re-download it later.`)) return;
+        setDeleting(mdl);
+        try {
+            const res = await fetch(`/api/rag/devices/${id}/models`, {
+                method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ backend: be, model: mdl }),
+            });
+            const d = await res.json();
+            if (!res.ok || d.error) { showToast(d.error || `Delete failed (HTTP ${res.status})`, 'error'); return; }
+            if (d.catalog) setCatalog(d.catalog);
+            if (d.installed) setInstalled(d.installed);
+            showToast(`Deleted ${mdl}`, 'success');
+        } catch (e) {
+            showToast('Delete failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
+        } finally { setDeleting(null); }
     };
 
     const selectModel = (be: string, mdl: string) => { setBackend(be); setModel(mdl); showToast(`Using ${mdl}`, 'success'); };
@@ -322,12 +351,19 @@ const Rag: React.FC = () => {
                                                                 {m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
                                                             </div>
                                                             <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
-                                                                {m.downloaded
-                                                                    ? <button className="btn btn-secondary btn-sm" disabled={!cat.available} onClick={() => selectModel(cat.backend, m.id)}>Use</button>
-                                                                    : <button className="btn btn-secondary btn-sm" disabled={downloading === m.id} onClick={() => downloadModel(cat.backend, m.id)}>
+                                                                {m.downloaded ? (
+                                                                    <>
+                                                                        <button className="btn btn-secondary btn-sm" disabled={!cat.available} onClick={() => selectModel(cat.backend, m.id)}>Use</button>
+                                                                        <button className="btn btn-danger btn-sm" disabled={deleting === m.id} title="Delete to reclaim disk" onClick={() => deleteModel(cat.backend, m.id)}>
+                                                                            {deleting === m.id ? <Loader2 size={12} className="chat-msg__spinner" /> : <Trash2 size={12} />}
+                                                                        </button>
+                                                                    </>
+                                                                ) : (
+                                                                    <button className="btn btn-secondary btn-sm" disabled={downloading === m.id} onClick={() => downloadModel(cat.backend, m.id)}>
                                                                         {downloading === m.id ? <Loader2 size={12} className="chat-msg__spinner" /> : <Download size={12} />}
                                                                         <span style={{ marginLeft: 4 }}>{downloading === m.id ? 'Downloading' : 'Download'}</span>
-                                                                      </button>}
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     ))}
@@ -336,6 +372,47 @@ const Rag: React.FC = () => {
                                         ))}
                                     </div>
                                     {downloading && downloadStatus && <div className="text-muted" style={{ fontSize: '0.78rem', marginTop: '0.5rem' }}>⏳ {downloadStatus}</div>}
+
+                                    {/* download any custom model */}
+                                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
+                                        <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Download a custom model</div>
+                                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                            <select value={customBackend} onChange={(e) => setCustomBackend(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+                                                {catalog.map((c) => <option key={c.backend} value={c.backend}>{c.label}</option>)}
+                                            </select>
+                                            <input value={customModel} onChange={(e) => setCustomModel(e.target.value)}
+                                                placeholder={customBackend === 'ollama' ? 'e.g. qwen2.5:7b' : customBackend === 'llama_cpp' ? 'repo:file.gguf' : 'e.g. mlx-community/Qwen2.5-7B-Instruct-4bit'}
+                                                onKeyDown={(e) => { if (e.key === 'Enter' && customModel.trim()) { downloadModel(customBackend, customModel); setCustomModel(''); } }}
+                                                style={{ ...inputStyle, flex: 1, minWidth: 200, fontFamily: 'var(--font-mono)' }} />
+                                            <button className="btn btn-secondary btn-sm" disabled={!customModel.trim() || downloading === customModel.trim()}
+                                                onClick={() => { downloadModel(customBackend, customModel); setCustomModel(''); }}>
+                                                <Download size={13} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Download
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* everything stored on this device */}
+                                    {(installed.hf.length > 0 || installed.ollama.length > 0) && (
+                                        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
+                                            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+                                                Installed on this device <span className="text-muted" style={{ fontWeight: 400 }}>· {installed.hf.length + installed.ollama.length} models</span>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                                                {[...installed.hf.map((m) => ({ ...m, source: 'transformers' })), ...installed.ollama.map((m) => ({ ...m, source: 'ollama' }))].map((m) => (
+                                                    <div key={m.source + m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
+                                                        <div style={{ minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {m.id}{m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
+                                                            <span className="text-muted"> · {m.source === 'ollama' ? 'Ollama' : 'HF'}</span>
+                                                        </div>
+                                                        <button className="btn btn-danger btn-sm" disabled={deleting === m.id} title="Delete to reclaim disk"
+                                                            onClick={() => deleteModel(m.source, m.id)} style={{ flexShrink: 0 }}>
+                                                            {deleting === m.id ? <Loader2 size={12} className="chat-msg__spinner" /> : <Trash2 size={12} />}
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
