@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { io, Socket } from 'socket.io-client';
 import Chart from 'chart.js/auto';
-import { Wand2, Upload, Loader2, Download, Boxes } from 'lucide-react';
+import { Wand2, Upload, Loader2, Download, Boxes, Cpu } from 'lucide-react';
 import { apiGet, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
@@ -26,7 +27,10 @@ interface Evaluation {
     mae?: number; rmse?: number; r2?: number | null;
     residuals?: { true: number; pred: number; residual: number }[];
 }
-interface PredictResponse { predictions: Prediction[]; evaluation: Evaluation | null; }
+interface LiveStats { cpu_percent?: number; gpu_percent?: number; ram_percent?: number; cpu_temp?: number; gpu_temp?: number; }
+interface ResourceInfo { inference_ms?: number; rows_per_sec?: number | null; stats?: LiveStats | null; }
+interface PredictResponse { predictions: Prediction[]; evaluation: Evaluation | null; device?: string | null; resource?: ResourceInfo | null; }
+interface RDevice { id: number; nickname: string; is_shared: boolean; online?: boolean; }
 
 const ARCH_LABEL: Record<string, string> = {
     mlp: 'MLP', dnn: 'DNN', cnn1d: 'CNN-1D', rnn: 'RNN', lstm: 'LSTM',
@@ -42,6 +46,7 @@ const inputStyle: React.CSSProperties = {
 const Playground: React.FC = () => {
     const navigate = useNavigate();
     const { user, isLoading: authLoading } = useAuth();
+    const isBeginner = user?.is_beginner === true;
     const [projects, setProjects] = useState<Project[]>([]);
     const [selectedId, setSelectedId] = useState<number | null>(null);
     const [schema, setSchema] = useState<Schema | null>(null);
@@ -49,9 +54,13 @@ const Playground: React.FC = () => {
     const [result, setResult] = useState<PredictResponse | null>(null);
     const [busy, setBusy] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [devices, setDevices] = useState<RDevice[]>([]);
+    const [deviceId, setDeviceId] = useState<number | null>(null);
+    const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
 
     const residualCanvasRef = useRef<HTMLCanvasElement>(null);
     const residualChartRef = useRef<Chart | null>(null);
+    const socketRef = useRef<Socket | null>(null);
 
     useEffect(() => {
         if (authLoading) return;
@@ -60,13 +69,28 @@ const Playground: React.FC = () => {
             .then((d) => setProjects(d.projects ?? []))
             .catch((e) => showToast('Failed to load models: ' + (e instanceof Error ? e.message : String(e)), 'error'))
             .finally(() => setLoading(false));
-    }, [user, authLoading, navigate]);
+        if (!isBeginner) apiGet('/api/rag/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
+    }, [user, authLoading, navigate, isBeginner]);
 
-    // Load the selected model's input schema.
+    // Socket: remote prediction results + live hardware stats while a node runs.
     useEffect(() => {
-        if (selectedId == null) { setSchema(null); return; }
+        if (!user) return;
+        const s = io();
+        socketRef.current = s;
+        s.on('predict_result', (d: PredictResponse) => {
+            setResult({ predictions: d.predictions || [], evaluation: d.evaluation || null, device: d.device, resource: d.resource });
+            setBusy(false); setLiveStats(null);
+        });
+        s.on('predict_stats', (d: LiveStats) => setLiveStats(d));
+        s.on('predict_error', (d: { error: string }) => { showToast(d.error, 'error'); setBusy(false); setLiveStats(null); });
+        return () => { s.disconnect(); socketRef.current = null; };
+    }, [user]);
+
+    // Load the selected model's input schema. (The schema/result reset happens in
+    // the model picker's onChange, so this effect only sets state asynchronously.)
+    useEffect(() => {
+        if (selectedId == null) return;
         let cancelled = false;
-        setResult(null);
         fetch(`/api/projects/${selectedId}/inference`, { credentials: 'include' })
             .then((r) => r.json())
             .then((s: Schema) => {
@@ -107,7 +131,7 @@ const Playground: React.FC = () => {
 
     const runPrediction = async (body: BodyInit, isJson: boolean) => {
         if (selectedId == null) return;
-        setBusy(true); setResult(null);
+        setBusy(true); setResult(null); setLiveStats(null);
         try {
             const res = await fetch(`/api/projects/${selectedId}/predict`, {
                 method: 'POST', credentials: 'include',
@@ -115,15 +139,24 @@ const Playground: React.FC = () => {
                 body,
             });
             const data = await res.json();
-            if (!res.ok || data.error) { showToast(data.error || `Prediction failed (HTTP ${res.status})`, 'error'); return; }
-            setResult({ predictions: data.predictions || [], evaluation: data.evaluation || null });
+            if (!res.ok || data.error) { showToast(data.error || `Prediction failed (HTTP ${res.status})`, 'error'); setBusy(false); return; }
+            if (data.mode === 'remote') return;  // result arrives over the socket (predict_result)
+            setResult({ predictions: data.predictions || [], evaluation: data.evaluation || null, device: data.device, resource: data.resource });
+            setBusy(false);
         } catch (e) {
             showToast('Prediction failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
-        } finally { setBusy(false); }
+            setBusy(false);
+        }
     };
 
-    const predictScenario = () => runPrediction(JSON.stringify({ rows: [values] }), true);
-    const predictCsv = (file: File) => { const fd = new FormData(); fd.append('file', file); runPrediction(fd, false); };
+    const predictScenario = () => runPrediction(JSON.stringify({ rows: [values], device_id: deviceId, socket_id: socketRef.current?.id }), true);
+    const predictCsv = (file: File) => {
+        const fd = new FormData();
+        fd.append('file', file);
+        if (deviceId != null) fd.append('device_id', String(deviceId));
+        if (socketRef.current?.id) fd.append('socket_id', socketRef.current.id);
+        runPrediction(fd, false);
+    };
     const exportModel = (fmt: 'onnx' | 'torchscript') => {
         if (selectedId == null) return;
         window.location.href = `/api/projects/${selectedId}/export?format=${fmt}`;
@@ -154,7 +187,7 @@ const Playground: React.FC = () => {
                         <div className="panel-title"><span className="pt-icon"><Boxes size={16} style={{ verticalAlign: 'middle' }} /></span> Choose a model</div>
                         <select
                             value={selectedId ?? ''}
-                            onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
+                            onChange={(e) => { setSelectedId(e.target.value ? Number(e.target.value) : null); setSchema(null); setResult(null); setLiveStats(null); }}
                             style={{ ...inputStyle, maxWidth: 460 }}
                         >
                             <option value="">— select a trained model —</option>
@@ -165,6 +198,17 @@ const Playground: React.FC = () => {
                                 </option>
                             ))}
                         </select>
+
+                        {!isBeginner && devices.length > 1 && (
+                            <div style={{ marginTop: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <span className="text-muted" style={{ fontSize: '0.8rem' }}>Run inference on:</span>
+                                <select value={deviceId ?? ''} onChange={(e) => setDeviceId(e.target.value ? Number(e.target.value) : null)}
+                                    style={{ ...inputStyle, maxWidth: 240 }} title="Where the forward pass runs">
+                                    <option value="">🖥️ Shared device</option>
+                                    {devices.filter((d) => !d.is_shared).map((d) => <option key={d.id} value={d.id}>💻 {d.nickname}</option>)}
+                                </select>
+                            </div>
+                        )}
 
                         {selectedId != null && (
                             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.9rem', flexWrap: 'wrap' }}>
@@ -220,7 +264,19 @@ const Playground: React.FC = () => {
                                         onChange={(e) => { if (e.target.files?.[0]) predictCsv(e.target.files[0]); }} />
                                 </label>
                             </div>
+                            {busy && !isBeginner && liveStats && (
+                                <div className="text-muted" style={{ marginTop: '0.7rem', fontSize: '0.78rem', display: 'inline-flex', gap: '0.7rem', alignItems: 'center' }}>
+                                    <Cpu size={12} style={{ verticalAlign: 'middle' }} /> running on device…
+                                    {liveStats.cpu_percent != null && <span>CPU {Math.round(liveStats.cpu_percent)}%</span>}
+                                    {liveStats.gpu_percent != null && <span>GPU {Math.round(liveStats.gpu_percent)}%</span>}
+                                    {liveStats.cpu_temp != null && <span>{Math.round(liveStats.cpu_temp)}°C</span>}
+                                </div>
+                            )}
                         </div>
+                    )}
+
+                    {!isBeginner && result && (result.resource || result.device) && (
+                        <ResourcePanel device={result.device} resource={result.resource} />
                     )}
 
                     {single && (
@@ -324,5 +380,32 @@ const Metric: React.FC<{ label: string; value?: number; int?: boolean }> = ({ la
         <div className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
     </div>
 );
+
+// Resource-consumption readout for a forward pass — where it ran, how long it
+// took, throughput, and the hardware snapshot taken during inference.
+const ResourcePanel: React.FC<{ device?: string | null; resource?: ResourceInfo | null }> = ({ device, resource }) => {
+    const s = resource?.stats || {};
+    const chip = (label: string, value: string) => (
+        <div style={{ padding: '0.5rem 0.7rem', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.05rem', fontWeight: 700 }}>{value}</div>
+            <div className="text-muted" style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+        </div>
+    );
+    return (
+        <div className="glass-panel">
+            <div className="panel-title"><span className="pt-icon"><Cpu size={16} style={{ verticalAlign: 'middle' }} /></span> Resource consumption</div>
+            <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                {device && chip('Device', device)}
+                {resource?.inference_ms != null && chip('Inference', `${resource.inference_ms} ms`)}
+                {resource?.rows_per_sec != null && chip('Throughput', `${resource.rows_per_sec} rows/s`)}
+                {s.cpu_percent != null && chip('CPU', `${Math.round(s.cpu_percent)}%`)}
+                {s.gpu_percent != null && chip('GPU', `${Math.round(s.gpu_percent)}%`)}
+                {s.ram_percent != null && chip('RAM', `${Math.round(s.ram_percent)}%`)}
+                {s.cpu_temp != null && chip('CPU temp', `${Math.round(s.cpu_temp)}°C`)}
+                {s.gpu_temp != null && chip('GPU temp', `${Math.round(s.gpu_temp)}°C`)}
+            </div>
+        </div>
+    );
+};
 
 export default Playground;

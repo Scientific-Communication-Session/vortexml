@@ -41,7 +41,7 @@ from training_engine import (
 from device_specs import detect_specs
 from auto_config_rules import recommend_config, guard_config
 import rag
-from system_stats import SystemMonitor
+from system_stats import SystemMonitor, sample as sample_stats
 
 # Run blocking hardware sampling (ioreg/nvidia-smi subprocesses, IOKit ctypes)
 # in a real OS thread so it never stalls the single eventlet hub that also
@@ -170,6 +170,7 @@ _queues = defaultdict(list)  # device_id -> [pending job dicts] (FIFO)
 _MAX_RESUME_ATTEMPTS = 1     # auto-restart an interrupted remote job this many times
 _rag_jobs = {}     # job_id -> {citations, chunks, backend, model, room} for remote RAG queries
 _chat_jobs = {}    # job_id -> {conversation_id, owner_user_id, citations, model, room} for remote chat turns
+_predict_jobs = {} # job_id -> {device, room} for remote neural-net inference
 
 
 def _utcnow():
@@ -872,6 +873,20 @@ def _project_preprocess(proj):
     return load_preprocess(os.path.join(WEIGHTS_DIR, proj.weight_filename))
 
 
+def _inference_resource(elapsed, n_rows):
+    """Resource-consumption summary for a forward pass: timing, throughput, and a
+    one-shot hardware snapshot (sampled off the event loop so it doesn't stall)."""
+    try:
+        snap = _run_blocking(sample_stats) or {}
+    except Exception:
+        snap = {}
+    return {
+        "inference_ms": round(elapsed * 1000, 1),
+        "rows_per_sec": round(n_rows / elapsed, 1) if elapsed > 0 else None,
+        "stats": snap,
+    }
+
+
 @app.route("/api/projects/<int:project_id>/inference", methods=["GET"])
 def inference_schema(project_id):
     """Describe the inputs a saved model expects, so the UI can build a form."""
@@ -930,6 +945,10 @@ def predict_project(project_id):
         return jsonify({"error": "This model can't be used for prediction "
                                  "(missing weights or preprocessing). Retrain it."}), 409
 
+    # device_id / socket_id may arrive as JSON (rows body) or multipart form fields.
+    device_id = request.form.get("device_id", type=int) if request.form else None
+    socket_id = request.form.get("socket_id") if request.form else None
+
     # Collect input rows from a CSV upload or a JSON body.
     rows = []
     if "file" in request.files and request.files["file"].filename:
@@ -950,41 +969,68 @@ def predict_project(project_id):
         rows = body.get("rows") or []
         if isinstance(rows, dict):
             rows = [rows]
+        device_id = body.get("device_id")
+        socket_id = body.get("socket_id")
 
     if not rows:
         return jsonify({"error": "No input rows provided"}), 400
     if len(rows) > 5000:
         return jsonify({"error": "Too many rows (max 5000 per request)"}), 400
 
+    # Which device runs the forward pass? None / shared → here; a personal node
+    # → ship the model + rows to that node and relay the result back.
+    device, derr = _resolve_rag_device(device_id, user.id)
+    if derr:
+        return derr
+
+    if device is not None and not device.is_shared:
+        node = _nodes.get(device.id)
+        if not node:
+            return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent and try again."}), 409
+        try:
+            with open(weights_path, "rb") as wf:
+                weights_b64 = base64.b64encode(wf.read()).decode()
+        except Exception as e:
+            return jsonify({"error": f"Could not read weights: {e}"}), 500
+        job_id = uuid.uuid4().hex[:12]
+        room = f"predict:{job_id}"
+        _join_job_room(socket_id, room)
+        _predict_jobs[job_id] = {"device": device.nickname, "room": room}
+        # Rows from a CSV upload can carry numpy scalars (np.int64, np.bool_) that
+        # the socket's JSON encoder can't serialize — coerce to plain Python first.
+        rows_payload = _json.loads(_json.dumps(
+            rows, default=lambda o: o.item() if hasattr(o, "item") else None))
+        socketio.emit("node_predict", {
+            "job_id": job_id,
+            "weights_b64": weights_b64,
+            "arch_type": proj.arch_type,
+            "layer_sizes": _json.loads(proj.layer_sizes),
+            "activation": proj.activation,
+            "preprocess": pp,
+            "rows": rows_payload,
+        }, room=node["sid"])
+        return jsonify({"status": "predicting", "mode": "remote",
+                        "job_id": job_id, "room": room, "device": device.nickname,
+                        "count": len(rows)})
+
+    # ── Local: run the forward pass here on the shared device ──
     try:
         X = apply_preprocess(pp, rows)
         model = load_weights_for_inference(
             weights_path, proj.arch_type, _json.loads(proj.layer_sizes),
             pp["input_dim"], pp["output_dim"], activation=proj.activation,
         )
+        t0 = time.time()
         out = predict(model, X, pp["task_type"])
+        elapsed = time.time() - t0
     except Exception as e:
         return jsonify({"error": f"Prediction failed: {e}"}), 500
 
-    predictions = []
-    if pp["task_type"] == "classification":
-        classes = pp.get("target_classes") or [str(i) for i in range(pp["output_dim"])]
-        for idx, probs in zip(out["indices"], out["probs"]):
-            label = classes[idx] if 0 <= idx < len(classes) else str(idx)
-            predictions.append({
-                "prediction": label,
-                "confidence": round(float(probs[idx]), 4),
-                "probabilities": {classes[i] if i < len(classes) else str(i): round(float(p), 4)
-                                  for i, p in enumerate(probs)},
-            })
-    else:
-        for v in out["values"]:
-            predictions.append({"prediction": round(float(v), 6)})
-
+    from training_engine import format_predictions, evaluate_predictions
+    predictions = format_predictions(pp, out)
     # If the caller supplied the true target alongside the features (e.g. a
-    # labelled CSV), evaluate the model against it on the spot — confusion
-    # matrix for classification, residual stats for regression.
-    evaluation = _evaluate_predictions(pp, rows, predictions)
+    # labelled CSV), evaluate the model against it on the spot.
+    evaluation = evaluate_predictions(pp, rows, predictions)
 
     return jsonify({
         "task_type": pp["task_type"],
@@ -992,6 +1038,8 @@ def predict_project(project_id):
         "count": len(predictions),
         "predictions": predictions,
         "evaluation": evaluation,
+        "device": device.nickname if device else "Shared device",
+        "resource": _inference_resource(elapsed, len(rows)),
     })
 
 
@@ -1651,65 +1699,9 @@ def on_chat_stop(data):
         _chat_cancel.add(jid)
 
 
-def _evaluate_predictions(pp, rows, predictions):
-    """Build evaluation metrics when every row carries the true target value.
-    Returns None if the target isn't present (plain prediction, no ground truth)."""
-    target_col = pp.get("target_col")
-    if not target_col:
-        return None
-    truths = [r.get(target_col) for r in rows]
-    if any(t is None or t == "" for t in truths):
-        return None  # not a labelled batch — nothing to score against
-
-    if pp["task_type"] == "classification":
-        classes = pp.get("target_classes") or []
-        index = {c: i for i, c in enumerate(classes)}
-        k = len(classes)
-        cm = [[0] * k for _ in range(k)]
-        correct = counted = 0
-        for true, pred in zip(truths, predictions):
-            t, p = str(true), str(pred["prediction"])
-            if t in index and p in index:
-                cm[index[t]][index[p]] += 1
-                counted += 1
-                if t == p:
-                    correct += 1
-        if not counted:
-            return None
-        return {
-            "task_type": "classification",
-            "classes": classes,
-            "confusion_matrix": cm,
-            "accuracy": round(correct / counted, 4),
-            "n": counted,
-        }
-
-    # regression
-    pairs = []
-    for true, pred in zip(truths, predictions):
-        try:
-            pairs.append((float(true), float(pred["prediction"])))
-        except (TypeError, ValueError):
-            continue
-    if not pairs:
-        return None
-    n = len(pairs)
-    errs = [p - t for t, p in pairs]
-    mae = sum(abs(e) for e in errs) / n
-    rmse = (sum(e * e for e in errs) / n) ** 0.5
-    mean_t = sum(t for t, _ in pairs) / n
-    ss_tot = sum((t - mean_t) ** 2 for t, _ in pairs)
-    ss_res = sum(e * e for e in errs)
-    r2 = (1 - ss_res / ss_tot) if ss_tot > 0 else None
-    return {
-        "task_type": "regression",
-        "mae": round(mae, 6),
-        "rmse": round(rmse, 6),
-        "r2": round(r2, 4) if r2 is not None else None,
-        "n": n,
-        "residuals": [{"true": round(t, 4), "pred": round(p, 4), "residual": round(p - t, 4)}
-                      for t, p in pairs[:500]],
-    }
+# NN prediction formatting + evaluation now live in training_engine
+# (format_predictions / evaluate_predictions) so the server and a remote node
+# produce byte-identical results.
 
 
 # ─────────────────────────────────────────────────────────
@@ -2179,6 +2171,37 @@ def on_node_rag_error(data):
     _rag_jobs.pop(data.get("job_id"), None)
     socketio.emit("rag_error", {"error": data.get("error", "Remote generation failed")},
                   room=f"rag:{data.get('job_id')}")
+
+
+@socketio.on("node_predict_stats")
+def on_node_predict_stats(data):
+    data = data or {}
+    socketio.emit("predict_stats", data.get("stats") or {}, room=f"predict:{data.get('job_id')}")
+
+
+@socketio.on("node_predict_complete")
+def on_node_predict_complete(data):
+    """A node finished a forward pass: push the predictions + resource use out."""
+    data = data or {}
+    jid = data.get("job_id")
+    job = _predict_jobs.pop(jid, None)
+    socketio.emit("predict_result", {
+        "task_type": data.get("task_type"),
+        "target_col": data.get("target_col"),
+        "count": data.get("count"),
+        "predictions": data.get("predictions") or [],
+        "evaluation": data.get("evaluation"),
+        "resource": data.get("resource"),
+        "device": job["device"] if job else None,
+    }, room=f"predict:{jid}")
+
+
+@socketio.on("node_predict_error")
+def on_node_predict_error(data):
+    data = data or {}
+    _predict_jobs.pop(data.get("job_id"), None)
+    socketio.emit("predict_error", {"error": data.get("error", "Remote prediction failed")},
+                  room=f"predict:{data.get('job_id')}")
 
 
 @socketio.on("node_chat_complete")

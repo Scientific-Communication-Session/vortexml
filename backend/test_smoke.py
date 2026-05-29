@@ -116,6 +116,11 @@ def main():
         {"f1": 0.9, "f2": 0.9, "f3": 0.2, "label": 1}, {"f1": 0.1, "f2": 0.1, "f3": 0.5, "label": 0}]}).get_json()
     expect(len(pr["predictions"]) == 2 and pr.get("evaluation") and "confusion_matrix" in pr["evaluation"],
            "predict + evaluation (confusion matrix)")
+    expect(pr.get("device") and pr.get("resource") and pr["resource"].get("inference_ms") is not None,
+           "predict reports device + resource consumption")
+    # Targeting an offline/unknown node for inference returns a clear 409/404.
+    off = c.post(f"/api/projects/{pid}/predict", json={"rows": [{"f1": 0.5, "f2": 0.5, "f3": 0.5}], "device_id": 999999})
+    expect(off.status_code in (404, 409), "predict on missing device -> 404/409")
     expect(c.get(f"/api/projects/{pid}/export?format=onnx").status_code == 200, "export onnx -> 200")
     expect(c.get(f"/api/projects/{pid}/export?format=torchscript").status_code == 200, "export torchscript -> 200")
     expect(c.get(f"/api/projects/{pid}/export?format=bogus").status_code == 400, "export bad format -> 400")

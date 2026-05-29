@@ -344,6 +344,80 @@ def predict(model, X, task_type):
         return {"values": out.cpu().numpy().reshape(-1).tolist()}
 
 
+def format_predictions(pp, out):
+    """Turn raw predict() output into labelled, UI-ready prediction dicts.
+
+    Shared by the server's /predict endpoint and the node agent so a model run
+    locally or on a remote device produces byte-identical results.
+    """
+    predictions = []
+    if pp["task_type"] == "classification":
+        classes = pp.get("target_classes") or [str(i) for i in range(pp["output_dim"])]
+        for idx, probs in zip(out["indices"], out["probs"]):
+            label = classes[idx] if 0 <= idx < len(classes) else str(idx)
+            predictions.append({
+                "prediction": label,
+                "confidence": round(float(probs[idx]), 4),
+                "probabilities": {classes[i] if i < len(classes) else str(i): round(float(p), 4)
+                                  for i, p in enumerate(probs)},
+            })
+    else:
+        for v in out["values"]:
+            predictions.append({"prediction": round(float(v), 6)})
+    return predictions
+
+
+def evaluate_predictions(pp, rows, predictions):
+    """Score predictions when every row carries the true target value.
+    Returns None if the target isn't present (plain prediction, no ground truth).
+    Confusion matrix for classification, residual stats for regression."""
+    target_col = pp.get("target_col")
+    if not target_col:
+        return None
+    truths = [r.get(target_col) for r in rows]
+    if any(t is None or t == "" for t in truths):
+        return None  # not a labelled batch — nothing to score against
+
+    if pp["task_type"] == "classification":
+        classes = pp.get("target_classes") or []
+        index = {c: i for i, c in enumerate(classes)}
+        k = len(classes)
+        cm = [[0] * k for _ in range(k)]
+        correct = counted = 0
+        for true, pred in zip(truths, predictions):
+            t, p = str(true), str(pred["prediction"])
+            if t in index and p in index:
+                cm[index[t]][index[p]] += 1
+                counted += 1
+                if t == p:
+                    correct += 1
+        if not counted:
+            return None
+        return {"task_type": "classification", "classes": classes,
+                "confusion_matrix": cm, "accuracy": round(correct / counted, 4), "n": counted}
+
+    pairs = []
+    for true, pred in zip(truths, predictions):
+        try:
+            pairs.append((float(true), float(pred["prediction"])))
+        except (TypeError, ValueError):
+            continue
+    if not pairs:
+        return None
+    n = len(pairs)
+    errs = [p - t for t, p in pairs]
+    mae = sum(abs(e) for e in errs) / n
+    rmse = (sum(e * e for e in errs) / n) ** 0.5
+    mean_t = sum(t for t, _ in pairs) / n
+    ss_tot = sum((t - mean_t) ** 2 for t, _ in pairs)
+    ss_res = sum(e * e for e in errs)
+    r2 = (1 - ss_res / ss_tot) if ss_tot > 0 else None
+    return {"task_type": "regression", "mae": round(mae, 6), "rmse": round(rmse, 6),
+            "r2": round(r2, 4) if r2 is not None else None, "n": n,
+            "residuals": [{"true": round(t, 4), "pred": round(p, 4), "residual": round(p - t, 4)}
+                          for t, p in pairs[:500]]}
+
+
 def export_model(weights_path, arch_type, layer_sizes, input_dim, output_dim,
                  activation="relu", fmt="onnx"):
     """Export a trained model to a portable format and return the file bytes.

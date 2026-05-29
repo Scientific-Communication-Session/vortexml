@@ -21,6 +21,21 @@ import base64
 import threading
 import traceback
 
+# ── On-disk layout for this device ───────────────────────────────────────────
+# Everything this node stores lives under uploads/, split into three folders by
+# kind. We create them — and point the Hugging Face cache at llms/ — *before*
+# importing any model library, so downloaded LLM weights land in llms/ rather
+# than the user's home cache. (Chat history is NOT stored here; conversations
+# live in the central PostgreSQL database.)
+HERE = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(HERE, "uploads")
+WEIGHTS_DIR = os.path.join(UPLOAD_DIR, "weights")  # trained neural-net weights (.pt)
+LLMS_DIR = os.path.join(UPLOAD_DIR, "llms")        # downloaded RAG/chat LLMs (HF cache, GGUF)
+MODELS_DIR = os.path.join(UPLOAD_DIR, "models")    # exported / portable models (ONNX, TorchScript)
+for _d in (WEIGHTS_DIR, LLMS_DIR, MODELS_DIR):
+    os.makedirs(_d, exist_ok=True)
+os.environ.setdefault("HF_HOME", LLMS_DIR)
+
 try:
     import socketio  # python-socketio client
 except ImportError:
@@ -35,10 +50,7 @@ try:
 except Exception:
     rag = None
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "node_config.json")
-UPLOAD_DIR = os.path.join(HERE, "uploads")
-os.makedirs(os.path.join(UPLOAD_DIR, "weights"), exist_ok=True)
 
 
 def load_config():
@@ -332,6 +344,64 @@ def on_chat(payload):
                                      "error": "RAG support not bundled on this node."})
         return
     threading.Thread(target=_chat, args=(payload,), daemon=True).start()
+
+
+def _predict(payload):
+    """Run a trained neural-net forward pass on this device. The server ships the
+    weights, preprocessing, and rows; we return formatted predictions + an
+    evaluation + this machine's resource use."""
+    job_id = payload["job_id"]
+    wpath = None
+    monitor = SystemMonitor(
+        emit_fn=lambda s: sio.emit("node_predict_stats", {"job_id": job_id, "stats": s}),
+        sleep_fn=time.sleep,
+    )
+    threading.Thread(target=monitor.loop, daemon=True).start()
+    try:
+        from data_processor import apply_preprocess
+        from training_engine import (load_weights_for_inference, predict,
+                                      format_predictions, evaluate_predictions)
+        import system_stats
+        pp = payload["preprocess"]
+        rows = payload["rows"]
+        wpath = os.path.join(WEIGHTS_DIR, f"predict_{job_id}.pt")
+        with open(wpath, "wb") as f:
+            f.write(base64.b64decode(payload["weights_b64"]))
+        X = apply_preprocess(pp, rows)
+        model = load_weights_for_inference(
+            wpath, payload["arch_type"], payload["layer_sizes"],
+            pp["input_dim"], pp["output_dim"], activation=payload.get("activation", "relu"))
+        t0 = time.time()
+        out = predict(model, X, pp["task_type"])
+        elapsed = time.time() - t0
+        preds = format_predictions(pp, out)
+        evaluation = evaluate_predictions(pp, rows, preds)
+        try:
+            snap = system_stats.sample()
+        except Exception:
+            snap = {}
+        sio.emit("node_predict_complete", {
+            "job_id": job_id, "task_type": pp["task_type"], "target_col": pp.get("target_col"),
+            "count": len(preds), "predictions": preds, "evaluation": evaluation,
+            "resource": {"inference_ms": round(elapsed * 1000, 1),
+                         "rows_per_sec": round(len(rows) / elapsed, 1) if elapsed > 0 else None,
+                         "stats": snap},
+        })
+    except Exception as e:
+        traceback.print_exc()
+        sio.emit("node_predict_error", {"job_id": job_id, "error": str(e)})
+    finally:
+        monitor.stop()
+        if wpath and os.path.exists(wpath):
+            try:
+                os.remove(wpath)
+            except Exception:
+                pass
+
+
+@sio.on("node_predict")
+def on_predict(payload):
+    threading.Thread(target=_predict, args=(payload,), daemon=True).start()
 
 
 # ── Startup banners ──────────────────────────────────────
