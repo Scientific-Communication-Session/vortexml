@@ -290,6 +290,37 @@ def on_rag_query(payload):
     threading.Thread(target=_rag_query, args=(payload,), daemon=True).start()
 
 
+def _chat(payload):
+    job_id = payload["job_id"]
+    monitor = SystemMonitor(
+        emit_fn=lambda s: sio.emit("node_rag_stats", {"job_id": job_id, "stats": s}),
+        sleep_fn=time.sleep,
+    )
+    threading.Thread(target=monitor.loop, daemon=True).start()
+    try:
+        gen = rag.chat(payload["backend"], payload.get("model"), payload["messages"],
+                       payload.get("temperature", 0.7), payload.get("max_tokens", 700))
+        sio.emit("node_chat_complete", {
+            "job_id": job_id, "text": gen["text"], "model": payload.get("model"),
+            "stats": {"tokens": gen["tokens"], "gen_time": gen["gen_time"],
+                      "tokens_per_second": gen["tokens_per_second"]},
+        })
+    except Exception as e:
+        traceback.print_exc()
+        sio.emit("node_chat_error", {"job_id": job_id, "error": str(e)})
+    finally:
+        monitor.stop()
+
+
+@sio.on("node_chat")
+def on_chat(payload):
+    if rag is None:
+        sio.emit("node_chat_error", {"job_id": (payload or {}).get("job_id"),
+                                     "error": "RAG support not bundled on this node."})
+        return
+    threading.Thread(target=_chat, args=(payload,), daemon=True).start()
+
+
 # ── Startup banners ──────────────────────────────────────
 _VORTEX_ART = r"""
 $$\    $$\                      $$\                               $$\      $$\ $$\

@@ -32,6 +32,8 @@ class User(db.Model):
                               cascade='all, delete-orphan')
     knowledge_bases = db.relationship('KnowledgeBase', backref='user', lazy='dynamic',
                                       cascade='all, delete-orphan')
+    conversations = db.relationship('Conversation', backref='user', lazy='dynamic',
+                                    cascade='all, delete-orphan')
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -207,5 +209,69 @@ class Document(db.Model):
             "filename": self.filename,
             "char_count": self.char_count,
             "chunk_count": self.chunk_count,
+            "created_at": self.created_at.isoformat() + "Z",
+        }
+
+
+class Conversation(db.Model):
+    """A ChatGPT-style conversation with one of the user's models. The generation
+    settings (backend/model/device, optional knowledge base for RAG grounding)
+    are pinned on the conversation."""
+    __tablename__ = 'conversations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False, default='New chat')
+    backend = db.Column(db.String(40), nullable=False, default='cloud')
+    model = db.Column(db.String(200), nullable=True)
+    device_id = db.Column(db.Integer, nullable=True)   # null = shared M4
+    kb_id = db.Column(db.Integer, nullable=True)        # optional RAG grounding
+    created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    messages = db.relationship('ChatMessage', backref='conversation', lazy='dynamic',
+                               cascade='all, delete-orphan')
+
+    def to_dict(self, include_messages=False):
+        d = {
+            "id": self.id,
+            "title": self.title,
+            "backend": self.backend,
+            "model": self.model,
+            "device_id": self.device_id,
+            "kb_id": self.kb_id,
+            "created_at": self.created_at.isoformat() + "Z",
+            "updated_at": self.updated_at.isoformat() + "Z",
+        }
+        if include_messages:
+            d["messages"] = [m.to_dict() for m in
+                             self.messages.order_by(ChatMessage.created_at).all()]
+        return d
+
+
+class ChatMessage(db.Model):
+    __tablename__ = 'chat_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id', ondelete='CASCADE'),
+                                nullable=False, index=True)
+    role = db.Column(db.String(16), nullable=False)  # user / assistant
+    content = db.Column(db.Text, nullable=False)
+    tokens = db.Column(db.Integer, nullable=True)
+    tokens_per_second = db.Column(db.Float, nullable=True)
+    model = db.Column(db.String(200), nullable=True)
+    citations = db.Column(db.Text, nullable=True)  # JSON list (RAG grounding)
+    created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "role": self.role,
+            "content": self.content,
+            "tokens": self.tokens,
+            "tokens_per_second": self.tokens_per_second,
+            "model": self.model,
+            "citations": json.loads(self.citations) if self.citations else None,
             "created_at": self.created_at.isoformat() + "Z",
         }

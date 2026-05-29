@@ -40,7 +40,8 @@ from device_specs import detect_specs
 from auto_config_rules import recommend_config, guard_config
 import rag
 from system_stats import SystemMonitor
-from models import db, User, Project, Device, KnowledgeBase, Document
+from models import (db, User, Project, Device, KnowledgeBase, Document,
+                    Conversation, ChatMessage)
 
 app = Flask(__name__)
 # Enable CORS with credentials support for session cookies pointing to the frontend
@@ -134,6 +135,7 @@ _device_busy = {}  # device_id -> job_id   (which job currently occupies it)
 _queues = defaultdict(list)  # device_id -> [pending job dicts] (FIFO)
 _MAX_RESUME_ATTEMPTS = 1     # auto-restart an interrupted remote job this many times
 _rag_jobs = {}     # job_id -> {citations, chunks, backend, model, room} for remote RAG queries
+_chat_jobs = {}    # job_id -> {conversation_id, owner_user_id, citations, model, room} for remote chat turns
 
 
 def _utcnow():
@@ -1287,6 +1289,199 @@ def query_kb(kb_id):
     return jsonify(result)
 
 
+# ─────────────────────────────────────────────────────────
+# Chat — ChatGPT-style multi-turn conversations with your models
+# ─────────────────────────────────────────────────────────
+CHAT_ASSISTANT_PROMPT = (
+    "You are a helpful, knowledgeable assistant running inside VortexML. Answer "
+    "clearly and concisely, use Markdown when it helps, and keep a friendly tone."
+)
+_CHAT_HISTORY_LIMIT = 20  # prior turns sent to the model
+
+
+@app.route("/api/conversations", methods=["GET"])
+def list_conversations():
+    user, err = _require_user()
+    if err:
+        return err
+    convs = (Conversation.query.filter_by(user_id=user.id)
+             .order_by(Conversation.updated_at.desc()).all())
+    return jsonify({"conversations": [c.to_dict() for c in convs]})
+
+
+@app.route("/api/conversations", methods=["POST"])
+def create_conversation():
+    user, err = _require_user()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    backend = data.get("backend") or rag.default_backend()
+    conv = Conversation(
+        user_id=user.id,
+        title=((data.get("title") or "").strip() or "New chat")[:200],
+        backend=backend,
+        model=(data.get("model") or None),
+        device_id=data.get("device_id"),
+        kb_id=data.get("kb_id"),
+    )
+    db.session.add(conv)
+    db.session.commit()
+    return jsonify({"conversation": conv.to_dict()}), 201
+
+
+@app.route("/api/conversations/<int:conv_id>", methods=["GET"])
+def get_conversation(conv_id):
+    user, err = _require_user()
+    if err:
+        return err
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+    return jsonify({"conversation": conv.to_dict(include_messages=True)})
+
+
+@app.route("/api/conversations/<int:conv_id>", methods=["PATCH"])
+def update_conversation(conv_id):
+    user, err = _require_user()
+    if err:
+        return err
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+    data = request.get_json(silent=True) or {}
+    if "title" in data:
+        conv.title = ((data.get("title") or "").strip() or conv.title)[:200]
+    for field in ("backend", "model"):
+        if field in data:
+            setattr(conv, field, data.get(field))
+    if "device_id" in data:
+        conv.device_id = data.get("device_id")
+    if "kb_id" in data:
+        conv.kb_id = data.get("kb_id")
+    db.session.commit()
+    return jsonify({"conversation": conv.to_dict()})
+
+
+@app.route("/api/conversations/<int:conv_id>", methods=["DELETE"])
+def delete_conversation(conv_id):
+    user, err = _require_user()
+    if err:
+        return err
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+    db.session.delete(conv)
+    db.session.commit()
+    return jsonify({"status": "deleted"})
+
+
+def _build_chat_messages(conv, user, content):
+    """Assemble the message list for a turn: system (+ RAG context if a KB is
+    attached) + recent history + the new user message. Returns (messages,
+    citations)."""
+    system_parts = [CHAT_ASSISTANT_PROMPT]
+    citations = None
+    if conv.kb_id:
+        kb = KnowledgeBase.query.filter_by(id=conv.kb_id, user_id=user.id).first()
+        if kb:
+            ctx = rag.build_context(conv.kb_id, content, top_k=4)
+            if ctx:
+                system_parts.append(
+                    "Use the following retrieved passages to ground your answer when "
+                    "relevant, citing them as [1], [2], etc.\n\n" +
+                    "\n\n".join(f"[{h['n']}] (from {h['doc_name']})\n{h['text']}"
+                               for h in ctx["hits"]))
+                citations = ctx["citations"]
+    messages = [{"role": "system", "content": "\n\n".join(system_parts)}]
+    history = (conv.messages.order_by(ChatMessage.created_at.desc())
+               .limit(_CHAT_HISTORY_LIMIT).all())[::-1]
+    for m in history:
+        messages.append({"role": m.role, "content": m.content})
+    messages.append({"role": "user", "content": content})
+    return messages, citations
+
+
+@app.route("/api/conversations/<int:conv_id>/message", methods=["POST"])
+def send_message(conv_id):
+    """Add a user message and generate the assistant reply on the conversation's
+    device (shared M4 in-process, or a node remotely)."""
+    user, err = _require_user()
+    if err:
+        return err
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+    data = request.get_json(silent=True) or {}
+    content = (data.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "content is required"}), 400
+    socket_id = data.get("socket_id")
+    try:
+        temperature = max(0.0, min(1.5, float(data.get("temperature", 0.7))))
+    except (TypeError, ValueError):
+        temperature = 0.7
+
+    messages, citations = _build_chat_messages(conv, user, content)
+
+    # Persist the user turn now; name the chat from the first message.
+    if conv.messages.count() == 0 and conv.title == "New chat":
+        conv.title = content[:60]
+    db.session.add(ChatMessage(conversation_id=conv.id, role="user", content=content))
+    conv.updated_at = _utcnow()
+    db.session.commit()
+
+    device, derr = _resolve_rag_device(conv.device_id, user.id)
+    if derr:
+        return derr
+
+    job_id = uuid.uuid4().hex[:12]
+    room = f"rag:{job_id}"
+    _join_job_room(socket_id, room)
+
+    # ── Remote: dispatch to the user's node ──
+    if device is not None and not device.is_shared:
+        node = _nodes.get(device.id)
+        if not node:
+            return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent."}), 409
+        _chat_jobs[job_id] = {"conversation_id": conv.id, "owner_user_id": user.id,
+                              "citations": citations, "model": conv.model, "room": room}
+        socketio.emit("node_chat", {
+            "job_id": job_id, "backend": conv.backend, "model": conv.model,
+            "messages": messages, "temperature": temperature, "max_tokens": 700,
+        }, room=node["sid"])
+        return jsonify({"status": "generating", "mode": "remote",
+                        "job_id": job_id, "room": room, "citations": citations})
+
+    # ── Local: generate on the shared M4, streaming hardware stats ──
+    monitor = SystemMonitor(
+        emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
+        sleep_fn=socketio.sleep,
+    )
+    socketio.start_background_task(monitor.loop)
+    try:
+        gen = rag.chat(conv.backend, conv.model, messages, temperature=temperature)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:
+        return jsonify({"error": f"Generation failed: {e}"}), 500
+    finally:
+        monitor.stop()
+
+    assistant = ChatMessage(
+        conversation_id=conv.id, role="assistant", content=gen["text"],
+        tokens=gen["tokens"], tokens_per_second=gen["tokens_per_second"],
+        model=conv.model or rag.BACKENDS.get(conv.backend, {}).get("default_model"),
+        citations=_json.dumps(citations) if citations else None,
+    )
+    db.session.add(assistant)
+    conv.updated_at = _utcnow()
+    db.session.commit()
+    return jsonify({"message": assistant.to_dict(), "mode": "local",
+                    "room": room, "title": conv.title})
+
+
 def _evaluate_predictions(pp, rows, predictions):
     """Build evaluation metrics when every row carries the true target value.
     Returns None if the target isn't present (plain prediction, no ground truth)."""
@@ -1814,6 +2009,38 @@ def on_node_rag_error(data):
     data = data or {}
     _rag_jobs.pop(data.get("job_id"), None)
     socketio.emit("rag_error", {"error": data.get("error", "Remote generation failed")},
+                  room=f"rag:{data.get('job_id')}")
+
+
+@socketio.on("node_chat_complete")
+def on_node_chat_complete(data):
+    """A node finished a chat turn: persist the assistant message + push it out."""
+    data = data or {}
+    job = _chat_jobs.pop(data.get("job_id"), None)
+    room = job["room"] if job else f"rag:{data.get('job_id')}"
+    text = (data.get("text") or "").strip()
+    stats = data.get("stats") or {}
+    payload = {"role": "assistant", "content": text}
+    if job:
+        conv = Conversation.query.get(job["conversation_id"])
+        if conv:
+            msg = ChatMessage(
+                conversation_id=conv.id, role="assistant", content=text,
+                tokens=stats.get("tokens"), tokens_per_second=stats.get("tokens_per_second"),
+                model=job.get("model"),
+                citations=_json.dumps(job["citations"]) if job.get("citations") else None)
+            db.session.add(msg)
+            conv.updated_at = _utcnow()
+            db.session.commit()
+            payload = msg.to_dict()
+    socketio.emit("chat_answer", {"message": payload, "stats": stats}, room=room)
+
+
+@socketio.on("node_chat_error")
+def on_node_chat_error(data):
+    data = data or {}
+    _chat_jobs.pop(data.get("job_id"), None)
+    socketio.emit("chat_error", {"error": data.get("error", "Remote chat failed")},
                   room=f"rag:{data.get('job_id')}")
 
 

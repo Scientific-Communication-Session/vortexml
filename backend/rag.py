@@ -482,38 +482,36 @@ def download_model(backend, model, progress=None):
 
 
 # -- per-backend generation (all guarded; only called when available) --
-# Each returns (text, completion_tokens|None). A None token count is estimated
-# by the caller so tokens/sec is always reportable.
-def _gen_cloud(system, user, model, temperature, max_tokens):
+# Each takes a multi-turn `messages` list ([{role: system|user|assistant,
+# content}]) and returns (text, completion_tokens|None). A None token count is
+# estimated by the caller so tokens/sec is always reportable.
+def _chat_cloud(messages, model, temperature, max_tokens):
     import anthropic
     client = anthropic.Anthropic()
-    resp = client.messages.create(
-        model=model or BACKENDS["cloud"]["default_model"],
-        max_tokens=max_tokens,
-        thinking={"type": "disabled"},
-        output_config={"effort": "low"},
-        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": user}],
-    )
+    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+    convo = [{"role": m["role"], "content": m["content"]}
+             for m in messages if m["role"] in ("user", "assistant")]
+    kwargs = dict(model=model or BACKENDS["cloud"]["default_model"], max_tokens=max_tokens,
+                  thinking={"type": "disabled"}, output_config={"effort": "low"}, messages=convo)
+    if system:
+        kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    resp = client.messages.create(**kwargs)
     text = next((b.text for b in resp.content if getattr(b, "type", None) == "text"), "")
-    ntok = getattr(getattr(resp, "usage", None), "output_tokens", None)
-    return text, ntok
+    return text, getattr(getattr(resp, "usage", None), "output_tokens", None)
 
 
-def _gen_mlx(system, user, model, temperature, max_tokens):
+def _chat_mlx(messages, model, temperature, max_tokens):
     from mlx_lm import load, generate
     key = model or BACKENDS["mlx"]["default_model"]
     if key not in _mlx_cache:
         _mlx_cache[key] = load(key)
     model_obj, tokenizer = _mlx_cache[key]
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
     text = generate(model_obj, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
-    ntok = len(tokenizer.encode(text)) if text else 0
-    return text, ntok
+    return text, (len(tokenizer.encode(text)) if text else 0)
 
 
-def _gen_transformers(system, user, model, temperature, max_tokens):
+def _chat_transformers(messages, model, temperature, max_tokens):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     key = model or BACKENDS["transformers"]["default_model"]
     if key not in _hf_cache:
@@ -521,7 +519,6 @@ def _gen_transformers(system, user, model, temperature, max_tokens):
         mdl = AutoModelForCausalLM.from_pretrained(key, torch_dtype="auto", device_map="auto")
         _hf_cache[key] = (mdl, tok)
     mdl, tok = _hf_cache[key]
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     inputs = tok.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(mdl.device)
     out = mdl.generate(inputs, max_new_tokens=max_tokens, do_sample=temperature > 0,
                        temperature=max(temperature, 0.01))
@@ -529,7 +526,7 @@ def _gen_transformers(system, user, model, temperature, max_tokens):
     return tok.decode(gen, skip_special_tokens=True), int(gen.shape[0])
 
 
-def _gen_llama_cpp(system, user, model, temperature, max_tokens):
+def _chat_llama_cpp(messages, model, temperature, max_tokens):
     from llama_cpp import Llama
     key = model or BACKENDS["llama_cpp"]["default_model"]
     if key not in _llamacpp_cache:
@@ -540,20 +537,14 @@ def _gen_llama_cpp(system, user, model, temperature, max_tokens):
             llm = Llama(model_path=key, n_ctx=4096, verbose=False)
         _llamacpp_cache[key] = llm
     llm = _llamacpp_cache[key]
-    resp = llm.create_chat_completion(
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        max_tokens=max_tokens, temperature=temperature,
-    )
-    text = resp["choices"][0]["message"]["content"]
-    ntok = resp.get("usage", {}).get("completion_tokens")
-    return text, ntok
+    resp = llm.create_chat_completion(messages=messages, max_tokens=max_tokens, temperature=temperature)
+    return resp["choices"][0]["message"]["content"], resp.get("usage", {}).get("completion_tokens")
 
 
-def _gen_ollama(system, user, model, temperature, max_tokens):
+def _chat_ollama(messages, model, temperature, max_tokens):
     payload = json.dumps({
         "model": model or BACKENDS["ollama"]["default_model"],
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "stream": False,
+        "messages": messages, "stream": False,
         "options": {"temperature": temperature, "num_predict": max_tokens},
     }).encode()
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload,
@@ -563,9 +554,9 @@ def _gen_ollama(system, user, model, temperature, max_tokens):
     return data["message"]["content"], data.get("eval_count")
 
 
-_GENERATORS = {
-    "cloud": _gen_cloud, "mlx": _gen_mlx, "transformers": _gen_transformers,
-    "llama_cpp": _gen_llama_cpp, "ollama": _gen_ollama,
+_CHAT_GENERATORS = {
+    "cloud": _chat_cloud, "mlx": _chat_mlx, "transformers": _chat_transformers,
+    "llama_cpp": _chat_llama_cpp, "ollama": _chat_ollama,
 }
 
 
@@ -595,23 +586,30 @@ def build_context(kb_id, query, top_k=4):
     return {"system": RAG_SYSTEM_PROMPT, "user": user, "hits": hits, "citations": citations}
 
 
-def generate(backend, model, system, user, temperature=0.2, max_tokens=700):
-    """Run one generation on this machine. Returns
-    {text, tokens, gen_time, tokens_per_second}. Used both by the central server
-    and (via the bundled rag.py) by a node agent."""
-    if backend not in _GENERATORS:
+def chat(backend, model, messages, temperature=0.7, max_tokens=700):
+    """Multi-turn generation. `messages` is a list of {role, content} with roles
+    system/user/assistant. Returns {text, tokens, gen_time, tokens_per_second}.
+    Used by the chat endpoint and (via the bundled rag.py) by a node agent."""
+    if backend not in _CHAT_GENERATORS:
         raise ValueError(f"Unknown backend: {backend}")
     if not backend_available(backend):
         meta = BACKENDS.get(backend, {})
         raise RuntimeError(f"Backend '{backend}' isn't available. {meta.get('setup', '')}")
     t0 = time.time()
-    text, ntok = _GENERATORS[backend](system, user, model, temperature, max_tokens)
+    text, ntok = _CHAT_GENERATORS[backend](messages, model, temperature, max_tokens)
     elapsed = time.time() - t0
     text = (text or "").strip()
     if not ntok:
         ntok = max(1, round(len(text) / 4))  # ~4 chars/token estimate
     return {"text": text, "tokens": int(ntok), "gen_time": round(elapsed, 3),
             "tokens_per_second": round(ntok / elapsed, 1) if elapsed > 0 else None}
+
+
+def generate(backend, model, system, user, temperature=0.2, max_tokens=700):
+    """Single-shot convenience wrapper over chat() (used by RAG query)."""
+    return chat(backend, model,
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                temperature, max_tokens)
 
 
 def rag_answer(kb_id, query, backend="cloud", model=None, top_k=4,
