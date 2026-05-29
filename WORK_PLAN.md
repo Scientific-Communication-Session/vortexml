@@ -353,3 +353,31 @@ Generalized generation to multi-turn and added a real chat experience.
 - RAG-grounded chat returns citations (API). Fixed a React key collision
   (namespaced `m<id>`/`i<index>` keys). Test conversations/KBs cleaned up.
 
+## Hardening + tests + streaming (follow-up)
+
+**Probe sweep → real bugs found & fixed** (`fix(security): …`):
+- Upload filenames were unsanitised in `os.path.join` → a name like `../app.py`
+  escaped the upload/weights dirs. Now `secure_filename` on dataset + weights
+  uploads, `basename` on the node-completion write.
+- `/api/weights/file/<name>` served ANY file by name (IDOR). Now basenamed and
+  scoped to the caller's current weights or a project they own (404 otherwise).
+- RAG model download rejects non-local backends (400). Chat ordering switched to
+  the monotonic `id`.
+
+**Regression suite** (`test: offline smoke suite`): `test_smoke.py` covers the
+non-LLM HTTP surface on a throwaway SQLite DB (auth, dataset upload/health/
+config + filename sanitisation, training validation, a real tiny trained project
+with inference/evaluation/export/leaderboard, weights-download authz, RAG KB
+ingest + TF-IDF retrieval + device catalog, conversation CRUD). All pass.
+
+**Streaming chat** (`feat(chat): stream responses token-by-token` + UI): added
+`rag.stream_chat` (cloud/mlx/ollama/llama.cpp stream; transformers falls back).
+The message endpoint streams each delta as a `chat_token` over the socket
+(with `socketio.sleep(0)` between tokens, which also keeps the event loop
+responsive during a local run) then a final `chat_answer`. The UI fills the
+assistant bubble live with a blinking cursor; added inline conversation rename.
+Caught + fixed a missing module-level `import time` (the streaming task had
+crashed with a NameError). Verified live: the local MLX Gemma-4B bubble grows
+token-by-token (23→64→76 chars across samples), cloud streams too, rename works,
+and an in-page `console.error` hook recorded **0** errors during a streamed turn.
+
