@@ -1174,18 +1174,20 @@ def rag_device_models(device_id):
 
     if device.is_shared:
         inventory = rag.local_model_inventory()
-        catalog = rag.device_model_catalog(inventory)
-        return jsonify({"online": True, "device": device.to_dict(), "catalog": catalog})
+        return jsonify({"online": True, "device": device.to_dict(),
+                        "catalog": rag.device_model_catalog(inventory),
+                        "installed": rag.installed_models(inventory)})
 
     node = _nodes.get(device.id)
     inventory = node.get("rag_inventory") if node else None
     if inventory is None:
         return jsonify({"online": device.id in _nodes, "device": device.to_dict(),
-                        "catalog": [],
+                        "catalog": [], "installed": {"hf": [], "ollama": []},
                         "reason": "Device is offline or hasn't reported its models yet. "
                                   "Start its node agent."})
     return jsonify({"online": True, "device": device.to_dict(),
-                    "catalog": rag.device_model_catalog(inventory)})
+                    "catalog": rag.device_model_catalog(inventory),
+                    "installed": rag.installed_models(inventory)})
 
 
 @app.route("/api/rag/devices/<int:device_id>/models/download", methods=["POST"])
@@ -1216,8 +1218,10 @@ def rag_download_model(device_id):
             try:
                 rag.download_model(backend, model,
                                    progress=lambda m: socketio.emit("rag_download", {"status": m}, room=room))
+                inv = rag.local_model_inventory()
                 socketio.emit("rag_download_complete",
-                              {"model": model, "catalog": rag.device_model_catalog()}, room=room)
+                              {"model": model, "catalog": rag.device_model_catalog(inv),
+                               "installed": rag.installed_models(inv)}, room=room)
             except Exception as e:
                 socketio.emit("rag_download_error", {"error": str(e)}, room=room)
         socketio.start_background_task(run)
@@ -1229,6 +1233,40 @@ def rag_download_model(device_id):
     socketio.emit("node_rag_download", {"job_id": job_id, "backend": backend, "model": model},
                   room=node["sid"])
     return jsonify({"status": "downloading", "mode": "remote", "job_id": job_id, "room": room})
+
+
+@app.route("/api/rag/devices/<int:device_id>/models", methods=["DELETE"])
+def rag_delete_model(device_id):
+    """Delete a downloaded model from a device to reclaim disk."""
+    user, err = _require_user()
+    if err:
+        return err
+    device, derr = _resolve_rag_device(device_id, user.id)
+    if derr:
+        return derr
+    data = request.get_json(silent=True) or {}
+    backend = data.get("backend")  # 'ollama' or any HF-backed backend
+    model = data.get("model")
+    if not backend or not model:
+        return jsonify({"error": "backend and model are required"}), 400
+
+    if device.is_shared:
+        try:
+            rag.delete_model(backend, model)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 404
+        except Exception as e:
+            return jsonify({"error": f"Delete failed: {e}"}), 500
+        inv = rag.local_model_inventory()
+        return jsonify({"status": "deleted",
+                        "catalog": rag.device_model_catalog(inv),
+                        "installed": rag.installed_models(inv)})
+
+    node = _nodes.get(device.id)
+    if not node:
+        return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent."}), 409
+    socketio.emit("node_rag_delete", {"backend": backend, "model": model}, room=node["sid"])
+    return jsonify({"status": "deleting", "mode": "remote"})
 
 
 @app.route("/api/rag/kb/<int:kb_id>/query", methods=["POST"])

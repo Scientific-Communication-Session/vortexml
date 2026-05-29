@@ -258,6 +258,18 @@ def on_rag_download(payload):
     threading.Thread(target=_rag_download, args=(payload,), daemon=True).start()
 
 
+@sio.on("node_rag_delete")
+def on_rag_delete(payload):
+    if rag is None:
+        return
+    payload = payload or {}
+    try:
+        rag.delete_model(payload.get("backend"), payload.get("model"))
+    except Exception as e:
+        print(f"[node] delete failed: {e}")
+    _report_rag_inventory()  # push the updated inventory back to the server
+
+
 def _rag_query(payload):
     job_id = payload["job_id"]
     monitor = SystemMonitor(

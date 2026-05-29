@@ -454,6 +454,40 @@ def device_model_catalog(inventory=None):
     return catalog
 
 
+def installed_models(inv=None):
+    """Flat lists of every model stored (this machine, or a node's reported
+    inventory), for the manager UI."""
+    inv = inv or local_model_inventory()
+    return {
+        "hf": [{"id": k, "size_bytes": v.get("size_bytes")} for k, v in inv["hf"].items()],
+        "ollama": [{"id": k, "size_bytes": v.get("size_bytes")} for k, v in inv["ollama"].items()],
+    }
+
+
+def delete_model(backend, model):
+    """Remove a downloaded model from THIS machine to reclaim disk. `backend`
+    only selects the storage to delete from: 'ollama' uses the Ollama server,
+    anything else deletes the repo from the Hugging Face cache (by repo id)."""
+    if backend == "ollama":
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/delete",
+            data=json.dumps({"name": model}).encode(),
+            headers={"Content-Type": "application/json"}, method="DELETE")
+        urllib.request.urlopen(req, timeout=30)
+        return
+    repo = model.split(":")[0]
+    from huggingface_hub import scan_cache_dir
+    for r in scan_cache_dir().repos:
+        if r.repo_id == repo and r.repo_type == "model":
+            # drop the in-memory handle so the files aren't held open, then delete
+            _mlx_cache.pop(model, None)
+            _hf_cache.pop(model, None)
+            _llamacpp_cache.pop(model, None)
+            shutil.rmtree(r.repo_path, ignore_errors=True)
+            return
+    raise ValueError(f"'{model}' is not downloaded on this device.")
+
+
 def download_model(backend, model, progress=None):
     """Download a model onto THIS machine. Blocking; meant to run in a background
     task. `progress(msg)` is an optional status callback. Raises on failure."""
