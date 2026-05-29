@@ -34,7 +34,7 @@ from data_processor import (
 from training_engine import (
     create_model, train_model, stop_training, get_torch_device,
     MODEL_REGISTRY, parse_weight_filename, WEIGHTS_DIR,
-    load_weights_for_inference, predict,
+    load_weights_for_inference, predict, export_model,
 )
 from device_specs import detect_specs
 from auto_config_rules import recommend_config, guard_config
@@ -927,12 +927,119 @@ def predict_project(project_id):
         for v in out["values"]:
             predictions.append({"prediction": round(float(v), 6)})
 
+    # If the caller supplied the true target alongside the features (e.g. a
+    # labelled CSV), evaluate the model against it on the spot — confusion
+    # matrix for classification, residual stats for regression.
+    evaluation = _evaluate_predictions(pp, rows, predictions)
+
     return jsonify({
         "task_type": pp["task_type"],
         "target_col": pp.get("target_col"),
         "count": len(predictions),
         "predictions": predictions,
+        "evaluation": evaluation,
     })
+
+
+@app.route("/api/projects/<int:project_id>/export", methods=["GET"])
+def export_project(project_id):
+    """Download a trained model as ONNX or TorchScript for use outside VortexML."""
+    user, err = _require_user()
+    if err:
+        return err
+    proj = Project.query.filter_by(id=project_id, user_id=user.id).first()
+    if not proj:
+        return jsonify({"error": "Project not found"}), 404
+
+    fmt = (request.args.get("format") or "onnx").lower()
+    if fmt not in ("onnx", "torchscript"):
+        return jsonify({"error": "format must be 'onnx' or 'torchscript'"}), 400
+
+    weights_path = os.path.join(WEIGHTS_DIR, proj.weight_filename)
+    if not os.path.exists(weights_path):
+        return jsonify({"error": "Weights file is missing on the server"}), 404
+
+    input_dim = proj.input_dim
+    if not input_dim:
+        pp = _project_preprocess(proj)
+        input_dim = pp.get("input_dim") if pp else None
+    if not input_dim or not proj.output_dim:
+        return jsonify({"error": "Model has no recorded input/output shape; retrain to export."}), 409
+
+    try:
+        data = export_model(weights_path, proj.arch_type, _json.loads(proj.layer_sizes),
+                            input_dim, proj.output_dim, proj.activation, fmt)
+    except Exception as e:
+        return jsonify({"error": f"Export failed for this architecture: {e}"}), 500
+
+    base = proj.weight_filename[:-3] if proj.weight_filename.endswith(".pt") else proj.weight_filename
+    ext = "onnx" if fmt == "onnx" else "torchscript.pt"
+    resp = make_response(data)
+    resp.headers["Content-Type"] = "application/octet-stream"
+    resp.headers["Content-Disposition"] = f'attachment; filename="{base}.{ext}"'
+    resp.headers["Content-Length"] = len(data)
+    return resp
+
+
+def _evaluate_predictions(pp, rows, predictions):
+    """Build evaluation metrics when every row carries the true target value.
+    Returns None if the target isn't present (plain prediction, no ground truth)."""
+    target_col = pp.get("target_col")
+    if not target_col:
+        return None
+    truths = [r.get(target_col) for r in rows]
+    if any(t is None or t == "" for t in truths):
+        return None  # not a labelled batch — nothing to score against
+
+    if pp["task_type"] == "classification":
+        classes = pp.get("target_classes") or []
+        index = {c: i for i, c in enumerate(classes)}
+        k = len(classes)
+        cm = [[0] * k for _ in range(k)]
+        correct = counted = 0
+        for true, pred in zip(truths, predictions):
+            t, p = str(true), str(pred["prediction"])
+            if t in index and p in index:
+                cm[index[t]][index[p]] += 1
+                counted += 1
+                if t == p:
+                    correct += 1
+        if not counted:
+            return None
+        return {
+            "task_type": "classification",
+            "classes": classes,
+            "confusion_matrix": cm,
+            "accuracy": round(correct / counted, 4),
+            "n": counted,
+        }
+
+    # regression
+    pairs = []
+    for true, pred in zip(truths, predictions):
+        try:
+            pairs.append((float(true), float(pred["prediction"])))
+        except (TypeError, ValueError):
+            continue
+    if not pairs:
+        return None
+    n = len(pairs)
+    errs = [p - t for t, p in pairs]
+    mae = sum(abs(e) for e in errs) / n
+    rmse = (sum(e * e for e in errs) / n) ** 0.5
+    mean_t = sum(t for t, _ in pairs) / n
+    ss_tot = sum((t - mean_t) ** 2 for t, _ in pairs)
+    ss_res = sum(e * e for e in errs)
+    r2 = (1 - ss_res / ss_tot) if ss_tot > 0 else None
+    return {
+        "task_type": "regression",
+        "mae": round(mae, 6),
+        "rmse": round(rmse, 6),
+        "r2": round(r2, 4) if r2 is not None else None,
+        "n": n,
+        "residuals": [{"true": round(t, 4), "pred": round(p, 4), "residual": round(p - t, 4)}
+                      for t, p in pairs[:500]],
+    }
 
 
 # ─────────────────────────────────────────────────────────

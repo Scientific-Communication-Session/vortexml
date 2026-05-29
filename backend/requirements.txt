@@ -14,3 +14,6 @@ psycopg2-binary>=2.9
 # chatbot + auto-configure endpoints. Older SDKs raise TypeError on these.
 anthropic>=0.102
 psutil>=5.9
+# ONNX export of trained models (POST .../export?format=onnx). TorchScript
+# export needs nothing beyond torch.
+onnx>=1.16

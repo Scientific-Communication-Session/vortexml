@@ -8,6 +8,7 @@ import copy
 import time
 import math
 import re
+import tempfile
 import threading
 import torch
 import torch.nn as nn
@@ -341,6 +342,43 @@ def predict(model, X, task_type):
                     "probs": probs.tolist()}
         out = out.squeeze(-1)
         return {"values": out.cpu().numpy().reshape(-1).tolist()}
+
+
+def export_model(weights_path, arch_type, layer_sizes, input_dim, output_dim,
+                 activation="relu", fmt="onnx"):
+    """Export a trained model to a portable format and return the file bytes.
+
+    `fmt` is "onnx" or "torchscript". The model is rebuilt on CPU in eval mode
+    and traced with a dummy `(1, input_dim)` input; the batch axis is dynamic
+    for ONNX. Preprocessing is NOT baked in — apply the same scaling/encoding
+    (see the project's .preprocess.json) before feeding inputs.
+    """
+    model = load_weights_for_inference(weights_path, arch_type, layer_sizes,
+                                       input_dim, output_dim, activation)
+    dummy = torch.zeros(1, input_dim, dtype=torch.float32)
+    suffix = ".onnx" if fmt == "onnx" else ".pt"
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tmp.close()
+    try:
+        if fmt == "torchscript":
+            torch.jit.trace(model, dummy).save(tmp.name)
+        elif fmt == "onnx":
+            # dynamo=False uses the stable TorchScript-based exporter (needs the
+            # `onnx` package); the newer dynamo exporter would also pull in
+            # onnxscript. Either works for these small tabular models.
+            torch.onnx.export(
+                model, dummy, tmp.name,
+                input_names=["input"], output_names=["output"],
+                dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
+                opset_version=17, dynamo=False,
+            )
+        else:
+            raise ValueError(f"Unsupported export format: {fmt}")
+        with open(tmp.name, "rb") as f:
+            return f.read()
+    finally:
+        if os.path.exists(tmp.name):
+            os.remove(tmp.name)
 
 
 def get_torch_device():
