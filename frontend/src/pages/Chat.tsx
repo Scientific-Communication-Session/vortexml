@@ -7,7 +7,7 @@ import { Plus, Send, Trash2, Loader2, MessageSquare, Cpu, Pencil, Square, Rotate
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
-interface Backend { key: string; label: string; available: boolean; default_model: string; models: string[]; supports_thinking?: boolean; }
+interface Backend { key: string; label: string; available: boolean; default_model: string; models: string[]; model_labels?: Record<string, string>; supports_thinking?: boolean; }
 interface KB { id: number; name: string; }
 interface RDevice { id: number; nickname: string; is_shared: boolean; online?: boolean; }
 interface Conversation { id: number; title: string; backend: string; model: string | null; device_id: number | null; kb_id: number | null; reasoning?: boolean; }
@@ -322,7 +322,7 @@ const Chat: React.FC = () => {
                                     style={{ ...inputStyle, maxWidth: 300 }} title="Model">
                                     <option value="">Default{activeBackend?.default_model ? ` (${activeBackend.default_model.split('/').pop()})` : ''}</option>
                                     {modelOptions.map((m) => (
-                                        <option key={m.id} value={m.id}>{m.id}{m.downloaded ? ' ✓ downloaded' : (catEntry ? ' (downloads on first use)' : '')}</option>
+                                        <option key={m.id} value={m.id}>{activeBackend?.model_labels?.[m.id] || m.id}{m.downloaded ? ' ✓ downloaded' : (catEntry ? ' (downloads on first use)' : '')}</option>
                                     ))}
                                     {settings.model && !modelOptions.some((m) => m.id === settings.model) && (
                                         <option value={settings.model}>{settings.model}</option>

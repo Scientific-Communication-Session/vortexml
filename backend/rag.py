@@ -264,8 +264,15 @@ BACKENDS = {
         "use_when": "You want it to just work, or your machine can't run a local LLM.",
         "local": False,
         "novice_default": True,
-        "default_model": "claude-sonnet-4-6",
-        "models": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"],
+        "default_model": "claude-opus-4-8",
+        "models": ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+        # Friendly names shown in the model picker (the API returns these so the
+        # UI can label opaque model IDs).
+        "model_labels": {
+            "claude-opus-4-8": "Claude Opus 4.8 (1M context) — most capable",
+            "claude-sonnet-4-6": "Claude Sonnet 4.6 — balanced",
+            "claude-haiku-4-5": "Claude Haiku 4.5 — fastest / cheapest",
+        },
         "setup": "Set ANTHROPIC_API_KEY in the server's .env.",
     },
     "mlx": {
@@ -377,6 +384,7 @@ def list_backends():
             "available": backend_available(key),
             "default_model": meta["default_model"],
             "models": meta["models"],
+            "model_labels": meta.get("model_labels", {}),
             "setup": meta["setup"],
             "recommended": key == recommended,
             "supports_thinking": supports_thinking(key),
@@ -538,18 +546,37 @@ def _mlx_prompt(tokenizer, messages, reasoning):
     return tokenizer.apply_chat_template(messages, add_generation_prompt=True)
 
 
-def _chat_cloud(messages, model, temperature, max_tokens, reasoning=False):
-    import anthropic
-    client = anthropic.Anthropic()
+# Cloud models that accept adaptive thinking + the `effort` knob: Opus 4.x and
+# Sonnet 4.6. Haiku 4.5 supports neither — sending `output_config.effort` (or a
+# `thinking` block) to it returns a 400 — so we omit both for it. Opus 4.8 keeps
+# the same request surface as 4.7 (adaptive thinking only; no temperature/top_p/
+# budget_tokens) and offers a 1M context window natively (no beta header needed).
+def _cloud_supports_effort(model):
+    m = (model or "").lower()
+    if "haiku" in m:
+        return False
+    return ("opus-4" in m) or ("sonnet-4-6" in m) or ("sonnet-4.6" in m)
+
+
+def _cloud_kwargs(messages, model, max_tokens, reasoning):
+    """Build the messages.create/stream kwargs, gating thinking+effort by model."""
+    model = model or BACKENDS["cloud"]["default_model"]
     system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     convo = [{"role": m["role"], "content": m["content"]}
              for m in messages if m["role"] in ("user", "assistant")]
-    kwargs = dict(model=model or BACKENDS["cloud"]["default_model"], max_tokens=max_tokens,
-                  thinking={"type": "adaptive"} if reasoning else {"type": "disabled"},
-                  output_config={"effort": "high" if reasoning else "low"}, messages=convo)
+    kwargs = dict(model=model, max_tokens=max_tokens, messages=convo)
+    if _cloud_supports_effort(model):
+        kwargs["thinking"] = {"type": "adaptive"} if reasoning else {"type": "disabled"}
+        kwargs["output_config"] = {"effort": "high" if reasoning else "low"}
     if system:
         kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
-    resp = client.messages.create(**kwargs)
+    return kwargs
+
+
+def _chat_cloud(messages, model, temperature, max_tokens, reasoning=False):
+    import anthropic
+    client = anthropic.Anthropic()
+    resp = client.messages.create(**_cloud_kwargs(messages, model, max_tokens, reasoning))
     text = next((b.text for b in resp.content if getattr(b, "type", None) == "text"), "")
     return text, getattr(getattr(resp, "usage", None), "output_tokens", None)
 
@@ -622,16 +649,11 @@ _CHAT_GENERATORS = {
 def _stream_cloud(messages, model, temperature, max_tokens, reasoning=False):
     import anthropic
     client = anthropic.Anthropic()
-    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
-    convo = [{"role": m["role"], "content": m["content"]}
-             for m in messages if m["role"] in ("user", "assistant")]
-    kwargs = dict(model=model or BACKENDS["cloud"]["default_model"], max_tokens=max_tokens,
-                  thinking={"type": "adaptive"} if reasoning else {"type": "disabled"},
-                  output_config={"effort": "high" if reasoning else "low"}, messages=convo)
-    if system:
-        kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    kwargs = _cloud_kwargs(messages, model, max_tokens, reasoning)
+    # Only stream separate reasoning when the model actually supports thinking.
+    thinking_on = kwargs.get("thinking", {}).get("type") == "adaptive"
     with client.messages.stream(**kwargs) as stream:
-        if not reasoning:
+        if not thinking_on:
             for delta in stream.text_stream:
                 yield ("answer", delta)
             return

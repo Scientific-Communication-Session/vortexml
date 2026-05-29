@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 
 interface Backend {
     key: string; label: string; tagline: string; description: string; use_when: string;
-    local: boolean; available: boolean; default_model: string; models: string[]; setup: string; recommended: boolean;
+    local: boolean; available: boolean; default_model: string; models: string[]; model_labels?: Record<string, string>; setup: string; recommended: boolean;
 }
 interface Embedder { key: string; label: string; description: string; available: boolean; }
 interface DocItem { id: number; filename: string; char_count: number; chunk_count: number; }
@@ -453,7 +453,7 @@ const Rag: React.FC = () => {
                                         <div>
                                             <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Model</label>
                                             <input value={model} onChange={(e) => setModel(e.target.value)} list="rag-models" style={inputStyle} />
-                                            <datalist id="rag-models">{(activeBackend?.models || []).map((m) => <option key={m} value={m} />)}</datalist>
+                                            <datalist id="rag-models">{(activeBackend?.models || []).map((m) => <option key={m} value={m}>{activeBackend?.model_labels?.[m] || m}</option>)}</datalist>
                                         </div>
                                         <div>
                                             <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Top-k passages</label>
