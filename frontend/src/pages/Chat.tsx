@@ -7,12 +7,12 @@ import { Plus, Send, Trash2, Loader2, MessageSquare, Cpu, Pencil, Square, Rotate
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
-interface Backend { key: string; label: string; available: boolean; default_model: string; models: string[]; }
+interface Backend { key: string; label: string; available: boolean; default_model: string; models: string[]; supports_thinking?: boolean; }
 interface KB { id: number; name: string; }
 interface RDevice { id: number; nickname: string; is_shared: boolean; online?: boolean; }
-interface Conversation { id: number; title: string; backend: string; model: string | null; device_id: number | null; kb_id: number | null; }
+interface Conversation { id: number; title: string; backend: string; model: string | null; device_id: number | null; kb_id: number | null; reasoning?: boolean; }
 interface Citation { n: number; doc_name: string; score: number; preview: string; }
-interface Msg { id?: number; role: string; content: string; tokens_per_second?: number | null; model?: string | null; citations?: Citation[] | null; streaming?: boolean; }
+interface Msg { id?: number; role: string; content: string; tokens_per_second?: number | null; model?: string | null; citations?: Citation[] | null; reasoning?: string | null; streaming?: boolean; }
 interface LiveStats { cpu_percent?: number; gpu_percent?: number; ram_percent?: number; cpu_temp?: number; gpu_temp?: number; }
 interface CatalogModel { id: string; downloaded: boolean; size_bytes: number | null; }
 interface CatalogEntry { backend: string; models: CatalogModel[]; }
@@ -21,6 +21,21 @@ const inputStyle: React.CSSProperties = {
     padding: '0.45rem 0.6rem', borderRadius: 8, background: 'rgba(255,255,255,0.05)',
     color: 'inherit', border: '1px solid rgba(255,255,255,0.12)', fontSize: '0.85rem',
 };
+
+// Split an assistant message into its reasoning + answer. Cloud/Ollama deliver
+// reasoning on a separate channel (`m.reasoning`); local models (mlx/transformers)
+// inline it as <think>…</think> inside the content, so we section that out here.
+function splitReasoning(m: Msg): { reasoning: string | null; answer: string } {
+    if (m.reasoning) return { reasoning: m.reasoning, answer: m.content };
+    const text = m.content || '';
+    const open = text.indexOf('<think>');
+    if (open === -1) return { reasoning: null, answer: text };
+    const close = text.indexOf('</think>');
+    if (close === -1) return { reasoning: text.slice(open + 7).trim(), answer: '' };  // still thinking
+    const reasoning = text.slice(open + 7, close).trim();
+    const answer = (text.slice(0, open) + text.slice(close + 8)).trim();
+    return { reasoning: reasoning || null, answer };
+}
 
 const Chat: React.FC = () => {
     const navigate = useNavigate();
@@ -36,8 +51,8 @@ const Chat: React.FC = () => {
     const [messages, setMessages] = useState<Msg[]>([]);
     const [loading, setLoading] = useState(true);
 
-    const [settings, setSettings] = useState<{ backend: string; model: string; deviceId: number | null; kbId: number | null }>(
-        { backend: 'cloud', model: '', deviceId: null, kbId: null });
+    const [settings, setSettings] = useState<{ backend: string; model: string; deviceId: number | null; kbId: number | null; reasoning: boolean }>(
+        { backend: 'cloud', model: '', deviceId: null, kbId: null, reasoning: false });
 
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
@@ -81,14 +96,15 @@ const Chat: React.FC = () => {
         if (!user) return;
         const s = io();
         socketRef.current = s;
-        s.on('chat_token', (d: { delta: string }) => setMessages((m) => {
+        s.on('chat_token', (d: { delta: string; kind?: string }) => setMessages((m) => {
             const last = m[m.length - 1];
+            const field = d.kind === 'reasoning' ? 'reasoning' : 'content';
             if (last && last.streaming) {
                 const copy = m.slice();
-                copy[copy.length - 1] = { ...last, content: last.content + d.delta };
+                copy[copy.length - 1] = { ...last, [field]: (last[field] || '') + d.delta };
                 return copy;
             }
-            return [...m, { role: 'assistant', content: d.delta, streaming: true }];
+            return [...m, { role: 'assistant', content: '', [field]: d.delta, streaming: true }];
         }));
         s.on('chat_answer', (d: { message: Msg }) => {
             setMessages((m) => {
@@ -118,7 +134,7 @@ const Chat: React.FC = () => {
     const newChat = async () => {
         const d = await apiPost('/api/conversations', {
             backend: settings.backend, model: settings.model || undefined,
-            device_id: settings.deviceId, kb_id: settings.kbId,
+            device_id: settings.deviceId, kb_id: settings.kbId, reasoning: settings.reasoning,
         });
         if (d.error) { showToast(d.error, 'error'); return; }
         setConversations((c) => [d.conversation, ...c]);
@@ -131,7 +147,7 @@ const Chat: React.FC = () => {
         const c: Conversation & { messages: Msg[] } = d.conversation;
         setActiveId(id);
         setMessages(c.messages || []);
-        setSettings({ backend: c.backend, model: c.model || '', deviceId: c.device_id, kbId: c.kb_id });
+        setSettings({ backend: c.backend, model: c.model || '', deviceId: c.device_id, kbId: c.kb_id, reasoning: !!c.reasoning });
     };
 
     const deleteConversation = async (id: number) => {
@@ -159,7 +175,7 @@ const Chat: React.FC = () => {
         if (activeId != null) {
             fetch(`/api/conversations/${activeId}`, {
                 method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ backend: next.backend, model: next.model || null, device_id: next.deviceId, kb_id: next.kbId }),
+                body: JSON.stringify({ backend: next.backend, model: next.model || null, device_id: next.deviceId, kb_id: next.kbId, reasoning: next.reasoning }),
             }).catch(() => { });
         }
     };
@@ -172,7 +188,7 @@ const Chat: React.FC = () => {
         if (convId == null) {  // first message → create the conversation
             const d = await apiPost('/api/conversations', {
                 backend: settings.backend, model: settings.model || undefined,
-                device_id: settings.deviceId, kb_id: settings.kbId,
+                device_id: settings.deviceId, kb_id: settings.kbId, reasoning: settings.reasoning,
             });
             if (d.error) { showToast(d.error, 'error'); return; }
             convId = d.conversation.id;
@@ -326,6 +342,13 @@ const Chat: React.FC = () => {
                             <option value="">No documents</option>
                             {kbs.map((k) => <option key={k.id} value={k.id}>📚 {k.name}</option>)}
                         </select>
+                        {activeBackend?.supports_thinking && (
+                            <label title="Let the model reason step-by-step before answering (slower, often more accurate)"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', cursor: 'pointer', userSelect: 'none', padding: '0.4rem 0.62rem', borderRadius: 8, border: '1px solid ' + (settings.reasoning ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.12)'), background: settings.reasoning ? 'rgba(139,92,246,0.18)' : 'rgba(255,255,255,0.05)' }}>
+                                <input type="checkbox" checked={settings.reasoning} onChange={(e) => patchSettings({ reasoning: e.target.checked })} style={{ accentColor: '#8b5cf6', margin: 0 }} />
+                                💭 Reasoning
+                            </label>
+                        )}
                     </div>
 
                     {/* messages */}
@@ -345,13 +368,31 @@ const Chat: React.FC = () => {
                                 }}>
                                     {m.role === 'user' ? (
                                         <span style={{ whiteSpace: 'pre-wrap' }}>{m.content}</span>
-                                    ) : m.streaming && !m.content ? (
-                                        <span className="text-muted"><Loader2 size={14} className="chat-msg__spinner" style={{ verticalAlign: 'middle' }} /> Thinking…</span>
-                                    ) : (
-                                        <div className="markdown-body">
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content + (m.streaming ? ' ▍' : '')}</ReactMarkdown>
-                                        </div>
-                                    )}
+                                    ) : (() => {
+                                        const { reasoning, answer } = splitReasoning(m);
+                                        const thinkingPhase = m.streaming && !answer;
+                                        return (
+                                            <>
+                                                {reasoning && (
+                                                    <details open={thinkingPhase} style={{ marginBottom: answer || !m.streaming ? '0.5rem' : 0 }}>
+                                                        <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-muted, #9d9dba)', userSelect: 'none' }}>
+                                                            💭 Reasoning{thinkingPhase ? '…' : ''}
+                                                        </summary>
+                                                        <div className="markdown-body" style={{ fontSize: '0.82rem', opacity: 0.8, marginTop: '0.35rem', paddingLeft: '0.65rem', borderLeft: '2px solid rgba(139,92,246,0.4)' }}>
+                                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{reasoning + (thinkingPhase ? ' ▍' : '')}</ReactMarkdown>
+                                                        </div>
+                                                    </details>
+                                                )}
+                                                {thinkingPhase && !reasoning ? (
+                                                    <span className="text-muted"><Loader2 size={14} className="chat-msg__spinner" style={{ verticalAlign: 'middle' }} /> Thinking…</span>
+                                                ) : (answer || !m.streaming) ? (
+                                                    <div className="markdown-body">
+                                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer + (m.streaming ? ' ▍' : '')}</ReactMarkdown>
+                                                    </div>
+                                                ) : null}
+                                            </>
+                                        );
+                                    })()}
                                     {m.role === 'assistant' && m.citations && m.citations.length > 0 && (
                                         <div className="text-muted" style={{ fontSize: '0.74rem', marginTop: '0.4rem' }}>
                                             Sources: {m.citations.map((c) => `[${c.n}] ${c.doc_name}`).join('  ')}

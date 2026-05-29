@@ -418,3 +418,31 @@ and an in-page `console.error` hook recorded **0** errors during a streamed turn
   tiny test model via the custom input → it appeared, deleted it via the UI →
   gone, **Gemma untouched**; delete-of-missing → 404; 0 console errors.
 
+
+## Reasoning / extended thinking toggle (capable models)
+
+- **Backend** (`feat(reasoning): extended thinking for capable models`,
+  committed earlier): `rag.supports_thinking(backend)` +
+  `THINKING_BACKENDS = {cloud, mlx, transformers, ollama}`; generators rewritten
+  to yield `(kind, delta)` tuples where `kind` is `"reasoning"` or `"answer"`.
+  Cloud uses `thinking={"type":"adaptive"}` + `output_config={"effort":"high"}`;
+  Ollama sets `think:true`; mlx/transformers pass `enable_thinking=True` to the
+  chat template (models without thinking support fall back silently). `chat()` /
+  `stream_chat()` / node-agent `node_chat` all thread a `reasoning` flag.
+  `Conversation.reasoning` (bool) + `ChatMessage.reasoning` (text) persist it.
+- **Migration** (`app.py` `_ensure_columns()`): `create_all()` never ALTERs
+  existing tables, so an idempotent ADD COLUMN step now adds the two `reasoning`
+  columns on startup (SQLite + Postgres). Applied automatically via the debug
+  reloader.
+- **Frontend** (`Chat.tsx`): a "💭 Reasoning" toggle in the settings bar, shown
+  only when the active backend `supports_thinking`; persisted on the conversation
+  via `patchSettings`. `splitReasoning()` surfaces reasoning from either the
+  separate `chat_token` channel (`kind==='reasoning'`, cloud/Ollama) or inline
+  `<think>…</think>` tags (mlx/transformers). Reasoning renders as a collapsible
+  `<details>` above the answer — auto-open while thinking, auto-collapsed once the
+  answer streams in.
+- **Verified** in-browser: mlx/Gemma-3 (no thinking support) correctly shows no
+  reasoning section; cloud + reasoning-on on the bat-and-ball CRT question
+  streamed a separate "💭 Reasoning" chain-of-thought (ball = $0.05) that
+  collapsed when the answer arrived, distinct from the answer body; 0 console
+  errors.

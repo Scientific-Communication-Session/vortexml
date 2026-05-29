@@ -63,8 +63,34 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
 
+def _ensure_columns():
+    """Lightweight, idempotent column migration.
+
+    `create_all()` only creates missing *tables*, never alters existing ones, so
+    columns added to a model after its table already exists (e.g. the `reasoning`
+    fields) need an explicit ALTER. Both SQLite and PostgreSQL support
+    `ALTER TABLE ... ADD COLUMN`.
+    """
+    from sqlalchemy import inspect as _inspect, text as _text
+    insp = _inspect(db.engine)
+    false_lit = "FALSE" if db.engine.dialect.name == "postgresql" else "0"
+    wanted = {
+        "conversations": [("reasoning", f"BOOLEAN NOT NULL DEFAULT {false_lit}")],
+        "chat_messages": [("reasoning", "TEXT")],
+    }
+    for table, cols in wanted.items():
+        if not insp.has_table(table):
+            continue
+        existing = {c["name"] for c in insp.get_columns(table)}
+        for name, ddl in cols:
+            if name not in existing:
+                db.session.execute(_text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+    db.session.commit()
+
+
 with app.app_context():
     db.create_all()
+    _ensure_columns()
 
 # Cache-busting: append version to static URLs so browser loads fresh JS/CSS
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
