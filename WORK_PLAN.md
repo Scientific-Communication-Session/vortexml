@@ -381,3 +381,23 @@ crashed with a NameError). Verified live: the local MLX Gemma-4B bubble grows
 token-by-token (23→64→76 chars across samples), cloud streams too, rename works,
 and an in-page `console.error` hook recorded **0** errors during a streamed turn.
 
+## Chat polish: model dropdown + Stop/Regenerate
+
+- **Model picker bug fix** (`fix(chat): real model dropdown …`): the model field
+  was a free-text input + datalist that looked broken next to the real
+  dropdowns. Now a proper `<select>` populated from the device model catalog,
+  flagging which models are "✓ downloaded" vs "downloads on first use" — matches
+  the backend + knowledge-base pickers. Verified: it's a SELECT with the
+  expected options and no datalist input remains.
+- **Stop** (`feat(chat): stop + regenerate endpoints` + UI): a red Stop button
+  during streaming cancels the in-flight job (a `chat_stop` socket event; the
+  streaming loop checks a cancel set each token) and keeps the partial reply.
+  Verified live: interrupted an MLX stream at 61 chars, kept the 60-char partial,
+  returned to the Send state.
+- **Regenerate**: redo the last assistant reply (drops it, re-answers the same
+  user turn). Verified: conversation stays `[user, assistant]` (no duplicated
+  turn), a fresh reply is produced.
+- Refactored the turn into `_assemble_chat` / `_launch_chat_stream` (cancellable)
+  / `_dispatch_chat`, shared by send + regenerate. Smoke suite still green; 0
+  console errors.
+
