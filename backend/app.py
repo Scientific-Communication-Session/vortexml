@@ -1395,16 +1395,19 @@ def delete_conversation(conv_id):
     return jsonify({"status": "deleted"})
 
 
-def _build_chat_messages(conv, user, content):
-    """Assemble the message list for a turn: system (+ RAG context if a KB is
-    attached) + recent history + the new user message. Returns (messages,
-    citations)."""
+_chat_cancel = set()  # job_ids the user asked to stop mid-stream
+
+
+def _assemble_chat(conv, user, rag_query):
+    """Build the message list for a turn: system (+ RAG context if a KB is
+    attached, retrieved for `rag_query`) + recent history. The history already
+    ends with the latest user turn (the caller persists it first)."""
     system_parts = [CHAT_ASSISTANT_PROMPT]
     citations = None
     if conv.kb_id:
         kb = KnowledgeBase.query.filter_by(id=conv.kb_id, user_id=user.id).first()
         if kb:
-            ctx = rag.build_context(conv.kb_id, content, top_k=4)
+            ctx = rag.build_context(conv.kb_id, rag_query, top_k=4)
             if ctx:
                 system_parts.append(
                     "Use the following retrieved passages to ground your answer when "
@@ -1417,77 +1420,23 @@ def _build_chat_messages(conv, user, content):
                .limit(_CHAT_HISTORY_LIMIT).all())[::-1]
     for m in history:
         messages.append({"role": m.role, "content": m.content})
-    messages.append({"role": "user", "content": content})
     return messages, citations
 
 
-@app.route("/api/conversations/<int:conv_id>/message", methods=["POST"])
-def send_message(conv_id):
-    """Add a user message and generate the assistant reply on the conversation's
-    device (shared M4 in-process, or a node remotely)."""
-    user, err = _require_user()
-    if err:
-        return err
-    conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
-    if not conv:
-        return jsonify({"error": "Conversation not found"}), 404
-    data = request.get_json(silent=True) or {}
-    content = (data.get("content") or "").strip()
-    if not content:
-        return jsonify({"error": "content is required"}), 400
-    socket_id = data.get("socket_id")
-    try:
-        temperature = max(0.0, min(1.5, float(data.get("temperature", 0.7))))
-    except (TypeError, ValueError):
-        temperature = 0.7
-
-    messages, citations = _build_chat_messages(conv, user, content)
-
-    # Persist the user turn now; name the chat from the first message.
-    if conv.messages.count() == 0 and conv.title == "New chat":
-        conv.title = content[:60]
-    db.session.add(ChatMessage(conversation_id=conv.id, role="user", content=content))
-    conv.updated_at = _utcnow()
-    db.session.commit()
-
-    device, derr = _resolve_rag_device(conv.device_id, user.id)
-    if derr:
-        return derr
-
-    job_id = uuid.uuid4().hex[:12]
-    room = f"rag:{job_id}"
-    _join_job_room(socket_id, room)
-
-    # ── Remote: dispatch to the user's node ──
-    if device is not None and not device.is_shared:
-        node = _nodes.get(device.id)
-        if not node:
-            return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent."}), 409
-        _chat_jobs[job_id] = {"conversation_id": conv.id, "owner_user_id": user.id,
-                              "citations": citations, "model": conv.model, "room": room}
-        socketio.emit("node_chat", {
-            "job_id": job_id, "backend": conv.backend, "model": conv.model,
-            "messages": messages, "temperature": temperature, "max_tokens": 700,
-        }, room=node["sid"])
-        return jsonify({"status": "generating", "mode": "remote",
-                        "job_id": job_id, "room": room, "citations": citations})
-
-    # ── Local: stream tokens from the shared M4 over the socket room ──
-    backend, model = conv.backend, conv.model
-    resolved_model = model or rag.BACKENDS.get(backend, {}).get("default_model")
-    cid, title = conv.id, conv.title
-    cit_json = _json.dumps(citations) if citations else None
-
+def _launch_chat_stream(cid, backend, model, resolved_model, messages, cit_json, citations, temperature, room, job_id):
+    """Background task: stream the reply token-by-token (honouring a stop
+    request), then persist it and emit the final chat_answer."""
     def run():
-        monitor = SystemMonitor(
-            emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
-            sleep_fn=socketio.sleep,
-        )
+        monitor = SystemMonitor(emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
+                                sleep_fn=socketio.sleep)
         socketio.start_background_task(monitor.loop)
         t0 = time.time()
-        parts = []
+        parts, stopped = [], False
         try:
             for delta in rag.stream_chat(backend, model, messages, temperature=temperature):
+                if job_id in _chat_cancel:
+                    stopped = True
+                    break
                 if not delta:
                     continue
                 parts.append(delta)
@@ -1495,11 +1444,15 @@ def send_message(conv_id):
                 socketio.sleep(0)  # flush the token + let other clients run
         except Exception as e:
             socketio.emit("chat_error", {"error": str(e)}, room=room)
-            monitor.stop()
-            _chat_jobs.pop(job_id, None)
+            monitor.stop(); _chat_jobs.pop(job_id, None); _chat_cancel.discard(job_id)
             return
         monitor.stop()
+        _chat_cancel.discard(job_id)
         text = "".join(parts).strip()
+        if not text:  # stopped before any output
+            socketio.emit("chat_stopped", {}, room=room)
+            _chat_jobs.pop(job_id, None)
+            return
         elapsed = time.time() - t0
         ntok = max(1, round(len(text) / 4))
         tps = round(ntok / elapsed, 1) if elapsed > 0 else None
@@ -1513,15 +1466,112 @@ def send_message(conv_id):
                 conv2.updated_at = _utcnow()
             db.session.commit()
             payload = msg.to_dict()
-        socketio.emit("chat_answer", {"message": payload,
+        socketio.emit("chat_answer", {"message": payload, "stopped": stopped,
                                       "stats": {"tokens": ntok, "tokens_per_second": tps,
                                                 "gen_time": round(elapsed, 3)}}, room=room)
         _chat_jobs.pop(job_id, None)
 
     _chat_jobs[job_id] = {"conversation_id": cid, "room": room}
     socketio.start_background_task(run)
+
+
+def _dispatch_chat(conv, user, messages, citations, socket_id, temperature):
+    """Send a turn to the conversation's device (node → node_chat; shared M4 →
+    local streaming) and return the HTTP response."""
+    device, derr = _resolve_rag_device(conv.device_id, user.id)
+    if derr:
+        return derr
+    job_id = uuid.uuid4().hex[:12]
+    room = f"rag:{job_id}"
+    _join_job_room(socket_id, room)
+
+    if device is not None and not device.is_shared:
+        node = _nodes.get(device.id)
+        if not node:
+            return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent."}), 409
+        _chat_jobs[job_id] = {"conversation_id": conv.id, "owner_user_id": user.id,
+                              "citations": citations, "model": conv.model, "room": room}
+        socketio.emit("node_chat", {
+            "job_id": job_id, "backend": conv.backend, "model": conv.model,
+            "messages": messages, "temperature": temperature, "max_tokens": 700,
+        }, room=node["sid"])
+        return jsonify({"status": "generating", "mode": "remote",
+                        "job_id": job_id, "room": room, "citations": citations})
+
+    resolved_model = conv.model or rag.BACKENDS.get(conv.backend, {}).get("default_model")
+    cit_json = _json.dumps(citations) if citations else None
+    _launch_chat_stream(conv.id, conv.backend, conv.model, resolved_model, messages,
+                        cit_json, citations, temperature, room, job_id)
     return jsonify({"status": "streaming", "mode": "streaming", "job_id": job_id,
-                    "room": room, "citations": citations, "title": title})
+                    "room": room, "citations": citations})
+
+
+@app.route("/api/conversations/<int:conv_id>/message", methods=["POST"])
+def send_message(conv_id):
+    """Add a user message and stream the assistant reply."""
+    user, err = _require_user()
+    if err:
+        return err
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+    data = request.get_json(silent=True) or {}
+    content = (data.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "content is required"}), 400
+    try:
+        temperature = max(0.0, min(1.5, float(data.get("temperature", 0.7))))
+    except (TypeError, ValueError):
+        temperature = 0.7
+
+    # Persist the user turn first, then assemble from history (which now ends
+    # with it). Name the chat from the first message.
+    if conv.messages.count() == 0 and conv.title == "New chat":
+        conv.title = content[:60]
+    db.session.add(ChatMessage(conversation_id=conv.id, role="user", content=content))
+    conv.updated_at = _utcnow()
+    db.session.commit()
+
+    messages, citations = _assemble_chat(conv, user, rag_query=content)
+    return _dispatch_chat(conv, user, messages, citations, data.get("socket_id"), temperature)
+
+
+@app.route("/api/conversations/<int:conv_id>/regenerate", methods=["POST"])
+def regenerate_message(conv_id):
+    """Drop the last assistant reply and generate a fresh one for the same
+    last user turn."""
+    user, err = _require_user()
+    if err:
+        return err
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        temperature = max(0.0, min(1.5, float(data.get("temperature", 0.7))))
+    except (TypeError, ValueError):
+        temperature = 0.7
+
+    msgs = conv.messages.order_by(ChatMessage.id).all()
+    if not msgs or msgs[-1].role != "assistant":
+        return jsonify({"error": "Nothing to regenerate yet."}), 400
+    last_user = next((m for m in reversed(msgs) if m.role == "user"), None)
+    if last_user is None:
+        return jsonify({"error": "No user message to respond to."}), 400
+    db.session.delete(msgs[-1])
+    conv.updated_at = _utcnow()
+    db.session.commit()
+
+    messages, citations = _assemble_chat(conv, user, rag_query=last_user.content)
+    return _dispatch_chat(conv, user, messages, citations, data.get("socket_id"), temperature)
+
+
+@socketio.on("chat_stop")
+def on_chat_stop(data):
+    """Browser asked to stop an in-flight streaming reply."""
+    jid = (data or {}).get("job_id")
+    if jid:
+        _chat_cancel.add(jid)
 
 
 def _evaluate_predictions(pp, rows, predictions):
