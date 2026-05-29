@@ -246,3 +246,49 @@ cleaned up afterward.
 Feature **7** (per-device telemetry history) remains the only deferred item —
 see `DEFERRED_FEATURES.md`.
 
+## RAG — Knowledge Assistant (new capability)
+
+Added a full retrieval-augmented-generation feature: upload documents → chunk →
+embed → retrieve top-k → ground a local (or cloud) LLM → answer with citations.
+
+- **`backend/rag.py`** — extraction (txt/md/csv/pdf) + overlapping chunking;
+  embedders (TF-IDF default = zero download; MiniLM optional); per-KB on-disk
+  vector store; and a **pluggable generation-backend registry** with
+  human-readable "what / use-when" copy + live availability:
+  - **MLX** (Apple Silicon) — recommended here; default model
+    `mlx-community/gemma-3-4b-it-4bit` (the ~4B Gemma the brief asked for).
+  - **llama.cpp** (GGUF), **Transformers** (PyTorch/MPS), **Ollama** (local
+    server), and a **Cloud (Claude)** fallback that works with no download.
+- **DB**: `KnowledgeBase` + `Document` models (user-scoped, cascade).
+- **API**: `/api/rag/backends`, KB CRUD, `…/documents` ingest, `…/query`
+  (retrieve-then-generate).
+- **Frontend `/assistant`** (nav "Assistant"): KB management + document upload;
+  **expert** mode shows the backend picker that *explains each option* with
+  availability + setup hints, plus model/top-k/temperature/embedder controls and
+  retrieved-source previews; **novice** mode hides all that and auto-uses the
+  recommended backend.
+
+### Dependencies + environment
+- Hard adds: `pypdf>=4.0` (PDF ingest). Retrieval (TF-IDF/sklearn) and cloud
+  generation work with no extra installs.
+- Installed into `backend/venv` on this M4 to light up local backends:
+  `mlx-lm` (→ MLX **available + recommended**) which also pulled in
+  `transformers` (→ Transformers available). `llama-cpp-python`,
+  `sentence-transformers`, and Ollama remain opt-in (detected if present).
+  These are documented as optional in `requirements.txt`, not hard deps
+  (Apple-only / heavy).
+
+### Verified (live, in-browser)
+- `/assistant` renders + "Assistant" nav link; expert backend picker lists all
+  five backends with descriptions, "Use when", availability, and the
+  ★ recommended (MLX) badge.
+- Created a KB, uploaded a doc, asked a question → correct **grounded answer
+  with citation [1]** ("…local 4B model via MLX on Apple Silicon [1] … Apple M4
+  Mac Mini [1]"). Unavailable backend → 409 with setup hint.
+- Novice mode hides the picker and shows the auto-backend note.
+- After installing mlx-lm: `/api/rag/backends` reports **recommended: mlx**,
+  mlx/transformers/cloud available. Zero console errors. Test KBs cleaned up.
+
+> First MLX query downloads the chosen model (~2.5 GB for a 4-bit 4B) — left to
+> the user to trigger; not downloaded during verification.
+
