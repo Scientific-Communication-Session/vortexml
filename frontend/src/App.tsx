@@ -8,6 +8,7 @@ import Training from './pages/Training';
 import Leaderboard from './pages/Leaderboard';
 import Playground from './pages/Playground';
 import Rag from './pages/Rag';
+import Chat from './pages/Chat';
 import Courses from './pages/Courses';
 import CourseDetail from './pages/CourseDetail';
 import Learn from './pages/Learn';
@@ -36,6 +37,7 @@ const App: React.FC = () => {
           <Route path="leaderboard" element={<Leaderboard />} />
           <Route path="predict" element={<Playground />} />
           <Route path="assistant" element={<Rag />} />
+          <Route path="chat" element={<Chat />} />
         </Route>
       </Routes>
     </AuthProvider>
