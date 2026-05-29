@@ -1,15 +1,32 @@
 # Deferred Features
 
-Features proposed in the review that were intentionally **not** implemented in
-this pass (scope was features 1, 2, 4, 5, 6). Each entry has enough detail to
-pick up cold.
+Features proposed in the review. The original deferred set was {3, 7, 8};
+**features 3 and 8 have since been implemented** (see "Implemented in follow-up"
+below). Only **feature 7** remains deferred.
+
+## Implemented in follow-up
+- **Feature 3 (confusion matrix / residuals)** — delivered as on-the-fly
+  evaluation: `POST /api/projects/<id>/predict` returns an `evaluation` block
+  (accuracy + confusion matrix, or MAE/RMSE/R² + residuals) whenever the input
+  rows carry the true target. Surfaced on the Model Playground page (`/predict`)
+  — a confusion-matrix table for classification, a residual scatter for
+  regression. This avoided touching `train_model`/the DB schema by scoring a
+  labelled CSV on demand rather than persisting test-set metrics at train time.
+- **Feature 8 (ONNX / TorchScript export)** — `GET /api/projects/<id>/export?`
+  `format=onnx|torchscript`, with export buttons on the Playground page.
+  Added `onnx>=1.16` to requirements (TorchScript needs only torch).
 
 ---
 
-## Feature 3 — Confusion matrix & regression residual plots
+## Feature 3 — Confusion matrix & regression residual plots  ✅ IMPLEMENTED (see above)
 
 **Original item:** "Confusion matrix / regression residual plots on the held-out
 test set (you compute a test split but never use it for reporting)."
+
+> Implemented via the predict-time `evaluation` path described above. The
+> original "persist test-set metrics at train time" design below remains a
+> valid (deeper) alternative if you later want metrics shown without
+> re-uploading a labelled set.
 
 **Why deferred:** Out of the assigned set {1,2,4,5,6}. It also depends on
 plumbing that doesn't exist yet: the training pipeline builds a `test_loader`
@@ -63,7 +80,7 @@ telemetry is the first real high-write table.
 
 ---
 
-## Feature 8 — Export to ONNX / TorchScript
+## Feature 8 — Export to ONNX / TorchScript  ✅ IMPLEMENTED (see top)
 
 **Original item:** "Export to ONNX / TorchScript for portability beyond the
 Python .pt."

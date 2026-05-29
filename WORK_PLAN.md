@@ -218,3 +218,31 @@ Both servers are left **healthy and running** (backend :5050, Vite :5173).
 Note: a couple of throwaway test-user rows (`verify_*`, `e2e_*`) remain in the
 dev Postgres DB (no delete-user endpoint); harmless.
 
+## Follow-up session — Model Playground + two previously-deferred features
+
+Elevated the inference feature into a first-class experience and pulled two of
+the originally-proposed (deferred) features forward:
+
+- **Model Playground** (`feat: Model Playground page`) — new `/predict` page +
+  nav link. Pick any trained model, enter a scenario in a typed form (or upload
+  a CSV), and get a prediction with confidence + class probabilities. The model
+  can be exported to ONNX/TorchScript from the same page.
+- **Feature 3** (`feat(#3,#8)`) — on-the-fly evaluation: `predict` returns an
+  `evaluation` block (accuracy + confusion matrix, or MAE/RMSE/R² + residuals)
+  when the rows carry the true target. Shown on the Playground as a
+  confusion-matrix table / residual scatter. Deliberately avoided touching
+  `train_model`/schema (scores a labelled CSV on demand).
+- **Feature 8** (`feat(#3,#8)`) — `GET /api/projects/<id>/export?format=`
+  `onnx|torchscript`. Added `onnx>=1.16` to requirements (the only new dep;
+  installed into the venv). TorchScript needs only torch.
+
+Verified in-browser against the live (restarted) server: Playground renders +
+"Predict" nav link; model dropdown lists trained models with metrics; scenario
+predict returns the correct class @100%; a labelled CSV batch shows 97.5%
+accuracy + confusion matrix; ONNX (1.7 KB, validated) and TorchScript (13 KB)
+both download; bad export format → 400; zero console errors. Demo projects
+cleaned up afterward.
+
+Feature **7** (per-device telemetry history) remains the only deferred item —
+see `DEFERRED_FEATURES.md`.
+
