@@ -17,3 +17,13 @@ psutil>=5.9
 # ONNX export of trained models (POST .../export?format=onnx). TorchScript
 # export needs nothing beyond torch.
 onnx>=1.16
+# RAG document ingestion (PDF). txt/md/csv need nothing extra.
+pypdf>=4.0
+# RAG retrieval defaults to TF-IDF (scikit-learn, already above) and generation
+# can use the cloud (anthropic) key. The local generation backends are OPTIONAL
+# and intentionally NOT hard requirements (heavy / platform-specific):
+#   mlx-lm                 # Apple Silicon — recommended local backend
+#   llama-cpp-python       # GGUF, cross-platform
+#   transformers accelerate# any HF model via PyTorch
+#   sentence-transformers  # MiniLM semantic embeddings (better retrieval)
+# Install whichever you want; the Assistant detects what's available.
