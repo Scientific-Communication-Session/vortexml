@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Plus, Send, Trash2, Loader2, MessageSquare, Cpu } from 'lucide-react';
+import { Plus, Send, Trash2, Loader2, MessageSquare, Cpu, Pencil } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
@@ -12,7 +12,7 @@ interface KB { id: number; name: string; }
 interface RDevice { id: number; nickname: string; is_shared: boolean; online?: boolean; }
 interface Conversation { id: number; title: string; backend: string; model: string | null; device_id: number | null; kb_id: number | null; }
 interface Citation { n: number; doc_name: string; score: number; preview: string; }
-interface Msg { id?: number; role: string; content: string; tokens_per_second?: number | null; model?: string | null; citations?: Citation[] | null; }
+interface Msg { id?: number; role: string; content: string; tokens_per_second?: number | null; model?: string | null; citations?: Citation[] | null; streaming?: boolean; }
 interface LiveStats { cpu_percent?: number; gpu_percent?: number; ram_percent?: number; cpu_temp?: number; gpu_temp?: number; }
 
 const inputStyle: React.CSSProperties = {
@@ -40,6 +40,8 @@ const Chat: React.FC = () => {
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
+    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editTitle, setEditTitle] = useState('');
 
     const socketRef = useRef<Socket | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -66,8 +68,27 @@ const Chat: React.FC = () => {
         if (!user) return;
         const s = io();
         socketRef.current = s;
-        s.on('chat_answer', (d: { message: Msg }) => { setMessages((m) => [...m, d.message]); setSending(false); setLiveStats(null); });
-        s.on('chat_error', (d: { error: string }) => { setSending(false); setLiveStats(null); showToast(d.error, 'error'); });
+        s.on('chat_token', (d: { delta: string }) => setMessages((m) => {
+            const last = m[m.length - 1];
+            if (last && last.streaming) {
+                const copy = m.slice();
+                copy[copy.length - 1] = { ...last, content: last.content + d.delta };
+                return copy;
+            }
+            return [...m, { role: 'assistant', content: d.delta, streaming: true }];
+        }));
+        s.on('chat_answer', (d: { message: Msg }) => {
+            setMessages((m) => {
+                const last = m[m.length - 1];
+                if (last && last.streaming) { const copy = m.slice(); copy[copy.length - 1] = d.message; return copy; }
+                return [...m, d.message];
+            });
+            setSending(false); setLiveStats(null);
+        });
+        s.on('chat_error', (d: { error: string }) => {
+            setMessages((m) => (m[m.length - 1]?.streaming ? m.slice(0, -1) : m));
+            setSending(false); setLiveStats(null); showToast(d.error, 'error');
+        });
         s.on('rag_stats', (d: LiveStats) => setLiveStats(d));
         return () => { s.disconnect(); socketRef.current = null; };
     }, [user]);
@@ -102,6 +123,17 @@ const Chat: React.FC = () => {
         if (activeId === id) { setActiveId(null); setMessages([]); }
     };
 
+    const renameConversation = async (id: number) => {
+        const title = editTitle.trim();
+        setEditingId(null);
+        if (!title) return;
+        setConversations((c) => c.map((x) => (x.id === id ? { ...x, title } : x)));
+        fetch(`/api/conversations/${id}`, {
+            method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        }).catch(() => { });
+    };
+
     // Persist a settings change onto the active conversation.
     const patchSettings = (patch: Partial<typeof settings>) => {
         const next = { ...settings, ...patch };
@@ -129,7 +161,9 @@ const Chat: React.FC = () => {
             setActiveId(convId);
         }
         setInput('');
-        setMessages((m) => [...m, { role: 'user', content: text }]);
+        // optimistic user bubble + an empty assistant placeholder that fills as
+        // tokens stream in (chat_token), then is finalized by chat_answer.
+        setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true }]);
         setSending(true); setLiveStats(null);
         try {
             const res = await fetch(`/api/conversations/${convId}/message`, {
@@ -137,12 +171,17 @@ const Chat: React.FC = () => {
                 body: JSON.stringify({ content: text, socket_id: socketRef.current?.id }),
             });
             const data = await res.json();
-            if (!res.ok || data.error) { showToast(data.error || `Chat failed (HTTP ${res.status})`, 'error'); setSending(false); return; }
-            if (data.mode === 'remote') return;  // assistant arrives via chat_answer socket event
-            setMessages((m) => [...m, data.message]); setSending(false); setLiveStats(null);
+            if (!res.ok || data.error) {
+                showToast(data.error || `Chat failed (HTTP ${res.status})`, 'error');
+                setMessages((m) => (m[m.length - 1]?.streaming ? m.slice(0, -1) : m));
+                setSending(false); return;
+            }
             if (data.title) setConversations((c) => c.map((x) => (x.id === convId ? { ...x, title: data.title } : x)));
+            // The reply (streamed or whole) arrives over the socket.
         } catch (e) {
-            showToast('Chat failed: ' + (e instanceof Error ? e.message : String(e)), 'error'); setSending(false);
+            showToast('Chat failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
+            setMessages((m) => (m[m.length - 1]?.streaming ? m.slice(0, -1) : m));
+            setSending(false);
         }
     };
 
@@ -173,10 +212,25 @@ const Chat: React.FC = () => {
                                     background: activeId === c.id ? 'rgba(139,92,246,0.14)' : 'transparent',
                                     border: '1px solid ' + (activeId === c.id ? 'rgba(139,92,246,0.3)' : 'transparent'),
                                 }}>
-                                <span style={{ minWidth: 0, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                    <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.7 }} />{c.title}
-                                </span>
-                                <button className="btn btn-secondary btn-sm" style={{ padding: '0.2rem' }} onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }}><Trash2 size={12} /></button>
+                                {editingId === c.id ? (
+                                    <input autoFocus value={editTitle} onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => setEditTitle(e.target.value)}
+                                        onBlur={() => renameConversation(c.id)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') renameConversation(c.id); if (e.key === 'Escape') setEditingId(null); }}
+                                        style={{ ...inputStyle, flex: 1, padding: '0.2rem 0.4rem', fontSize: '0.82rem' }} />
+                                ) : (
+                                    <span title="Double-click to rename"
+                                        onDoubleClick={(e) => { e.stopPropagation(); setEditingId(c.id); setEditTitle(c.title); }}
+                                        style={{ minWidth: 0, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                        <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.7 }} />{c.title}
+                                    </span>
+                                )}
+                                <div style={{ display: 'flex', gap: '0.15rem', flexShrink: 0 }}>
+                                    <button className="btn btn-secondary btn-sm" style={{ padding: '0.2rem' }} title="Rename"
+                                        onClick={(e) => { e.stopPropagation(); setEditingId(c.id); setEditTitle(c.title); }}><Pencil size={11} /></button>
+                                    <button className="btn btn-secondary btn-sm" style={{ padding: '0.2rem' }} title="Delete"
+                                        onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }}><Trash2 size={12} /></button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -224,9 +278,15 @@ const Chat: React.FC = () => {
                                     background: m.role === 'user' ? 'rgba(139,92,246,0.22)' : 'rgba(255,255,255,0.05)',
                                     border: '1px solid rgba(255,255,255,0.08)',
                                 }}>
-                                    {m.role === 'user'
-                                        ? <span style={{ whiteSpace: 'pre-wrap' }}>{m.content}</span>
-                                        : <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>}
+                                    {m.role === 'user' ? (
+                                        <span style={{ whiteSpace: 'pre-wrap' }}>{m.content}</span>
+                                    ) : m.streaming && !m.content ? (
+                                        <span className="text-muted"><Loader2 size={14} className="chat-msg__spinner" style={{ verticalAlign: 'middle' }} /> Thinking…</span>
+                                    ) : (
+                                        <div className="markdown-body">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content + (m.streaming ? ' ▍' : '')}</ReactMarkdown>
+                                        </div>
+                                    )}
                                     {m.role === 'assistant' && m.citations && m.citations.length > 0 && (
                                         <div className="text-muted" style={{ fontSize: '0.74rem', marginTop: '0.4rem' }}>
                                             Sources: {m.citations.map((c) => `[${c.n}] ${c.doc_name}`).join('  ')}
@@ -238,19 +298,14 @@ const Chat: React.FC = () => {
                                 </div>
                             </div>
                         ))}
-                        {sending && (
-                            <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: '0.6rem' }}>
-                                <div style={{ padding: '0.7rem 0.95rem', borderRadius: 14, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                                    <Loader2 size={15} className="chat-msg__spinner" style={{ verticalAlign: 'middle' }} /> <span className="text-muted">Thinking…</span>
-                                </div>
-                                {!isBeginner && liveStats && (
-                                    <span className="text-muted" style={{ fontSize: '0.74rem', display: 'inline-flex', gap: '0.7rem' }}>
-                                        <Cpu size={12} style={{ verticalAlign: 'middle' }} />
-                                        {liveStats.cpu_percent != null && <span>CPU {Math.round(liveStats.cpu_percent)}%</span>}
-                                        {liveStats.gpu_percent != null && <span>GPU {Math.round(liveStats.gpu_percent)}%</span>}
-                                        {liveStats.cpu_temp != null && <span>{Math.round(liveStats.cpu_temp)}°C</span>}
-                                    </span>
-                                )}
+                        {sending && !isBeginner && liveStats && (
+                            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                                <span className="text-muted" style={{ fontSize: '0.74rem', display: 'inline-flex', gap: '0.7rem', alignItems: 'center' }}>
+                                    <Cpu size={12} style={{ verticalAlign: 'middle' }} />
+                                    {liveStats.cpu_percent != null && <span>CPU {Math.round(liveStats.cpu_percent)}%</span>}
+                                    {liveStats.gpu_percent != null && <span>GPU {Math.round(liveStats.gpu_percent)}%</span>}
+                                    {liveStats.cpu_temp != null && <span>{Math.round(liveStats.cpu_temp)}°C</span>}
+                                </span>
                             </div>
                         )}
                     </div>
