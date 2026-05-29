@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { io, Socket } from 'socket.io-client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Database, Plus, Upload, Send, Trash2, Loader2, FileText, Cpu, Cloud, ChevronDown } from 'lucide-react';
+import { Database, Plus, Upload, Send, Trash2, Loader2, FileText, Cpu, Cloud, ChevronDown, Server, Download, Check, Gauge } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
@@ -15,7 +16,14 @@ interface DocItem { id: number; filename: string; char_count: number; chunk_coun
 interface KB { id: number; name: string; embedder: string; chunk_size: number; overlap: number; n_docs: number; n_chunks: number; documents?: DocItem[]; }
 interface Citation { n: number; doc_name: string; score: number; preview: string; }
 interface Chunk { n: number; doc_name: string; score: number; text: string; }
-interface QueryResult { answer: string; citations: Citation[]; chunks: Chunk[]; backend: string; model: string; }
+interface GenStats { tokens?: number; gen_time?: number; tokens_per_second?: number | null; }
+interface QueryResult { answer: string; citations: Citation[]; chunks: Chunk[]; backend: string; model: string; stats?: GenStats | null; }
+interface RagDevice { id: number; nickname: string; is_shared: boolean; online?: boolean; status?: string; }
+interface CatalogModel { id: string; downloaded: boolean; size_bytes: number | null; }
+interface CatalogEntry { backend: string; label: string; available: boolean; default_model: string; models: CatalogModel[]; }
+interface LiveStats { cpu_percent?: number; gpu_percent?: number; ram_percent?: number; cpu_temp?: number; gpu_temp?: number; }
+
+const fmtSize = (b: number | null) => (b ? `${(b / 1e9).toFixed(1)} GB` : '');
 
 const inputStyle: React.CSSProperties = {
     width: '100%', padding: '0.5rem 0.65rem', borderRadius: 8,
@@ -52,6 +60,18 @@ const Rag: React.FC = () => {
     const [uploading, setUploading] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
 
+    // device + model catalog ("run on your hardware")
+    const [devices, setDevices] = useState<RagDevice[]>([]);
+    const [deviceId, setDeviceId] = useState<number | null>(null); // null = shared M4
+    const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+    const [catalogOnline, setCatalogOnline] = useState(true);
+    const [downloading, setDownloading] = useState<string | null>(null);
+    const [downloadStatus, setDownloadStatus] = useState<string>('');
+
+    // live hardware stats (streamed during a query / download)
+    const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
+    const socketRef = useRef<Socket | null>(null);
+
     useEffect(() => {
         if (authLoading) return;
         if (!user) { navigate('/signin'); return; }
@@ -68,6 +88,39 @@ const Rag: React.FC = () => {
             .catch((e) => showToast('Failed to load RAG: ' + (e instanceof Error ? e.message : String(e)), 'error'))
             .finally(() => setLoading(false));
     }, [user, authLoading, navigate]);
+
+    // Socket for live download progress + hardware stats + remote answers.
+    useEffect(() => {
+        if (isBeginner) return;  // device/stats UI is expert-only
+        const s = io();
+        socketRef.current = s;
+        s.on('rag_stats', (d: LiveStats) => setLiveStats(d));
+        s.on('rag_download', (d: { status: string }) => setDownloadStatus(d.status));
+        s.on('rag_download_complete', (d: { catalog?: CatalogEntry[] }) => {
+            setDownloading(null); setDownloadStatus('');
+            if (d.catalog) setCatalog(d.catalog);
+            showToast('Model downloaded', 'success');
+        });
+        s.on('rag_download_error', (d: { error: string }) => { setDownloading(null); setDownloadStatus(''); showToast(d.error, 'error'); });
+        s.on('rag_answer', (d: QueryResult) => { setResult(d); setAsking(false); setLiveStats(null); });
+        s.on('rag_error', (d: { error: string }) => { setAsking(false); setLiveStats(null); showToast(d.error, 'error'); });
+        return () => { s.disconnect(); socketRef.current = null; };
+    }, [isBeginner]);
+
+    // Load devices (expert) and the model catalog for the chosen device.
+    useEffect(() => {
+        if (isBeginner || !user) return;
+        apiGet('/api/rag/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
+    }, [isBeginner, user]);
+
+    useEffect(() => {
+        if (isBeginner) return;
+        const id = deviceId ?? devices.find((d) => d.is_shared)?.id;
+        if (id == null) return;
+        apiGet(`/api/rag/devices/${id}/models`)
+            .then((d) => { setCatalog(d.catalog || []); setCatalogOnline(d.online !== false); })
+            .catch(() => { setCatalog([]); setCatalogOnline(false); });
+    }, [deviceId, devices, isBeginner]);
 
     const refreshKbs = () => apiGet('/api/rag/kb').then((d) => setKbs(d.knowledge_bases || [])).catch(() => { });
     const selectKb = (id: number) => {
@@ -113,20 +166,35 @@ const Rag: React.FC = () => {
 
     const ask = async () => {
         if (!selected || !query.trim()) return;
-        setAsking(true); setResult(null);
+        setAsking(true); setResult(null); setLiveStats(null);
         try {
             const body: Record<string, unknown> = { query: query.trim(), top_k: topK, temperature };
-            if (!isBeginner) { body.backend = backend; body.model = model || undefined; }
+            if (!isBeginner) {
+                body.backend = backend; body.model = model || undefined;
+                body.device_id = deviceId; body.socket_id = socketRef.current?.id;
+            }
             const res = await fetch(`/api/rag/kb/${selected.id}/query`, {
                 method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
             });
             const data = await res.json();
-            if (!res.ok || data.error) { showToast(data.error || `Query failed (HTTP ${res.status})`, 'error'); return; }
-            setResult(data);
+            if (!res.ok || data.error) { showToast(data.error || `Query failed (HTTP ${res.status})`, 'error'); setAsking(false); return; }
+            if (data.mode === 'remote') return;  // answer arrives via the rag_answer socket event
+            setResult(data); setAsking(false); setLiveStats(null);
         } catch (e) {
             showToast('Query failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
-        } finally { setAsking(false); }
+            setAsking(false);
+        }
     };
+
+    const downloadModel = async (be: string, mdl: string) => {
+        const id = deviceId ?? devices.find((d) => d.is_shared)?.id;
+        if (id == null) return;
+        setDownloading(mdl); setDownloadStatus('Starting…');
+        const d = await apiPost(`/api/rag/devices/${id}/models/download`, { backend: be, model: mdl, socket_id: socketRef.current?.id });
+        if (d.error) { setDownloading(null); showToast(d.error, 'error'); }
+    };
+
+    const selectModel = (be: string, mdl: string) => { setBackend(be); setModel(mdl); showToast(`Using ${mdl}`, 'success'); };
 
     const pickBackend = (b: Backend) => {
         setBackend(b.key);
@@ -222,6 +290,55 @@ const Rag: React.FC = () => {
                                 )}
                             </div>
 
+                            {/* device + model catalog ("run on your hardware") — expert */}
+                            {!isBeginner && (
+                                <div className="glass-panel">
+                                    <div className="panel-title"><span className="pt-icon"><Server size={15} style={{ verticalAlign: 'middle' }} /></span> Run on your hardware</div>
+                                    <p className="text-muted mb-2" style={{ fontSize: '0.84rem' }}>Pick a device, then see the models stored on it and download more. Generation runs there; retrieval stays here.</p>
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.9rem' }}>
+                                        {devices.map((d) => {
+                                            const active = (deviceId ?? devices.find((x) => x.is_shared)?.id) === d.id;
+                                            return (
+                                                <button key={d.id} onClick={() => setDeviceId(d.id)}
+                                                    className={`btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}`}>
+                                                    {d.is_shared ? '🖥️' : '💻'} {d.nickname}
+                                                    <span style={{ marginLeft: 6, opacity: 0.8 }}>{d.online === false ? '○' : '●'}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {!catalogOnline && <div className="info-banner" style={{ borderLeft: '3px solid #f5a623' }}><span className="info-banner-icon">⚠️</span><div>This device is offline or hasn't reported its models yet — start its node agent.</div></div>}
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
+                                        {catalog.map((cat) => (
+                                            <div key={cat.backend}>
+                                                <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+                                                    {cat.label} <span className="text-muted" style={{ fontWeight: 400 }}>{cat.available ? '· runtime ready' : '· runtime not installed'}</span>
+                                                </div>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                                                    {cat.models.map((m) => (
+                                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
+                                                            <div style={{ minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                {m.downloaded ? <Check size={12} style={{ color: '#22c55e', verticalAlign: 'middle', marginRight: 4 }} /> : null}{m.id}
+                                                                {m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
+                                                            </div>
+                                                            <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
+                                                                {m.downloaded
+                                                                    ? <button className="btn btn-secondary btn-sm" disabled={!cat.available} onClick={() => selectModel(cat.backend, m.id)}>Use</button>
+                                                                    : <button className="btn btn-secondary btn-sm" disabled={downloading === m.id} onClick={() => downloadModel(cat.backend, m.id)}>
+                                                                        {downloading === m.id ? <Loader2 size={12} className="chat-msg__spinner" /> : <Download size={12} />}
+                                                                        <span style={{ marginLeft: 4 }}>{downloading === m.id ? 'Downloading' : 'Download'}</span>
+                                                                      </button>}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {downloading && downloadStatus && <div className="text-muted" style={{ fontSize: '0.78rem', marginTop: '0.5rem' }}>⏳ {downloadStatus}</div>}
+                                </div>
+                            )}
+
                             {/* backend selection (expert) or note (novice) */}
                             {!isBeginner ? (
                                 <div className="glass-panel">
@@ -296,6 +413,18 @@ const Rag: React.FC = () => {
                                 </div>
                                 {selected.n_chunks === 0 && <p className="text-muted" style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>Add documents first.</p>}
 
+                                {/* live hardware stats while generating (expert) */}
+                                {!isBeginner && asking && liveStats && (
+                                    <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginTop: '0.7rem', padding: '0.5rem 0.7rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                                        <span className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}><Gauge size={12} style={{ verticalAlign: 'middle' }} /> live</span>
+                                        <Stat label="CPU" v={liveStats.cpu_percent} suffix="%" />
+                                        <Stat label="GPU" v={liveStats.gpu_percent} suffix="%" />
+                                        <Stat label="RAM" v={liveStats.ram_percent} suffix="%" />
+                                        <Stat label="CPU °C" v={liveStats.cpu_temp} suffix="°" />
+                                        <Stat label="GPU °C" v={liveStats.gpu_temp} suffix="°" />
+                                    </div>
+                                )}
+
                                 {result && (
                                     <div style={{ marginTop: '1rem' }}>
                                         <div className="markdown-body" style={{ fontSize: '0.92rem', lineHeight: 1.6 }}>
@@ -316,6 +445,11 @@ const Rag: React.FC = () => {
                                         )}
                                         <div className="text-muted" style={{ fontSize: '0.72rem', marginTop: '0.6rem' }}>
                                             Generated by {result.backend} · {result.model}
+                                            {result.stats?.tokens_per_second != null && (
+                                                <> · <strong>{result.stats.tokens_per_second} tok/s</strong>
+                                                    {result.stats.tokens != null ? ` (${result.stats.tokens} tokens` : ''}
+                                                    {result.stats.gen_time != null ? ` in ${result.stats.gen_time}s)` : result.stats.tokens != null ? ')' : ''}</>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -327,5 +461,12 @@ const Rag: React.FC = () => {
         </>
     );
 };
+
+const Stat: React.FC<{ label: string; v?: number; suffix: string }> = ({ label, v, suffix }) => (
+    <span style={{ fontSize: '0.78rem' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{v == null ? '—' : Math.round(v) + suffix}</span>
+        <span className="text-muted" style={{ marginLeft: 4 }}>{label}</span>
+    </span>
+);
 
 export default Rag;
