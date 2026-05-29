@@ -6,6 +6,7 @@ import Dataset from './pages/Dataset';
 import Architect from './pages/Architect';
 import Training from './pages/Training';
 import Leaderboard from './pages/Leaderboard';
+import Playground from './pages/Playground';
 import Courses from './pages/Courses';
 import CourseDetail from './pages/CourseDetail';
 import Learn from './pages/Learn';
@@ -32,6 +33,7 @@ const App: React.FC = () => {
           <Route path="architect" element={<Architect />} />
           <Route path="training" element={<Training />} />
           <Route path="leaderboard" element={<Leaderboard />} />
+          <Route path="predict" element={<Playground />} />
         </Route>
       </Routes>
     </AuthProvider>

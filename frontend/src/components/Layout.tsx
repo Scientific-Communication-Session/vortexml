@@ -10,6 +10,7 @@ const navLinks = [
     { to: '/dataset', label: 'Dataset' },
     { to: '/architect', label: 'Architect' },
     { to: '/training', label: 'Training' },
+    { to: '/predict', label: 'Predict' },
     { to: '/leaderboard', label: 'Leaderboard' },
     { to: '/learn', label: 'Learn' },
 ];
