@@ -30,6 +30,8 @@ class User(db.Model):
                                cascade='all, delete-orphan')
     devices = db.relationship('Device', backref='user', lazy='dynamic',
                               cascade='all, delete-orphan')
+    knowledge_bases = db.relationship('KnowledgeBase', backref='user', lazy='dynamic',
+                                      cascade='all, delete-orphan')
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -148,3 +150,62 @@ class Device(db.Model):
         if runtime:
             d.update(runtime)
         return d
+
+
+class KnowledgeBase(db.Model):
+    """A RAG knowledge base: a named collection of a user's documents whose
+    chunks + embeddings live on disk under uploads/rag/<id> (see rag.KBStore)."""
+    __tablename__ = 'knowledge_bases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    embedder = db.Column(db.String(40), nullable=False, default='tfidf')
+    chunk_size = db.Column(db.Integer, nullable=False, default=900)
+    overlap = db.Column(db.Integer, nullable=False, default=150)
+    n_docs = db.Column(db.Integer, nullable=False, default=0)
+    n_chunks = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
+
+    documents = db.relationship('Document', backref='knowledge_base', lazy='dynamic',
+                                cascade='all, delete-orphan')
+
+    def to_dict(self, include_docs=False):
+        d = {
+            "id": self.id,
+            "name": self.name,
+            "embedder": self.embedder,
+            "chunk_size": self.chunk_size,
+            "overlap": self.overlap,
+            "n_docs": self.n_docs,
+            "n_chunks": self.n_chunks,
+            "created_at": self.created_at.isoformat() + "Z",
+        }
+        if include_docs:
+            d["documents"] = [doc.to_dict() for doc in
+                              self.documents.order_by(Document.created_at).all()]
+        return d
+
+
+class Document(db.Model):
+    """One ingested file within a knowledge base (text is not stored verbatim;
+    only its chunks live in the on-disk vector store)."""
+    __tablename__ = 'rag_documents'
+
+    id = db.Column(db.Integer, primary_key=True)
+    kb_id = db.Column(db.Integer, db.ForeignKey('knowledge_bases.id', ondelete='CASCADE'),
+                      nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    char_count = db.Column(db.Integer, nullable=False, default=0)
+    chunk_count = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "filename": self.filename,
+            "char_count": self.char_count,
+            "chunk_count": self.chunk_count,
+            "created_at": self.created_at.isoformat() + "Z",
+        }

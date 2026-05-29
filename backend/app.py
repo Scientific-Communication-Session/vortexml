@@ -38,8 +38,9 @@ from training_engine import (
 )
 from device_specs import detect_specs
 from auto_config_rules import recommend_config, guard_config
+import rag
 from system_stats import SystemMonitor
-from models import db, User, Project, Device
+from models import db, User, Project, Device, KnowledgeBase, Document
 
 app = Flask(__name__)
 # Enable CORS with credentials support for session cookies pointing to the frontend
@@ -979,6 +980,173 @@ def export_project(project_id):
     resp.headers["Content-Disposition"] = f'attachment; filename="{base}.{ext}"'
     resp.headers["Content-Length"] = len(data)
     return resp
+
+
+# ─────────────────────────────────────────────────────────
+# RAG — knowledge bases + retrieval-augmented chat
+# ─────────────────────────────────────────────────────────
+@app.route("/api/rag/backends", methods=["GET"])
+def rag_backends():
+    """Generation backends + embedders with availability + the copy the UI
+    shows to explain what each one does."""
+    user, err = _require_user()
+    if err:
+        return err
+    data = rag.list_backends()
+    data["embedders"] = [
+        {"key": k, "label": v["label"], "description": v["description"],
+         "available": rag.embedder_available(k)}
+        for k, v in rag.EMBEDDERS.items()
+    ]
+    return jsonify(data)
+
+
+@app.route("/api/rag/kb", methods=["GET"])
+def list_kbs():
+    user, err = _require_user()
+    if err:
+        return err
+    kbs = (KnowledgeBase.query.filter_by(user_id=user.id)
+           .order_by(KnowledgeBase.created_at.desc()).all())
+    return jsonify({"knowledge_bases": [k.to_dict() for k in kbs]})
+
+
+@app.route("/api/rag/kb", methods=["POST"])
+def create_kb():
+    user, err = _require_user()
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    name = ((data.get("name") or "").strip() or "Knowledge Base")[:120]
+    embedder = data.get("embedder", "tfidf")
+    if embedder not in rag.EMBEDDERS:
+        return jsonify({"error": f"Unknown embedder: {embedder}"}), 400
+    if not rag.embedder_available(embedder):
+        return jsonify({"error": f"Embedder '{embedder}' isn't installed on the server."}), 400
+    try:
+        chunk_size = max(200, min(4000, int(data.get("chunk_size", 900))))
+        overlap = max(0, min(chunk_size // 2, int(data.get("overlap", 150))))
+    except (TypeError, ValueError):
+        return jsonify({"error": "chunk_size/overlap must be integers"}), 400
+    kb = KnowledgeBase(user_id=user.id, name=name, embedder=embedder,
+                       chunk_size=chunk_size, overlap=overlap)
+    db.session.add(kb)
+    db.session.commit()
+    return jsonify({"knowledge_base": kb.to_dict()}), 201
+
+
+@app.route("/api/rag/kb/<int:kb_id>", methods=["GET"])
+def get_kb(kb_id):
+    user, err = _require_user()
+    if err:
+        return err
+    kb = KnowledgeBase.query.filter_by(id=kb_id, user_id=user.id).first()
+    if not kb:
+        return jsonify({"error": "Knowledge base not found"}), 404
+    return jsonify({"knowledge_base": kb.to_dict(include_docs=True)})
+
+
+@app.route("/api/rag/kb/<int:kb_id>", methods=["DELETE"])
+def delete_kb(kb_id):
+    user, err = _require_user()
+    if err:
+        return err
+    kb = KnowledgeBase.query.filter_by(id=kb_id, user_id=user.id).first()
+    if not kb:
+        return jsonify({"error": "Knowledge base not found"}), 404
+    rag.KBStore(kb_id).destroy()
+    db.session.delete(kb)
+    db.session.commit()
+    return jsonify({"status": "deleted"})
+
+
+@app.route("/api/rag/kb/<int:kb_id>/documents", methods=["POST"])
+def add_kb_documents(kb_id):
+    """Ingest one or more uploaded files: extract text, chunk, embed, persist.
+    Files come under the 'file' field (repeatable)."""
+    user, err = _require_user()
+    if err:
+        return err
+    kb = KnowledgeBase.query.filter_by(id=kb_id, user_id=user.id).first()
+    if not kb:
+        return jsonify({"error": "Knowledge base not found"}), 404
+
+    files = [f for f in request.files.getlist("file") if f and f.filename]
+    if not files:
+        return jsonify({"error": "No files provided"}), 400
+
+    store = rag.KBStore(kb_id)
+    chunks = store.load_chunks()
+    next_id = max((c["id"] for c in chunks), default=-1) + 1
+    added = []
+    for f in files:
+        try:
+            text = rag.extract_text(f.filename, f.read())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        doc_chunks = rag.chunk_text(text, kb.chunk_size, kb.overlap)
+        if not doc_chunks:
+            continue
+        doc = Document(kb_id=kb.id, filename=f.filename[:255],
+                       char_count=len(text), chunk_count=len(doc_chunks))
+        db.session.add(doc)
+        db.session.flush()  # assign doc.id
+        for ch in doc_chunks:
+            chunks.append({"id": next_id, "doc_id": doc.id,
+                           "doc_name": f.filename, "text": ch})
+            next_id += 1
+        added.append(doc)
+
+    if not added:
+        db.session.rollback()
+        return jsonify({"error": "No usable text found in the upload(s)."}), 400
+
+    try:
+        store.rebuild(chunks, embedder=kb.embedder,
+                      chunk_size=kb.chunk_size, overlap=kb.overlap)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Embedding failed: {e}"}), 500
+
+    kb.n_docs = (kb.n_docs or 0) + len(added)
+    kb.n_chunks = len(chunks)
+    db.session.commit()
+    return jsonify({"knowledge_base": kb.to_dict(include_docs=True),
+                    "added": [d.to_dict() for d in added]})
+
+
+@app.route("/api/rag/kb/<int:kb_id>/query", methods=["POST"])
+def query_kb(kb_id):
+    """Retrieve-then-generate against a knowledge base."""
+    user, err = _require_user()
+    if err:
+        return err
+    kb = KnowledgeBase.query.filter_by(id=kb_id, user_id=user.id).first()
+    if not kb:
+        return jsonify({"error": "Knowledge base not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    query = (data.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "query is required"}), 400
+    backend = data.get("backend") or rag.default_backend()
+    model = data.get("model") or None
+    try:
+        top_k = max(1, min(12, int(data.get("top_k", 4))))
+        temperature = max(0.0, min(1.5, float(data.get("temperature", 0.2))))
+    except (TypeError, ValueError):
+        return jsonify({"error": "top_k/temperature must be numbers"}), 400
+
+    try:
+        result = rag.rag_answer(kb_id, query, backend=backend, model=model,
+                                top_k=top_k, temperature=temperature)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 409  # backend not available
+    except Exception as e:
+        return jsonify({"error": f"Generation failed: {e}"}), 500
+    return jsonify(result)
 
 
 def _evaluate_predictions(pp, rows, predictions):
