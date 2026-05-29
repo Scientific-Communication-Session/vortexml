@@ -178,3 +178,43 @@ scope/effort, and dependencies.
   (it makes real, paid Opus calls); the new offline rule test covers the
   guard/fallback logic instead.
 
+## Post-completion verification (full live E2E)
+
+Closed the two gaps from the first pass:
+
+1. **Existing test suite re-run** — `test_auto_config.py` (the live Opus picker
+   test) now passes against the rewritten picker; **all hard assertions PASS**
+   and the justification correctly names the fired rule
+   ("Rule R6 tiny_safe fired …"), confirming Workstream C didn't regress it.
+2. **Full data-dependent UI E2E** — trained a real model end-to-end through the
+   running server and click-tested every data-dependent surface:
+   - Training run completes and persists a Project (val_acc 100%, val_loss
+     0.044) — `sawRunning` true.
+   - **Predict** modal: opens from the Profile card, renders the feature form,
+     submit returns a prediction with confidence + probability bars. Prediction
+     correctness verified via the direct API (0.9/0.9 → class 1 @1.0; 0.1/0.1 →
+     class 0 @0.9995 — the model learned f1+f2>1 and inference reproduces it).
+   - **Explain** modal: opens, calls the tutor model, renders an accurate
+     markdown verdict citing the run's real loss values (~0.73 → ~0.046).
+   - **Leaderboard**: ranked table populated, project preselected, both overlay
+     charts mounted; `/api/projects/compare` returns the 8-epoch history.
+   - **Dataset Health**, nav **Leaderboard** link, auth-gating: confirmed.
+   - Zero console errors throughout. Demo project + weights cleaned up after.
+
+### Environment fix made during verification
+The machine's long-running dev servers were both broken before I started and
+were blocking live verification, so I restarted them (project convention allows
+killing stale servers):
+- The **Vite** dev server (11 days up) was returning HTTP 500 `EPERM` on every
+  route (incl. `/`) though `index.html` is fine — started a fresh one (now 200).
+- The **backend** was in a stale multi-process state (two `app.py` procs on
+  different Python versions; the 10h-old listener had my routes but training
+  died instantly while the *identical* path completed cleanly in a controlled
+  process). Restarted it cleanly on Postgres (preserving the user's projects)
+  with `.env` sourced — which also re-enables the chatbot/Explain API key.
+  After the restart, training and all AI features work.
+
+Both servers are left **healthy and running** (backend :5050, Vite :5173).
+Note: a couple of throwaway test-user rows (`verify_*`, `e2e_*`) remain in the
+dev Postgres DB (no delete-user endpoint); harmless.
+
