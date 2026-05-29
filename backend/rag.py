@@ -23,6 +23,7 @@ import json
 import pickle
 import platform
 import shutil
+import time
 import urllib.request
 from importlib.util import find_spec
 
@@ -381,7 +382,108 @@ def default_backend():
     return "cloud"
 
 
+# ─────────────────────────────────────────────────────────
+# Model inventory — what's downloaded on THIS machine
+# ─────────────────────────────────────────────────────────
+def _hf_cache_models():
+    """{repo_id: {size_bytes}} for models in the local Hugging Face cache."""
+    try:
+        from huggingface_hub import scan_cache_dir
+        info = scan_cache_dir()
+        return {r.repo_id: {"size_bytes": int(r.size_on_disk)}
+                for r in info.repos if r.repo_type == "model"}
+    except Exception:
+        return {}
+
+
+def _ollama_models():
+    """{name: {size_bytes}} for models pulled into a local Ollama server."""
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=0.5) as r:
+            data = json.loads(r.read())
+        return {m["name"]: {"size_bytes": m.get("size")} for m in data.get("models", [])}
+    except Exception:
+        return {}
+
+
+def local_model_inventory():
+    """Raw inventory of models stored on this machine, by source."""
+    return {"hf": _hf_cache_models(), "ollama": _ollama_models()}
+
+
+def device_model_catalog(inventory=None):
+    """Curated per-backend RAG model list ('variations') annotated with whether
+    each is already downloaded on the device, plus its on-disk size.
+
+    Pass a node's reported `inventory` to build the catalog for a remote device;
+    omit it to build for this (the central) machine.
+    """
+    if inventory is None:
+        inventory = local_model_inventory()
+    hf = inventory.get("hf", {})
+    oll = inventory.get("ollama", {})
+
+    def lookup(backend, model_id):
+        if backend == "ollama":
+            tag = model_id.split(":")[0]
+            for name, meta in oll.items():
+                if name == model_id or name.split(":")[0] == tag:
+                    return True, meta.get("size_bytes")
+            return False, None
+        # mlx / transformers use the HF repo id directly; llama.cpp uses repo:file
+        repo = model_id.split(":")[0]
+        if repo in hf:
+            return True, hf[repo].get("size_bytes")
+        return False, None
+
+    catalog = []
+    for key, meta in BACKENDS.items():
+        if not meta["local"]:
+            continue  # cloud has no local model files
+        models = []
+        for m in meta["models"]:
+            downloaded, size = lookup(key, m)
+            models.append({"id": m, "downloaded": downloaded, "size_bytes": size})
+        catalog.append({
+            "backend": key,
+            "label": meta["label"],
+            "available": backend_available(key),
+            "default_model": meta["default_model"],
+            "models": models,
+        })
+    return catalog
+
+
+def download_model(backend, model, progress=None):
+    """Download a model onto THIS machine. Blocking; meant to run in a background
+    task. `progress(msg)` is an optional status callback. Raises on failure."""
+    def emit(msg):
+        if progress:
+            progress(msg)
+    if backend in ("mlx", "transformers", "llama_cpp"):
+        from huggingface_hub import snapshot_download, hf_hub_download
+        if backend == "llama_cpp" and ":" in model:
+            repo, filename = model.split(":", 1)
+            emit(f"Downloading {filename} from {repo}…")
+            hf_hub_download(repo_id=repo, filename=filename)
+        else:
+            emit(f"Downloading {model} from Hugging Face…")
+            snapshot_download(repo_id=model)
+        emit("Download complete.")
+    elif backend == "ollama":
+        emit(f"Pulling {model} via Ollama…")
+        payload = json.dumps({"model": model, "stream": False}).encode()
+        req = urllib.request.Request(f"{OLLAMA_URL}/api/pull", data=payload,
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=3600)
+        emit("Pull complete.")
+    else:
+        raise ValueError(f"Backend '{backend}' has no downloadable local model.")
+
+
 # -- per-backend generation (all guarded; only called when available) --
+# Each returns (text, completion_tokens|None). A None token count is estimated
+# by the caller so tokens/sec is always reportable.
 def _gen_cloud(system, user, model, temperature, max_tokens):
     import anthropic
     client = anthropic.Anthropic()
@@ -393,10 +495,9 @@ def _gen_cloud(system, user, model, temperature, max_tokens):
         system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user}],
     )
-    for block in resp.content:
-        if getattr(block, "type", None) == "text":
-            return block.text
-    return ""
+    text = next((b.text for b in resp.content if getattr(b, "type", None) == "text"), "")
+    ntok = getattr(getattr(resp, "usage", None), "output_tokens", None)
+    return text, ntok
 
 
 def _gen_mlx(system, user, model, temperature, max_tokens):
@@ -407,11 +508,12 @@ def _gen_mlx(system, user, model, temperature, max_tokens):
     model_obj, tokenizer = _mlx_cache[key]
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
-    return generate(model_obj, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
+    text = generate(model_obj, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
+    ntok = len(tokenizer.encode(text)) if text else 0
+    return text, ntok
 
 
 def _gen_transformers(system, user, model, temperature, max_tokens):
-    import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
     key = model or BACKENDS["transformers"]["default_model"]
     if key not in _hf_cache:
@@ -423,7 +525,8 @@ def _gen_transformers(system, user, model, temperature, max_tokens):
     inputs = tok.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(mdl.device)
     out = mdl.generate(inputs, max_new_tokens=max_tokens, do_sample=temperature > 0,
                        temperature=max(temperature, 0.01))
-    return tok.decode(out[0][inputs.shape[1]:], skip_special_tokens=True)
+    gen = out[0][inputs.shape[1]:]
+    return tok.decode(gen, skip_special_tokens=True), int(gen.shape[0])
 
 
 def _gen_llama_cpp(system, user, model, temperature, max_tokens):
@@ -441,7 +544,9 @@ def _gen_llama_cpp(system, user, model, temperature, max_tokens):
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=max_tokens, temperature=temperature,
     )
-    return resp["choices"][0]["message"]["content"]
+    text = resp["choices"][0]["message"]["content"]
+    ntok = resp.get("usage", {}).get("completion_tokens")
+    return text, ntok
 
 
 def _gen_ollama(system, user, model, temperature, max_tokens):
@@ -454,7 +559,8 @@ def _gen_ollama(system, user, model, temperature, max_tokens):
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as r:
-        return json.loads(r.read())["message"]["content"]
+        data = json.loads(r.read())
+    return data["message"]["content"], data.get("eval_count")
 
 
 _GENERATORS = {
@@ -475,27 +581,51 @@ RAG_SYSTEM_PROMPT = (
 )
 
 
-def rag_answer(kb_id, query, backend="cloud", model=None, top_k=4,
-               temperature=0.2, max_tokens=700):
-    """Retrieve, ground, and generate. Returns answer + citations + chunks."""
+def build_context(kb_id, query, top_k=4):
+    """Retrieve top-k chunks and assemble the grounded prompt. Returns None when
+    nothing relevant was found. Retrieval always happens centrally (the vector
+    store lives here) — only the prompt is shipped to a remote device."""
+    hits = KBStore(kb_id).search(query, k=top_k)
+    if not hits:
+        return None
+    context = "\n\n".join(f"[{h['n']}] (from {h['doc_name']})\n{h['text']}" for h in hits)
+    user = f"Context passages:\n{context}\n\nQuestion: {query}"
+    citations = [{"n": h["n"], "doc_name": h["doc_name"], "score": h["score"],
+                  "preview": h["text"][:240]} for h in hits]
+    return {"system": RAG_SYSTEM_PROMPT, "user": user, "hits": hits, "citations": citations}
+
+
+def generate(backend, model, system, user, temperature=0.2, max_tokens=700):
+    """Run one generation on this machine. Returns
+    {text, tokens, gen_time, tokens_per_second}. Used both by the central server
+    and (via the bundled rag.py) by a node agent."""
     if backend not in _GENERATORS:
         raise ValueError(f"Unknown backend: {backend}")
     if not backend_available(backend):
         meta = BACKENDS.get(backend, {})
         raise RuntimeError(f"Backend '{backend}' isn't available. {meta.get('setup', '')}")
+    t0 = time.time()
+    text, ntok = _GENERATORS[backend](system, user, model, temperature, max_tokens)
+    elapsed = time.time() - t0
+    text = (text or "").strip()
+    if not ntok:
+        ntok = max(1, round(len(text) / 4))  # ~4 chars/token estimate
+    return {"text": text, "tokens": int(ntok), "gen_time": round(elapsed, 3),
+            "tokens_per_second": round(ntok / elapsed, 1) if elapsed > 0 else None}
 
-    hits = KBStore(kb_id).search(query, k=top_k)
-    if not hits:
+
+def rag_answer(kb_id, query, backend="cloud", model=None, top_k=4,
+               temperature=0.2, max_tokens=700):
+    """Retrieve, ground, and generate locally. Returns answer + citations +
+    chunks + generation stats (tokens/sec)."""
+    ctx = build_context(kb_id, query, top_k=top_k)
+    if ctx is None:
         return {"answer": "I couldn't find anything relevant in this knowledge "
                           "base. Add documents (or rephrase the question) and try again.",
-                "citations": [], "chunks": [], "backend": backend, "model": model}
-
-    context = "\n\n".join(f"[{h['n']}] (from {h['doc_name']})\n{h['text']}" for h in hits)
-    user = f"Context passages:\n{context}\n\nQuestion: {query}"
-    answer = _GENERATORS[backend](RAG_SYSTEM_PROMPT, user, model, temperature, max_tokens)
-
-    citations = [{"n": h["n"], "doc_name": h["doc_name"], "score": h["score"],
-                  "preview": h["text"][:240]} for h in hits]
-    return {"answer": (answer or "").strip(), "citations": citations,
-            "chunks": hits, "backend": backend,
-            "model": model or BACKENDS[backend]["default_model"]}
+                "citations": [], "chunks": [], "backend": backend, "model": model,
+                "stats": None}
+    gen = generate(backend, model, ctx["system"], ctx["user"], temperature, max_tokens)
+    return {"answer": gen["text"], "citations": ctx["citations"], "chunks": ctx["hits"],
+            "backend": backend, "model": model or BACKENDS[backend]["default_model"],
+            "stats": {"tokens": gen["tokens"], "gen_time": gen["gen_time"],
+                      "tokens_per_second": gen["tokens_per_second"]}}

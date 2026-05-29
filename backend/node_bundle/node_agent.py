@@ -30,6 +30,10 @@ from device_specs import detect_specs
 from data_processor import prepare_dataset
 from training_engine import create_model, train_model, get_torch_device, _stop_training
 from system_stats import SystemMonitor
+try:
+    import rag  # bundled; enables RAG model inventory / download / generation
+except Exception:
+    rag = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "node_config.json")
@@ -171,12 +175,22 @@ def _run_job(payload):
 
 
 # ── SocketIO event handlers ──────────────────────────────
+def _report_rag_inventory():
+    if rag is None:
+        return
+    try:
+        sio.emit("node_rag_inventory", {"inventory": rag.local_model_inventory()})
+    except Exception:
+        pass
+
+
 @sio.event
 def connect():
     specs = detect_specs()
     print(f"[node] connected to {CENTRAL_URL}")
     sio.emit("node_register", {"token": DEVICE_TOKEN,
                                "nickname": NICKNAME, "specs": specs})
+    _report_rag_inventory()
 
 
 @sio.event
@@ -217,6 +231,63 @@ def on_run_job(payload):
 def on_stop(data):
     print(f"[node] stop requested for job {(data or {}).get('job_id')}")
     _stop_training.set()
+
+
+# ── RAG: download a model onto this node, then run generation on it ──
+def _rag_download(payload):
+    job_id = payload["job_id"]
+    try:
+        rag.download_model(
+            payload["backend"], payload["model"],
+            progress=lambda m: sio.emit("node_rag_download_progress", {"job_id": job_id, "status": m}),
+        )
+        sio.emit("node_rag_download_complete",
+                 {"job_id": job_id, "model": payload["model"],
+                  "inventory": rag.local_model_inventory()})
+    except Exception as e:
+        traceback.print_exc()
+        sio.emit("node_rag_download_error", {"job_id": job_id, "error": str(e)})
+
+
+@sio.on("node_rag_download")
+def on_rag_download(payload):
+    if rag is None:
+        sio.emit("node_rag_download_error", {"job_id": (payload or {}).get("job_id"),
+                                             "error": "RAG support not bundled on this node."})
+        return
+    threading.Thread(target=_rag_download, args=(payload,), daemon=True).start()
+
+
+def _rag_query(payload):
+    job_id = payload["job_id"]
+    monitor = SystemMonitor(
+        emit_fn=lambda s: sio.emit("node_rag_stats", {"job_id": job_id, "stats": s}),
+        sleep_fn=time.sleep,
+    )
+    threading.Thread(target=monitor.loop, daemon=True).start()
+    try:
+        gen = rag.generate(payload["backend"], payload.get("model"),
+                           payload["system"], payload["user"],
+                           payload.get("temperature", 0.2), payload.get("max_tokens", 700))
+        sio.emit("node_rag_complete", {
+            "job_id": job_id, "text": gen["text"], "model": payload.get("model"),
+            "stats": {"tokens": gen["tokens"], "gen_time": gen["gen_time"],
+                      "tokens_per_second": gen["tokens_per_second"]},
+        })
+    except Exception as e:
+        traceback.print_exc()
+        sio.emit("node_rag_error", {"job_id": job_id, "error": str(e)})
+    finally:
+        monitor.stop()
+
+
+@sio.on("node_rag_query")
+def on_rag_query(payload):
+    if rag is None:
+        sio.emit("node_rag_error", {"job_id": (payload or {}).get("job_id"),
+                                    "error": "RAG support not bundled on this node."})
+        return
+    threading.Thread(target=_rag_query, args=(payload,), daemon=True).start()
 
 
 # ── Startup banners ──────────────────────────────────────

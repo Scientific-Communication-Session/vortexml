@@ -133,6 +133,7 @@ _jobs = {}         # job_id -> live job dict (epoch/eta/room/owner/config)
 _device_busy = {}  # device_id -> job_id   (which job currently occupies it)
 _queues = defaultdict(list)  # device_id -> [pending job dicts] (FIFO)
 _MAX_RESUME_ATTEMPTS = 1     # auto-restart an interrupted remote job this many times
+_rag_jobs = {}     # job_id -> {citations, chunks, backend, model, room} for remote RAG queries
 
 
 def _utcnow():
@@ -1115,9 +1116,107 @@ def add_kb_documents(kb_id):
                     "added": [d.to_dict() for d in added]})
 
 
+def _resolve_rag_device(device_id, user_id):
+    """Pick the target device for a RAG op: the shared M4 when device_id is
+    None, else a device the user owns. Returns (device, error_response)."""
+    if device_id is None:
+        return Device.query.filter_by(is_shared=True).first(), None
+    device = Device.query.get(device_id)
+    if device is None:
+        return None, (jsonify({"error": "Device not found"}), 404)
+    if not device.is_shared and device.user_id != user_id:
+        return None, (jsonify({"error": "That device is not linked to your account"}), 403)
+    return device, None
+
+
+@app.route("/api/rag/devices", methods=["GET"])
+def rag_devices():
+    """Devices a RAG query can run on — the shared M4 plus the user's nodes."""
+    user, err = _require_user()
+    if err:
+        return err
+    devices = [d.to_dict(runtime=_device_runtime(d))
+               for d in Device.query.filter_by(is_shared=True).all()]
+    owned = Device.query.filter_by(user_id=user.id).order_by(Device.created_at).all()
+    devices += [d.to_dict(runtime=_device_runtime(d)) for d in owned]
+    return jsonify({"devices": devices})
+
+
+@app.route("/api/rag/devices/<int:device_id>/models", methods=["GET"])
+def rag_device_models(device_id):
+    """Models stored on a device + the curated RAG 'variations' (downloaded?)."""
+    user, err = _require_user()
+    if err:
+        return err
+    device, derr = _resolve_rag_device(device_id, user.id)
+    if derr:
+        return derr
+
+    if device.is_shared:
+        inventory = rag.local_model_inventory()
+        catalog = rag.device_model_catalog(inventory)
+        return jsonify({"online": True, "device": device.to_dict(), "catalog": catalog})
+
+    node = _nodes.get(device.id)
+    inventory = node.get("rag_inventory") if node else None
+    if inventory is None:
+        return jsonify({"online": device.id in _nodes, "device": device.to_dict(),
+                        "catalog": [],
+                        "reason": "Device is offline or hasn't reported its models yet. "
+                                  "Start its node agent."})
+    return jsonify({"online": True, "device": device.to_dict(),
+                    "catalog": rag.device_model_catalog(inventory)})
+
+
+@app.route("/api/rag/devices/<int:device_id>/models/download", methods=["POST"])
+def rag_download_model(device_id):
+    """Download a model onto a device. Progress streams over a socket room."""
+    user, err = _require_user()
+    if err:
+        return err
+    device, derr = _resolve_rag_device(device_id, user.id)
+    if derr:
+        return derr
+    data = request.get_json(silent=True) or {}
+    backend = data.get("backend")
+    model = data.get("model")
+    socket_id = data.get("socket_id")
+    if backend not in rag.BACKENDS or not model:
+        return jsonify({"error": "backend and model are required"}), 400
+
+    job_id = uuid.uuid4().hex[:12]
+    room = f"rag:{job_id}"
+    _join_job_room(socket_id, room)
+
+    if device.is_shared:
+        def run():
+            socketio.emit("rag_download", {"status": f"Starting download of {model}…"}, room=room)
+            try:
+                rag.download_model(backend, model,
+                                   progress=lambda m: socketio.emit("rag_download", {"status": m}, room=room))
+                socketio.emit("rag_download_complete",
+                              {"model": model, "catalog": rag.device_model_catalog()}, room=room)
+            except Exception as e:
+                socketio.emit("rag_download_error", {"error": str(e)}, room=room)
+        socketio.start_background_task(run)
+        return jsonify({"status": "downloading", "mode": "local", "job_id": job_id, "room": room})
+
+    node = _nodes.get(device.id)
+    if not node:
+        return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent."}), 409
+    socketio.emit("node_rag_download", {"job_id": job_id, "backend": backend, "model": model},
+                  room=node["sid"])
+    return jsonify({"status": "downloading", "mode": "remote", "job_id": job_id, "room": room})
+
+
 @app.route("/api/rag/kb/<int:kb_id>/query", methods=["POST"])
 def query_kb(kb_id):
-    """Retrieve-then-generate against a knowledge base."""
+    """Retrieve-then-generate against a knowledge base, on the chosen device.
+
+    Retrieval always happens here (the vector store is central). For the shared
+    M4 we generate in-process and stream hardware stats over a socket room; for
+    a personal node we ship only the grounded prompt and the node generates on
+    its own hardware, relaying stats + the answer back."""
     user, err = _require_user()
     if err:
         return err
@@ -1131,12 +1230,47 @@ def query_kb(kb_id):
         return jsonify({"error": "query is required"}), 400
     backend = data.get("backend") or rag.default_backend()
     model = data.get("model") or None
+    socket_id = data.get("socket_id")
     try:
         top_k = max(1, min(12, int(data.get("top_k", 4))))
         temperature = max(0.0, min(1.5, float(data.get("temperature", 0.2))))
     except (TypeError, ValueError):
         return jsonify({"error": "top_k/temperature must be numbers"}), 400
 
+    device, derr = _resolve_rag_device(data.get("device_id"), user.id)
+    if derr:
+        return derr
+
+    job_id = uuid.uuid4().hex[:12]
+    room = f"rag:{job_id}"
+    _join_job_room(socket_id, room)
+
+    # ── Remote: dispatch the grounded prompt to the user's node ──
+    if device is not None and not device.is_shared:
+        node = _nodes.get(device.id)
+        if not node:
+            return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent."}), 409
+        ctx = rag.build_context(kb_id, query, top_k=top_k)
+        if ctx is None:
+            return jsonify({"answer": "Nothing relevant in this knowledge base yet.",
+                            "citations": [], "chunks": [], "backend": backend, "model": model})
+        _rag_jobs[job_id] = {"citations": ctx["citations"], "chunks": ctx["hits"],
+                             "backend": backend, "model": model, "room": room}
+        socketio.emit("node_rag_query", {
+            "job_id": job_id, "backend": backend, "model": model,
+            "system": ctx["system"], "user": ctx["user"],
+            "temperature": temperature, "max_tokens": 700,
+        }, room=node["sid"])
+        return jsonify({"status": "generating", "mode": "remote",
+                        "job_id": job_id, "room": room,
+                        "citations": ctx["citations"]})
+
+    # ── Local: generate on the shared M4, streaming hardware stats ──
+    monitor = SystemMonitor(
+        emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
+        sleep_fn=socketio.sleep,
+    )
+    socketio.start_background_task(monitor.loop)
     try:
         result = rag.rag_answer(kb_id, query, backend=backend, model=model,
                                 top_k=top_k, temperature=temperature)
@@ -1146,6 +1280,10 @@ def query_kb(kb_id):
         return jsonify({"error": str(e)}), 409  # backend not available
     except Exception as e:
         return jsonify({"error": f"Generation failed: {e}"}), 500
+    finally:
+        monitor.stop()
+    result["mode"] = "local"
+    result["room"] = room
     return jsonify(result)
 
 
@@ -1564,7 +1702,7 @@ def download_agent(device_id):
                 z.write(p, arcname=fn)
         # Backend modules the agent reuses verbatim.
         for fn in ("training_engine.py", "data_processor.py", "device_specs.py",
-                   "system_stats.py"):
+                   "system_stats.py", "rag.py"):
             z.write(os.path.join(backend_dir, fn), arcname=fn)
         # Per-device config — the API key that pairs this machine to the account.
         z.writestr("node_config.json", _json.dumps(node_config, indent=2))
@@ -1612,6 +1750,71 @@ def on_node_register(data):
     # Resume any jobs that were queued (or interrupted by a disconnect) while
     # this node was offline.
     _drain_queue(dev.id)
+
+
+# ── Node RAG protocol (model inventory, download, remote generation) ──
+@socketio.on("node_rag_inventory")
+def on_node_rag_inventory(data):
+    """A node reports which models it has stored, so the catalog can show them."""
+    dev_id = _node_sids.get(request.sid)
+    if dev_id is not None and dev_id in _nodes:
+        _nodes[dev_id]["rag_inventory"] = (data or {}).get("inventory") or {}
+
+
+@socketio.on("node_rag_download_progress")
+def on_node_rag_download_progress(data):
+    data = data or {}
+    socketio.emit("rag_download", {"status": data.get("status", "")},
+                  room=f"rag:{data.get('job_id')}")
+
+
+@socketio.on("node_rag_download_complete")
+def on_node_rag_download_complete(data):
+    data = data or {}
+    dev_id = _node_sids.get(request.sid)
+    if dev_id is not None and dev_id in _nodes and data.get("inventory"):
+        _nodes[dev_id]["rag_inventory"] = data["inventory"]
+    catalog = rag.device_model_catalog(data.get("inventory")) if data.get("inventory") else []
+    socketio.emit("rag_download_complete", {"model": data.get("model"), "catalog": catalog},
+                  room=f"rag:{data.get('job_id')}")
+
+
+@socketio.on("node_rag_download_error")
+def on_node_rag_download_error(data):
+    data = data or {}
+    socketio.emit("rag_download_error", {"error": data.get("error", "Download failed")},
+                  room=f"rag:{data.get('job_id')}")
+
+
+@socketio.on("node_rag_stats")
+def on_node_rag_stats(data):
+    data = data or {}
+    socketio.emit("rag_stats", data.get("stats") or {}, room=f"rag:{data.get('job_id')}")
+
+
+@socketio.on("node_rag_complete")
+def on_node_rag_complete(data):
+    """A node finished generating: merge the centrally-built citations and push
+    the final answer to the browser room."""
+    data = data or {}
+    job = _rag_jobs.pop(data.get("job_id"), None)
+    room = job["room"] if job else f"rag:{data.get('job_id')}"
+    socketio.emit("rag_answer", {
+        "answer": (data.get("text") or "").strip(),
+        "citations": job["citations"] if job else [],
+        "chunks": job["chunks"] if job else [],
+        "backend": job["backend"] if job else data.get("backend"),
+        "model": data.get("model") or (job["model"] if job else None),
+        "stats": data.get("stats"),
+    }, room=room)
+
+
+@socketio.on("node_rag_error")
+def on_node_rag_error(data):
+    data = data or {}
+    _rag_jobs.pop(data.get("job_id"), None)
+    socketio.emit("rag_error", {"error": data.get("error", "Remote generation failed")},
+                  room=f"rag:{data.get('job_id')}")
 
 
 @socketio.on("node_relay")
