@@ -326,3 +326,30 @@ a browsable/downloadable model catalog and live stats.
   greenthread during a blocking generate (issue #13); remote-node stats stream
   freely. Tokens/sec is exact in both paths.
 
+## Chat — ChatGPT-style conversations with your models
+
+Generalized generation to multi-turn and added a real chat experience.
+
+- **`rag.chat(backend, model, messages, …)`** is now the generation primitive
+  (per-backend generators take a `messages` list); `generate()` is a single-shot
+  wrapper so RAG is unchanged.
+- **DB**: `Conversation` + `ChatMessage` (user-scoped, cascade). A conversation
+  pins backend/model/device + an optional KB for grounding.
+- **API**: `/api/conversations` CRUD + `…/<id>/message`, which builds
+  system + recent history (+ retrieved KB context with citations when a KB is
+  attached), generates on the conversation's device (shared in-process with
+  live stats, or a node via `node_chat`), and persists both turns with
+  tokens/sec.
+- **Frontend `/chat`** (nav "Chat"): conversation sidebar (new/select/delete),
+  Markdown message bubbles, a composer (Enter to send), and a settings bar to
+  pick backend/model/device + attach a KB (expert) — novices just chat with the
+  recommended model. Per-reply tokens/sec + live CPU/GPU/temp for experts.
+
+### Verified (live, in-browser)
+- Multi-turn **memory** with the cloud model (told it a name, it recalled it a
+  turn later); conversation persisted + auto-titled; sidebar lists it.
+- A real **local MLX Gemma-4B** chat turn through the UI
+  (footer "gemma-3-4b-it-4bit · N tok/s").
+- RAG-grounded chat returns citations (API). Fixed a React key collision
+  (namespaced `m<id>`/`i<index>` keys). Test conversations/KBs cleaned up.
+
