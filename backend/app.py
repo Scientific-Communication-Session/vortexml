@@ -10,6 +10,7 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 import io
 import re
 import json
+import time
 import uuid
 import base64
 import zipfile
@@ -1471,34 +1472,56 @@ def send_message(conv_id):
         return jsonify({"status": "generating", "mode": "remote",
                         "job_id": job_id, "room": room, "citations": citations})
 
-    # ── Local: generate on the shared M4, streaming hardware stats ──
-    monitor = SystemMonitor(
-        emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
-        sleep_fn=socketio.sleep,
-    )
-    socketio.start_background_task(monitor.loop)
-    try:
-        gen = rag.chat(conv.backend, conv.model, messages, temperature=temperature)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except RuntimeError as e:
-        return jsonify({"error": str(e)}), 409
-    except Exception as e:
-        return jsonify({"error": f"Generation failed: {e}"}), 500
-    finally:
-        monitor.stop()
+    # ── Local: stream tokens from the shared M4 over the socket room ──
+    backend, model = conv.backend, conv.model
+    resolved_model = model or rag.BACKENDS.get(backend, {}).get("default_model")
+    cid, title = conv.id, conv.title
+    cit_json = _json.dumps(citations) if citations else None
 
-    assistant = ChatMessage(
-        conversation_id=conv.id, role="assistant", content=gen["text"],
-        tokens=gen["tokens"], tokens_per_second=gen["tokens_per_second"],
-        model=conv.model or rag.BACKENDS.get(conv.backend, {}).get("default_model"),
-        citations=_json.dumps(citations) if citations else None,
-    )
-    db.session.add(assistant)
-    conv.updated_at = _utcnow()
-    db.session.commit()
-    return jsonify({"message": assistant.to_dict(), "mode": "local",
-                    "room": room, "title": conv.title})
+    def run():
+        monitor = SystemMonitor(
+            emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
+            sleep_fn=socketio.sleep,
+        )
+        socketio.start_background_task(monitor.loop)
+        t0 = time.time()
+        parts = []
+        try:
+            for delta in rag.stream_chat(backend, model, messages, temperature=temperature):
+                if not delta:
+                    continue
+                parts.append(delta)
+                socketio.emit("chat_token", {"job_id": job_id, "delta": delta}, room=room)
+                socketio.sleep(0)  # flush the token + let other clients run
+        except Exception as e:
+            socketio.emit("chat_error", {"error": str(e)}, room=room)
+            monitor.stop()
+            _chat_jobs.pop(job_id, None)
+            return
+        monitor.stop()
+        text = "".join(parts).strip()
+        elapsed = time.time() - t0
+        ntok = max(1, round(len(text) / 4))
+        tps = round(ntok / elapsed, 1) if elapsed > 0 else None
+        with app.app_context():
+            msg = ChatMessage(conversation_id=cid, role="assistant", content=text,
+                              tokens=ntok, tokens_per_second=tps, model=resolved_model,
+                              citations=cit_json)
+            db.session.add(msg)
+            conv2 = Conversation.query.get(cid)
+            if conv2:
+                conv2.updated_at = _utcnow()
+            db.session.commit()
+            payload = msg.to_dict()
+        socketio.emit("chat_answer", {"message": payload,
+                                      "stats": {"tokens": ntok, "tokens_per_second": tps,
+                                                "gen_time": round(elapsed, 3)}}, room=room)
+        _chat_jobs.pop(job_id, None)
+
+    _chat_jobs[job_id] = {"conversation_id": cid, "room": room}
+    socketio.start_background_task(run)
+    return jsonify({"status": "streaming", "mode": "streaming", "job_id": job_id,
+                    "room": room, "citations": citations, "title": title})
 
 
 def _evaluate_predictions(pp, rows, predictions):

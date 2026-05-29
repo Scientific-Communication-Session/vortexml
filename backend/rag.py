@@ -560,6 +560,76 @@ _CHAT_GENERATORS = {
 }
 
 
+# -- streaming generators: yield text deltas as they're produced --
+def _stream_cloud(messages, model, temperature, max_tokens):
+    import anthropic
+    client = anthropic.Anthropic()
+    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+    convo = [{"role": m["role"], "content": m["content"]}
+             for m in messages if m["role"] in ("user", "assistant")]
+    kwargs = dict(model=model or BACKENDS["cloud"]["default_model"], max_tokens=max_tokens,
+                  thinking={"type": "disabled"}, output_config={"effort": "low"}, messages=convo)
+    if system:
+        kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    with client.messages.stream(**kwargs) as stream:
+        for delta in stream.text_stream:
+            yield delta
+
+
+def _stream_mlx(messages, model, temperature, max_tokens):
+    from mlx_lm import load, stream_generate
+    key = model or BACKENDS["mlx"]["default_model"]
+    if key not in _mlx_cache:
+        _mlx_cache[key] = load(key)
+    model_obj, tokenizer = _mlx_cache[key]
+    prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+    for resp in stream_generate(model_obj, tokenizer, prompt, max_tokens=max_tokens):
+        yield getattr(resp, "text", str(resp))
+
+
+def _stream_ollama(messages, model, temperature, max_tokens):
+    payload = json.dumps({
+        "model": model or BACKENDS["ollama"]["default_model"],
+        "messages": messages, "stream": True,
+        "options": {"temperature": temperature, "num_predict": max_tokens},
+    }).encode()
+    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        for line in r:
+            line = line.strip()
+            if not line:
+                continue
+            d = json.loads(line)
+            delta = (d.get("message") or {}).get("content")
+            if delta:
+                yield delta
+            if d.get("done"):
+                break
+
+
+def _stream_llama_cpp(messages, model, temperature, max_tokens):
+    from llama_cpp import Llama
+    key = model or BACKENDS["llama_cpp"]["default_model"]
+    if key not in _llamacpp_cache:
+        if ":" in key and not os.path.exists(key):
+            repo, filename = key.split(":", 1)
+            _llamacpp_cache[key] = Llama.from_pretrained(repo_id=repo, filename=filename, n_ctx=4096, verbose=False)
+        else:
+            _llamacpp_cache[key] = Llama(model_path=key, n_ctx=4096, verbose=False)
+    for part in _llamacpp_cache[key].create_chat_completion(
+            messages=messages, max_tokens=max_tokens, temperature=temperature, stream=True):
+        delta = (part["choices"][0].get("delta") or {}).get("content")
+        if delta:
+            yield delta
+
+
+_STREAM_GENERATORS = {
+    "cloud": _stream_cloud, "mlx": _stream_mlx,
+    "ollama": _stream_ollama, "llama_cpp": _stream_llama_cpp,
+}
+
+
 # ─────────────────────────────────────────────────────────
 # 5. RAG orchestration
 # ─────────────────────────────────────────────────────────
@@ -610,6 +680,22 @@ def generate(backend, model, system, user, temperature=0.2, max_tokens=700):
     return chat(backend, model,
                 [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 temperature, max_tokens)
+
+
+def stream_chat(backend, model, messages, temperature=0.7, max_tokens=700):
+    """Yield assistant text deltas as they're generated. Backends without a
+    streaming path (transformers) fall back to one final chunk."""
+    if backend not in _CHAT_GENERATORS:
+        raise ValueError(f"Unknown backend: {backend}")
+    if not backend_available(backend):
+        meta = BACKENDS.get(backend, {})
+        raise RuntimeError(f"Backend '{backend}' isn't available. {meta.get('setup', '')}")
+    gen = _STREAM_GENERATORS.get(backend)
+    if gen is None:  # non-streaming backend → emit the whole reply at once
+        text, _ = _CHAT_GENERATORS[backend](messages, model, temperature, max_tokens)
+        yield text or ""
+        return
+    yield from gen(messages, model, temperature, max_tokens)
 
 
 def rag_answer(kb_id, query, backend="cloud", model=None, top_k=4,
