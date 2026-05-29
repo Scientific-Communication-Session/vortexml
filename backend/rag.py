@@ -352,8 +352,18 @@ def backend_available(key):
     return False
 
 
+# Backends that can do extended thinking / reasoning. For cloud it's always on
+# when requested (Claude); for local backends it depends on the model (Qwen3,
+# DeepSeek-R1, etc.) — we pass the request through and surface any reasoning the
+# model produces.
+THINKING_BACKENDS = {"cloud", "mlx", "transformers", "ollama"}
+
+
+def supports_thinking(backend):
+    return backend in THINKING_BACKENDS
+
+
 def list_backends():
-    """Backend metadata + live availability, with a recommendation for the UI."""
     recommended = "mlx" if backend_available("mlx") else "cloud"
     out = []
     for key, meta in BACKENDS.items():
@@ -369,6 +379,7 @@ def list_backends():
             "models": meta["models"],
             "setup": meta["setup"],
             "recommended": key == recommended,
+            "supports_thinking": supports_thinking(key),
         })
     return {"backends": out, "recommended": recommended,
             "apple_silicon": _IS_APPLE_SILICON}
@@ -516,17 +527,26 @@ def download_model(backend, model, progress=None):
 
 
 # -- per-backend generation (all guarded; only called when available) --
-# Each takes a multi-turn `messages` list ([{role: system|user|assistant,
-# content}]) and returns (text, completion_tokens|None). A None token count is
-# estimated by the caller so tokens/sec is always reportable.
-def _chat_cloud(messages, model, temperature, max_tokens):
+# Each takes a multi-turn `messages` list and `reasoning` flag, returning
+# (text, completion_tokens|None). A None token count is estimated by the caller.
+def _mlx_prompt(tokenizer, messages, reasoning):
+    if reasoning:
+        try:
+            return tokenizer.apply_chat_template(messages, add_generation_prompt=True, enable_thinking=True)
+        except TypeError:
+            pass  # this model's template doesn't support thinking
+    return tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+
+
+def _chat_cloud(messages, model, temperature, max_tokens, reasoning=False):
     import anthropic
     client = anthropic.Anthropic()
     system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     convo = [{"role": m["role"], "content": m["content"]}
              for m in messages if m["role"] in ("user", "assistant")]
     kwargs = dict(model=model or BACKENDS["cloud"]["default_model"], max_tokens=max_tokens,
-                  thinking={"type": "disabled"}, output_config={"effort": "low"}, messages=convo)
+                  thinking={"type": "adaptive"} if reasoning else {"type": "disabled"},
+                  output_config={"effort": "high" if reasoning else "low"}, messages=convo)
     if system:
         kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
     resp = client.messages.create(**kwargs)
@@ -534,18 +554,18 @@ def _chat_cloud(messages, model, temperature, max_tokens):
     return text, getattr(getattr(resp, "usage", None), "output_tokens", None)
 
 
-def _chat_mlx(messages, model, temperature, max_tokens):
+def _chat_mlx(messages, model, temperature, max_tokens, reasoning=False):
     from mlx_lm import load, generate
     key = model or BACKENDS["mlx"]["default_model"]
     if key not in _mlx_cache:
         _mlx_cache[key] = load(key)
     model_obj, tokenizer = _mlx_cache[key]
-    prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+    prompt = _mlx_prompt(tokenizer, messages, reasoning)
     text = generate(model_obj, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
     return text, (len(tokenizer.encode(text)) if text else 0)
 
 
-def _chat_transformers(messages, model, temperature, max_tokens):
+def _chat_transformers(messages, model, temperature, max_tokens, reasoning=False):
     from transformers import AutoModelForCausalLM, AutoTokenizer
     key = model or BACKENDS["transformers"]["default_model"]
     if key not in _hf_cache:
@@ -553,14 +573,18 @@ def _chat_transformers(messages, model, temperature, max_tokens):
         mdl = AutoModelForCausalLM.from_pretrained(key, torch_dtype="auto", device_map="auto")
         _hf_cache[key] = (mdl, tok)
     mdl, tok = _hf_cache[key]
-    inputs = tok.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(mdl.device)
+    try:
+        inputs = tok.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt",
+                                         **({"enable_thinking": True} if reasoning else {})).to(mdl.device)
+    except TypeError:
+        inputs = tok.apply_chat_template(messages, add_generation_prompt=True, return_tensors="pt").to(mdl.device)
     out = mdl.generate(inputs, max_new_tokens=max_tokens, do_sample=temperature > 0,
                        temperature=max(temperature, 0.01))
     gen = out[0][inputs.shape[1]:]
     return tok.decode(gen, skip_special_tokens=True), int(gen.shape[0])
 
 
-def _chat_llama_cpp(messages, model, temperature, max_tokens):
+def _chat_llama_cpp(messages, model, temperature, max_tokens, reasoning=False):
     from llama_cpp import Llama
     key = model or BACKENDS["llama_cpp"]["default_model"]
     if key not in _llamacpp_cache:
@@ -575,13 +599,12 @@ def _chat_llama_cpp(messages, model, temperature, max_tokens):
     return resp["choices"][0]["message"]["content"], resp.get("usage", {}).get("completion_tokens")
 
 
-def _chat_ollama(messages, model, temperature, max_tokens):
-    payload = json.dumps({
-        "model": model or BACKENDS["ollama"]["default_model"],
-        "messages": messages, "stream": False,
-        "options": {"temperature": temperature, "num_predict": max_tokens},
-    }).encode()
-    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload,
+def _chat_ollama(messages, model, temperature, max_tokens, reasoning=False):
+    body = {"model": model or BACKENDS["ollama"]["default_model"], "messages": messages,
+            "stream": False, "options": {"temperature": temperature, "num_predict": max_tokens}}
+    if reasoning:
+        body["think"] = True
+    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as r:
         data = json.loads(r.read())
@@ -594,40 +617,51 @@ _CHAT_GENERATORS = {
 }
 
 
-# -- streaming generators: yield text deltas as they're produced --
-def _stream_cloud(messages, model, temperature, max_tokens):
+# -- streaming generators: yield (kind, delta) where kind is "reasoning" or
+# "answer", as the tokens are produced --
+def _stream_cloud(messages, model, temperature, max_tokens, reasoning=False):
     import anthropic
     client = anthropic.Anthropic()
     system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     convo = [{"role": m["role"], "content": m["content"]}
              for m in messages if m["role"] in ("user", "assistant")]
     kwargs = dict(model=model or BACKENDS["cloud"]["default_model"], max_tokens=max_tokens,
-                  thinking={"type": "disabled"}, output_config={"effort": "low"}, messages=convo)
+                  thinking={"type": "adaptive"} if reasoning else {"type": "disabled"},
+                  output_config={"effort": "high" if reasoning else "low"}, messages=convo)
     if system:
         kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
     with client.messages.stream(**kwargs) as stream:
-        for delta in stream.text_stream:
-            yield delta
+        if not reasoning:
+            for delta in stream.text_stream:
+                yield ("answer", delta)
+            return
+        for event in stream:
+            if getattr(event, "type", None) == "content_block_delta":
+                d = event.delta
+                dt = getattr(d, "type", None)
+                if dt == "thinking_delta":
+                    yield ("reasoning", getattr(d, "thinking", ""))
+                elif dt == "text_delta":
+                    yield ("answer", getattr(d, "text", ""))
 
 
-def _stream_mlx(messages, model, temperature, max_tokens):
+def _stream_mlx(messages, model, temperature, max_tokens, reasoning=False):
     from mlx_lm import load, stream_generate
     key = model or BACKENDS["mlx"]["default_model"]
     if key not in _mlx_cache:
         _mlx_cache[key] = load(key)
     model_obj, tokenizer = _mlx_cache[key]
-    prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+    prompt = _mlx_prompt(tokenizer, messages, reasoning)
     for resp in stream_generate(model_obj, tokenizer, prompt, max_tokens=max_tokens):
-        yield getattr(resp, "text", str(resp))
+        yield ("answer", getattr(resp, "text", str(resp)))  # <think> sectioned client-side
 
 
-def _stream_ollama(messages, model, temperature, max_tokens):
-    payload = json.dumps({
-        "model": model or BACKENDS["ollama"]["default_model"],
-        "messages": messages, "stream": True,
-        "options": {"temperature": temperature, "num_predict": max_tokens},
-    }).encode()
-    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=payload,
+def _stream_ollama(messages, model, temperature, max_tokens, reasoning=False):
+    body = {"model": model or BACKENDS["ollama"]["default_model"], "messages": messages,
+            "stream": True, "options": {"temperature": temperature, "num_predict": max_tokens}}
+    if reasoning:
+        body["think"] = True
+    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as r:
         for line in r:
@@ -635,14 +669,16 @@ def _stream_ollama(messages, model, temperature, max_tokens):
             if not line:
                 continue
             d = json.loads(line)
-            delta = (d.get("message") or {}).get("content")
-            if delta:
-                yield delta
+            msg = d.get("message") or {}
+            if msg.get("thinking"):
+                yield ("reasoning", msg["thinking"])
+            if msg.get("content"):
+                yield ("answer", msg["content"])
             if d.get("done"):
                 break
 
 
-def _stream_llama_cpp(messages, model, temperature, max_tokens):
+def _stream_llama_cpp(messages, model, temperature, max_tokens, reasoning=False):
     from llama_cpp import Llama
     key = model or BACKENDS["llama_cpp"]["default_model"]
     if key not in _llamacpp_cache:
@@ -655,7 +691,7 @@ def _stream_llama_cpp(messages, model, temperature, max_tokens):
             messages=messages, max_tokens=max_tokens, temperature=temperature, stream=True):
         delta = (part["choices"][0].get("delta") or {}).get("content")
         if delta:
-            yield delta
+            yield ("answer", delta)
 
 
 _STREAM_GENERATORS = {
@@ -690,7 +726,7 @@ def build_context(kb_id, query, top_k=4):
     return {"system": RAG_SYSTEM_PROMPT, "user": user, "hits": hits, "citations": citations}
 
 
-def chat(backend, model, messages, temperature=0.7, max_tokens=700):
+def chat(backend, model, messages, temperature=0.7, max_tokens=700, reasoning=False):
     """Multi-turn generation. `messages` is a list of {role, content} with roles
     system/user/assistant. Returns {text, tokens, gen_time, tokens_per_second}.
     Used by the chat endpoint and (via the bundled rag.py) by a node agent."""
@@ -700,7 +736,7 @@ def chat(backend, model, messages, temperature=0.7, max_tokens=700):
         meta = BACKENDS.get(backend, {})
         raise RuntimeError(f"Backend '{backend}' isn't available. {meta.get('setup', '')}")
     t0 = time.time()
-    text, ntok = _CHAT_GENERATORS[backend](messages, model, temperature, max_tokens)
+    text, ntok = _CHAT_GENERATORS[backend](messages, model, temperature, max_tokens, reasoning)
     elapsed = time.time() - t0
     text = (text or "").strip()
     if not ntok:
@@ -716,9 +752,10 @@ def generate(backend, model, system, user, temperature=0.2, max_tokens=700):
                 temperature, max_tokens)
 
 
-def stream_chat(backend, model, messages, temperature=0.7, max_tokens=700):
-    """Yield assistant text deltas as they're generated. Backends without a
-    streaming path (transformers) fall back to one final chunk."""
+def stream_chat(backend, model, messages, temperature=0.7, max_tokens=700, reasoning=False):
+    """Yield (kind, delta) where kind is "reasoning" or "answer", as tokens are
+    produced. Backends without a streaming path (transformers) fall back to one
+    final chunk."""
     if backend not in _CHAT_GENERATORS:
         raise ValueError(f"Unknown backend: {backend}")
     if not backend_available(backend):
@@ -726,10 +763,10 @@ def stream_chat(backend, model, messages, temperature=0.7, max_tokens=700):
         raise RuntimeError(f"Backend '{backend}' isn't available. {meta.get('setup', '')}")
     gen = _STREAM_GENERATORS.get(backend)
     if gen is None:  # non-streaming backend → emit the whole reply at once
-        text, _ = _CHAT_GENERATORS[backend](messages, model, temperature, max_tokens)
-        yield text or ""
+        text, _ = _CHAT_GENERATORS[backend](messages, model, temperature, max_tokens, reasoning)
+        yield ("answer", text or "")
         return
-    yield from gen(messages, model, temperature, max_tokens)
+    yield from gen(messages, model, temperature, max_tokens, reasoning)
 
 
 def rag_answer(kb_id, query, backend="cloud", model=None, top_k=4,

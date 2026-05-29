@@ -311,7 +311,8 @@ def _chat(payload):
     threading.Thread(target=monitor.loop, daemon=True).start()
     try:
         gen = rag.chat(payload["backend"], payload.get("model"), payload["messages"],
-                       payload.get("temperature", 0.7), payload.get("max_tokens", 700))
+                       payload.get("temperature", 0.7), payload.get("max_tokens", 700),
+                       reasoning=payload.get("reasoning", False))
         sio.emit("node_chat_complete", {
             "job_id": job_id, "text": gen["text"], "model": payload.get("model"),
             "stats": {"tokens": gen["tokens"], "gen_time": gen["gen_time"],

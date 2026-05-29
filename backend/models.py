@@ -227,6 +227,7 @@ class Conversation(db.Model):
     model = db.Column(db.String(200), nullable=True)
     device_id = db.Column(db.Integer, nullable=True)   # null = shared M4
     kb_id = db.Column(db.Integer, nullable=True)        # optional RAG grounding
+    reasoning = db.Column(db.Boolean, nullable=False, default=False)  # extended thinking
     created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -241,6 +242,7 @@ class Conversation(db.Model):
             "model": self.model,
             "device_id": self.device_id,
             "kb_id": self.kb_id,
+            "reasoning": self.reasoning,
             "created_at": self.created_at.isoformat() + "Z",
             "updated_at": self.updated_at.isoformat() + "Z",
         }
@@ -262,6 +264,7 @@ class ChatMessage(db.Model):
     tokens_per_second = db.Column(db.Float, nullable=True)
     model = db.Column(db.String(200), nullable=True)
     citations = db.Column(db.Text, nullable=True)  # JSON list (RAG grounding)
+    reasoning = db.Column(db.Text, nullable=True)  # extended-thinking content
     created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
 
     def to_dict(self):
@@ -273,5 +276,6 @@ class ChatMessage(db.Model):
             "tokens_per_second": self.tokens_per_second,
             "model": self.model,
             "citations": json.loads(self.citations) if self.citations else None,
+            "reasoning": self.reasoning,
             "created_at": self.created_at.isoformat() + "Z",
         }

@@ -1381,6 +1381,7 @@ def create_conversation():
         model=(data.get("model") or None),
         device_id=data.get("device_id"),
         kb_id=data.get("kb_id"),
+        reasoning=bool(data.get("reasoning", False)),
     )
     db.session.add(conv)
     db.session.commit()
@@ -1416,6 +1417,8 @@ def update_conversation(conv_id):
         conv.device_id = data.get("device_id")
     if "kb_id" in data:
         conv.kb_id = data.get("kb_id")
+    if "reasoning" in data:
+        conv.reasoning = bool(data.get("reasoning"))
     db.session.commit()
     return jsonify({"conversation": conv.to_dict()})
 
@@ -1461,24 +1464,26 @@ def _assemble_chat(conv, user, rag_query):
     return messages, citations
 
 
-def _launch_chat_stream(cid, backend, model, resolved_model, messages, cit_json, citations, temperature, room, job_id):
-    """Background task: stream the reply token-by-token (honouring a stop
-    request), then persist it and emit the final chat_answer."""
+def _launch_chat_stream(cid, backend, model, resolved_model, messages, cit_json, citations, temperature, room, job_id, reasoning=False):
+    """Background task: stream the reply token-by-token (separating any
+    reasoning/thinking from the answer, honouring a stop request), then persist
+    it and emit the final chat_answer."""
     def run():
         monitor = SystemMonitor(emit_fn=lambda s: socketio.emit("rag_stats", s, room=room),
                                 sleep_fn=socketio.sleep)
         socketio.start_background_task(monitor.loop)
         t0 = time.time()
-        parts, stopped = [], False
+        answer_parts, reasoning_parts, stopped = [], [], False
         try:
-            for delta in rag.stream_chat(backend, model, messages, temperature=temperature):
+            for kind, delta in rag.stream_chat(backend, model, messages,
+                                               temperature=temperature, reasoning=reasoning):
                 if job_id in _chat_cancel:
                     stopped = True
                     break
                 if not delta:
                     continue
-                parts.append(delta)
-                socketio.emit("chat_token", {"job_id": job_id, "delta": delta}, room=room)
+                (reasoning_parts if kind == "reasoning" else answer_parts).append(delta)
+                socketio.emit("chat_token", {"job_id": job_id, "delta": delta, "kind": kind}, room=room)
                 socketio.sleep(0)  # flush the token + let other clients run
         except Exception as e:
             socketio.emit("chat_error", {"error": str(e)}, room=room)
@@ -1486,18 +1491,19 @@ def _launch_chat_stream(cid, backend, model, resolved_model, messages, cit_json,
             return
         monitor.stop()
         _chat_cancel.discard(job_id)
-        text = "".join(parts).strip()
-        if not text:  # stopped before any output
+        text = "".join(answer_parts).strip()
+        reasoning_text = "".join(reasoning_parts).strip() or None
+        if not text and not reasoning_text:  # stopped before any output
             socketio.emit("chat_stopped", {}, room=room)
             _chat_jobs.pop(job_id, None)
             return
         elapsed = time.time() - t0
-        ntok = max(1, round(len(text) / 4))
+        ntok = max(1, round((len(text) + len(reasoning_text or "")) / 4))
         tps = round(ntok / elapsed, 1) if elapsed > 0 else None
         with app.app_context():
             msg = ChatMessage(conversation_id=cid, role="assistant", content=text,
                               tokens=ntok, tokens_per_second=tps, model=resolved_model,
-                              citations=cit_json)
+                              citations=cit_json, reasoning=reasoning_text)
             db.session.add(msg)
             conv2 = Conversation.query.get(cid)
             if conv2:
@@ -1532,6 +1538,7 @@ def _dispatch_chat(conv, user, messages, citations, socket_id, temperature):
         socketio.emit("node_chat", {
             "job_id": job_id, "backend": conv.backend, "model": conv.model,
             "messages": messages, "temperature": temperature, "max_tokens": 700,
+            "reasoning": conv.reasoning,
         }, room=node["sid"])
         return jsonify({"status": "generating", "mode": "remote",
                         "job_id": job_id, "room": room, "citations": citations})
@@ -1539,7 +1546,7 @@ def _dispatch_chat(conv, user, messages, citations, socket_id, temperature):
     resolved_model = conv.model or rag.BACKENDS.get(conv.backend, {}).get("default_model")
     cit_json = _json.dumps(citations) if citations else None
     _launch_chat_stream(conv.id, conv.backend, conv.model, resolved_model, messages,
-                        cit_json, citations, temperature, room, job_id)
+                        cit_json, citations, temperature, room, job_id, reasoning=conv.reasoning)
     return jsonify({"status": "streaming", "mode": "streaming", "job_id": job_id,
                     "room": room, "citations": citations})
 
