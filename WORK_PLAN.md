@@ -401,3 +401,20 @@ and an in-page `console.error` hook recorded **0** errors during a streamed turn
   / `_dispatch_chat`, shared by send + regenerate. Smoke suite still green; 0
   console errors.
 
+## Full model management (full control of local models)
+
+- **Backend** (`feat(models): … list all, custom download, delete`):
+  `rag.installed_models` reports every model stored on a device (HF cache +
+  Ollama) with sizes; `rag.delete_model` removes one (HF cache by repo id, or
+  Ollama). `/models` returns an `installed` list beside the curated catalog;
+  `DELETE /api/rag/devices/<id>/models` deletes (shared in-process, or node via
+  `node_rag_delete` which re-reports inventory). Custom downloads already work —
+  the download endpoint accepts any model id.
+- **Frontend** (`feat(models): full model manager UI …`): the "Run on your
+  hardware" panel now has a "Download a custom model" row (any HF repo / GGUF
+  `repo:file` / Ollama tag), Delete buttons on downloaded catalog models, and an
+  "Installed on this device" list (every stored model + size + delete).
+- **Verified** end-to-end on the M4: listed Gemma-3-4B (3.4 GB), downloaded a
+  tiny test model via the custom input → it appeared, deleted it via the UI →
+  gone, **Gemma untouched**; delete-of-missing → 404; 0 console errors.
+
