@@ -11,6 +11,7 @@ const navLinks = [
     { to: '/architect', label: 'Architect' },
     { to: '/training', label: 'Training' },
     { to: '/predict', label: 'Predict' },
+    { to: '/assistant', label: 'Assistant' },
     { to: '/leaderboard', label: 'Leaderboard' },
     { to: '/learn', label: 'Learn' },
 ];

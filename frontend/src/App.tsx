@@ -7,6 +7,7 @@ import Architect from './pages/Architect';
 import Training from './pages/Training';
 import Leaderboard from './pages/Leaderboard';
 import Playground from './pages/Playground';
+import Rag from './pages/Rag';
 import Courses from './pages/Courses';
 import CourseDetail from './pages/CourseDetail';
 import Learn from './pages/Learn';
@@ -34,6 +35,7 @@ const App: React.FC = () => {
           <Route path="training" element={<Training />} />
           <Route path="leaderboard" element={<Leaderboard />} />
           <Route path="predict" element={<Playground />} />
+          <Route path="assistant" element={<Rag />} />
         </Route>
       </Routes>
     </AuthProvider>
