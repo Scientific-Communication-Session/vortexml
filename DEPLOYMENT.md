@@ -52,6 +52,56 @@ Two things make this work and are already wired up:
 - If the tunnel ever serves plain HTTP instead of HTTPS, change
   `VORTEX_PUBLIC_URL` accordingly — that string is what node agents dial.
 
+### Auto-start (launchd service)
+
+macOS has no `systemd` / `systemctl` — its equivalent is **launchd**, which
+runs services defined by `.plist` files and managed with `launchctl`:
+
+| Linux (systemd)         | macOS (launchd)                                  |
+|-------------------------|--------------------------------------------------|
+| `.service` unit file    | `.plist` (here `com.vortexml.server`)            |
+| `systemctl start/stop`  | `launchctl kickstart` / `launchctl bootout`      |
+| `systemctl enable`      | a `.plist` in `~/Library/LaunchAgents/`          |
+| `journalctl`            | `logs/service.out.log`, `logs/service.err.log`   |
+
+**1. Grant Full Disk Access.** The project lives under `~/Desktop`, which
+macOS sandboxes — a `launchd` service is otherwise denied access to files
+there (`Operation not permitted`). Grant `/bin/bash` Full Disk Access:
+
+- open System Settings → Privacy & Security → **Full Disk Access**
+  (`open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"`)
+- click **+**, press **⇧⌘G**, type `/bin/bash`, add it, and turn its toggle **on**
+
+(Alternatively, move the project out of `~/Desktop` — e.g. to `~/vortexml` —
+and no Full Disk Access is needed.)
+
+**2. Install the service:**
+
+```sh
+bash deploy/install-service.sh
+```
+
+This writes a LaunchAgent to `~/Library/LaunchAgents/com.vortexml.server.plist`
+and starts it. VortexML then starts automatically at login and is **restarted
+automatically if it ever crashes** (`KeepAlive`).
+
+For it to start at **boot with no manual login** (a true headless server),
+also enable auto-login: System Settings → Users & Groups → *Automatically log
+in as* → your user. A LaunchAgent runs in your user session; PostgreSQL —
+installed via `brew services` — already auto-starts the same way.
+
+Managing it:
+
+```sh
+launchctl print gui/$(id -u)/com.vortexml.server          # status
+tail -f logs/service.out.log                              # logs
+launchctl kickstart -k gui/$(id -u)/com.vortexml.server   # restart
+bash deploy/uninstall-service.sh                          # remove
+```
+
+The Cloudflare tunnel is a separate process — to auto-start it too, install
+its own service with `cloudflared service install`.
+
 ## Train on your own device
 
 ### For the user

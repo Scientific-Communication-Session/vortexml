@@ -123,8 +123,18 @@ info "Installing Python dependencies (this may take a while on first run)…"
 ok "Python dependencies installed."
 
 # ── Check database connectivity ─────────────────────────
+# Retry briefly: when launched as a boot service, PostgreSQL's own launchd
+# job may still be starting up — don't fall back to SQLite prematurely.
 info "Checking PostgreSQL connectivity…"
-if $PYTHON -c "import psycopg2; psycopg2.connect('postgresql://andrei:2006@localhost:5432/vortex_db').close()" 2>/dev/null; then
+PG_REACHABLE=0
+for _ in $(seq 1 12); do
+    if $PYTHON -c "import psycopg2; psycopg2.connect('postgresql://andrei:2006@localhost:5432/vortex_db').close()" 2>/dev/null; then
+        PG_REACHABLE=1
+        break
+    fi
+    sleep 1
+done
+if [ "$PG_REACHABLE" -eq 1 ]; then
     ok "PostgreSQL is reachable."
 else
     warn "PostgreSQL is not reachable — switching backend to SQLite."
