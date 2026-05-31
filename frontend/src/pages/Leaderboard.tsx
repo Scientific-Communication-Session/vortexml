@@ -28,6 +28,11 @@ const ARCH_LABEL: Record<string, string> = {
 const PALETTE = ['#8b5cf6', '#06b6d4', '#22c55e', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#a855f7'];
 const MAX_COMPARE = 6;
 
+const chartHintStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border: '1px dashed rgba(139,92,246,0.25)', borderRadius: '8px',
+};
+
 const Leaderboard: React.FC = () => {
     const navigate = useNavigate();
     const { user, isLoading: authLoading } = useAuth();
@@ -48,15 +53,27 @@ const Leaderboard: React.FC = () => {
             .then((data) => {
                 const list: Project[] = data.projects ?? [];
                 setProjects(list);
-                // Preselect the top few so the charts aren't empty on arrival.
-                setSelected(list.slice(0, Math.min(3, list.length)).map((p) => p.id));
+                // No auto-selection: the user opts in via the "Compare" checkboxes.
             })
             .catch((e) => showToast('Failed to load projects: ' + (e instanceof Error ? e.message : String(e)), 'error'))
             .finally(() => setLoading(false));
     }, [user, authLoading, navigate]);
 
-    // Build the two empty charts once.
+    // The chart panels (and their <canvas> elements) are only rendered once we have
+    // finished loading, own at least one project, and the user has ticked at least
+    // one model to compare. We mirror that exact condition here.
+    const showCharts = !loading && projects.length > 0 && selected.length > 0;
+
+    // Create / tear down the two charts in lockstep with `showCharts`.
+    //
+    // The original bug: the charts were built in a mount-only `useEffect(..., [])`,
+    // but on first mount the component is in its `loading` early-return, so the
+    // canvases were NOT in the DOM, `getContext('2d')` returned null, and the chart
+    // refs stayed null forever — even after data arrived and the canvases rendered.
+    // Gating creation on `showCharts` guarantees the canvases exist before we build.
     useEffect(() => {
+        if (!showCharts) return;
+
         const mk = (canvas: HTMLCanvasElement | null, yTitle: string, yMax?: number) => {
             const ctx = canvas?.getContext('2d');
             if (!ctx) return null;
@@ -74,21 +91,22 @@ const Leaderboard: React.FC = () => {
                 },
             });
         };
+
         lossChartRef.current = mk(lossCanvasRef.current, 'Validation Loss');
         accChartRef.current = mk(accCanvasRef.current, 'Validation Accuracy %', 100);
+
         return () => {
             lossChartRef.current?.destroy();
             accChartRef.current?.destroy();
+            lossChartRef.current = null;
+            accChartRef.current = null;
         };
-    }, []);
+    }, [showCharts]);
 
-    // Fetch histories for the selected projects and redraw the overlays.
+    // Fetch histories for the selected projects and redraw the overlays. Runs after
+    // the creation effect above (same render commit) so the chart refs are live.
     useEffect(() => {
-        if (selected.length === 0) {
-            if (lossChartRef.current) { lossChartRef.current.data.datasets = []; lossChartRef.current.update(); }
-            if (accChartRef.current) { accChartRef.current.data.datasets = []; accChartRef.current.update(); }
-            return;
-        }
+        if (!showCharts) return;
         let cancelled = false;
         apiPost('/api/projects/compare', { ids: selected })
             .then((data) => {
@@ -119,7 +137,7 @@ const Leaderboard: React.FC = () => {
             })
             .catch(() => { });
         return () => { cancelled = true; };
-    }, [selected]);
+    }, [selected, showCharts]);
 
     const toggle = (id: number) => {
         setSelected((prev) => {
@@ -176,8 +194,22 @@ const Leaderboard: React.FC = () => {
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Compare</th><th>#</th><th>Project</th><th>Architecture</th>
-                                        <th>Task</th><th>Val Accuracy</th><th>Val Loss</th><th>Epochs</th>
+                                        <th>Compare</th><th>#</th><th>Project</th><th>Architecture</th><th>Task</th>
+                                        <th
+                                            onClick={() => setSortBy('acc')}
+                                            style={{ cursor: 'pointer', color: sortBy === 'acc' ? '#8b5cf6' : undefined, whiteSpace: 'nowrap' }}
+                                            title="Sort by validation accuracy (highest first)"
+                                        >
+                                            Val Accuracy{sortBy === 'acc' ? ' ▼' : ''}
+                                        </th>
+                                        <th
+                                            onClick={() => setSortBy('loss')}
+                                            style={{ cursor: 'pointer', color: sortBy === 'loss' ? '#8b5cf6' : undefined, whiteSpace: 'nowrap' }}
+                                            title="Sort by validation loss (lowest first)"
+                                        >
+                                            Val Loss{sortBy === 'loss' ? ' ▲' : ''}
+                                        </th>
+                                        <th>Epochs</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -208,11 +240,27 @@ const Leaderboard: React.FC = () => {
                     <div className="training-grid">
                         <div className="glass-panel">
                             <div className="panel-title"><span className="pt-icon">📉</span> Validation Loss</div>
-                            <div className="chart-container"><canvas ref={lossCanvasRef} /></div>
+                            {selected.length > 0 ? (
+                                <div className="chart-container"><canvas ref={lossCanvasRef} /></div>
+                            ) : (
+                                <div className="chart-container" style={chartHintStyle}>
+                                    <span className="text-muted" style={{ fontSize: '0.9rem', textAlign: 'center', padding: '0 1rem' }}>
+                                        Tick models in the table above to overlay their curves.
+                                    </span>
+                                </div>
+                            )}
                         </div>
                         <div className="glass-panel">
                             <div className="panel-title"><BarChart3 size={15} style={{ marginRight: 6, verticalAlign: 'middle' }} /> Validation Accuracy</div>
-                            <div className="chart-container"><canvas ref={accCanvasRef} /></div>
+                            {selected.length > 0 ? (
+                                <div className="chart-container"><canvas ref={accCanvasRef} /></div>
+                            ) : (
+                                <div className="chart-container" style={chartHintStyle}>
+                                    <span className="text-muted" style={{ fontSize: '0.9rem', textAlign: 'center', padding: '0 1rem' }}>
+                                        Tick models in the table above to overlay their curves.
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </>
