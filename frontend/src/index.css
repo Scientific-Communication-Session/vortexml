@@ -3286,6 +3286,17 @@ body::before {
     to { transform: rotate(360deg); }
 }
 
+/* Indeterminate model-download bar (used when total size is unknown). */
+.dl-indeterminate {
+    width: 40% !important;
+    animation: dl-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes dl-indeterminate {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(320%); }
+}
+
 .chat-drawer__input {
     display: flex;
     gap: 0.5rem;

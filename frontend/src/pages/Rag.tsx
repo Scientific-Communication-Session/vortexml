@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Database, Plus, Upload, Send, Trash2, Loader2, FileText, Cpu, Cloud, ChevronDown, Server, Download, Check, Gauge } from 'lucide-react';
+import { Database, Plus, Upload, Send, Trash2, Loader2, FileText, Cpu, Cloud, ChevronDown, Server, Download, Check, Gauge, X } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
@@ -26,6 +26,20 @@ interface Installed { hf: InstalledModel[]; ollama: InstalledModel[]; }
 interface LiveStats { cpu_percent?: number; gpu_percent?: number; ram_percent?: number; cpu_temp?: number; gpu_temp?: number; }
 
 const fmtSize = (b: number | null) => (b ? `${(b / 1e9).toFixed(1)} GB` : '');
+const fmtSpeed = (bps: number | null | undefined) => {
+    if (bps == null || bps <= 0) return '';
+    const mbps = bps / 1e6;
+    return mbps >= 1 ? `${mbps.toFixed(1)} MB/s` : `${(bps / 1e3).toFixed(0)} KB/s`;
+};
+
+interface DownloadProgress {
+    status: string;            // 'starting' | 'downloading' | 'complete'
+    phase?: string;            // short human text, e.g. 'Fetching model.safetensors'
+    downloaded_bytes?: number;
+    total_bytes?: number | null;
+    percent?: number | null;   // 0..100, or null for an indeterminate bar
+    speed_bps?: number | null;
+}
 
 const inputStyle: React.CSSProperties = {
     width: '100%', padding: '0.5rem 0.65rem', borderRadius: 8,
@@ -69,7 +83,9 @@ const Rag: React.FC = () => {
     const [catalogOnline, setCatalogOnline] = useState(true);
     const [installed, setInstalled] = useState<Installed>({ hf: [], ollama: [] });
     const [downloading, setDownloading] = useState<string | null>(null);
-    const [downloadStatus, setDownloadStatus] = useState<string>('');
+    const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+    const [downloadJobId, setDownloadJobId] = useState<string | null>(null);
+    const [cancelling, setCancelling] = useState(false);
     const [deleting, setDeleting] = useState<string | null>(null);
     const [customBackend, setCustomBackend] = useState('mlx');
     const [customModel, setCustomModel] = useState('');
@@ -101,14 +117,21 @@ const Rag: React.FC = () => {
         const s = io();
         socketRef.current = s;
         s.on('rag_stats', (d: LiveStats) => setLiveStats(d));
-        s.on('rag_download', (d: { status: string }) => setDownloadStatus(d.status));
+        s.on('rag_download', (d: DownloadProgress) => setDownloadProgress(d));
         s.on('rag_download_complete', (d: { catalog?: CatalogEntry[]; installed?: Installed }) => {
-            setDownloading(null); setDownloadStatus('');
+            setDownloading(null); setDownloadProgress(null); setDownloadJobId(null); setCancelling(false);
             if (d.catalog) setCatalog(d.catalog);
             if (d.installed) setInstalled(d.installed);
             showToast('Model downloaded', 'success');
         });
-        s.on('rag_download_error', (d: { error: string }) => { setDownloading(null); setDownloadStatus(''); showToast(d.error, 'error'); });
+        s.on('rag_download_error', (d: { error: string }) => {
+            setDownloading(null); setDownloadProgress(null); setDownloadJobId(null); setCancelling(false);
+            showToast(d.error, 'error');
+        });
+        s.on('rag_download_cancelled', () => {
+            setDownloading(null); setDownloadProgress(null); setDownloadJobId(null); setCancelling(false);
+            showToast('Download cancelled', 'info');
+        });
         s.on('rag_answer', (d: QueryResult) => { setResult(d); setAsking(false); setLiveStats(null); });
         s.on('rag_error', (d: { error: string }) => { setAsking(false); setLiveStats(null); showToast(d.error, 'error'); });
         return () => { s.disconnect(); socketRef.current = null; };
@@ -198,9 +221,23 @@ const Rag: React.FC = () => {
     const downloadModel = async (be: string, mdl: string) => {
         const id = resolvedDeviceId();
         if (id == null || !mdl.trim()) return;
-        setDownloading(mdl); setDownloadStatus('Starting…');
+        setDownloading(mdl); setCancelling(false); setDownloadJobId(null);
+        setDownloadProgress({ status: 'starting', phase: 'Starting…', percent: null, downloaded_bytes: 0, total_bytes: null, speed_bps: null });
         const d = await apiPost(`/api/rag/devices/${id}/models/download`, { backend: be, model: mdl.trim(), socket_id: socketRef.current?.id });
-        if (d.error) { setDownloading(null); showToast(d.error, 'error'); }
+        if (d.error) { setDownloading(null); setDownloadProgress(null); showToast(d.error, 'error'); return; }
+        if (d.job_id) setDownloadJobId(d.job_id);
+    };
+
+    const cancelDownload = async () => {
+        const id = resolvedDeviceId();
+        if (id == null || !downloadJobId) return;
+        setCancelling(true);
+        const d = await apiPost(`/api/rag/devices/${id}/models/download/cancel`, { job_id: downloadJobId });
+        // If the job already finished server-side, reset immediately; otherwise
+        // wait for the rag_download_cancelled / _error socket event.
+        if (d?.status === 'not_found') {
+            setDownloading(null); setDownloadProgress(null); setDownloadJobId(null); setCancelling(false);
+        }
     };
 
     const deleteModel = async (be: string, mdl: string) => {
@@ -224,6 +261,11 @@ const Rag: React.FC = () => {
     };
 
     const selectModel = (be: string, mdl: string) => { setBackend(be); setModel(mdl); showToast(`Using ${mdl}`, 'success'); };
+    // A model row is "in use" when it matches the active generation backend+model.
+    // HF sources (mlx/transformers/llama_cpp) all share one repo id, so match on
+    // the id alone for those; ollama is matched on its exact tag.
+    const isActiveModel = (be: string, mdl: string) =>
+        model === mdl && (backend === be || (be !== 'ollama' && backend !== 'ollama' && backend !== 'cloud'));
 
     const pickBackend = (b: Backend) => {
         setBackend(b.key);
@@ -344,34 +386,46 @@ const Rag: React.FC = () => {
                                                     {cat.label} <span className="text-muted" style={{ fontWeight: 400 }}>{cat.available ? '· runtime ready' : '· runtime not installed'}</span>
                                                 </div>
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                                                    {cat.models.map((m) => (
-                                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
+                                                    {cat.models.map((m) => {
+                                                        const inUse = isActiveModel(cat.backend, m.id);
+                                                        return (
+                                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'rgba(139,92,246,0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', borderLeft: inUse ? '3px solid #8b5cf6' : '1px solid rgba(255,255,255,0.07)' }}>
                                                             <div style={{ minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                                 {m.downloaded ? <Check size={12} style={{ color: '#22c55e', verticalAlign: 'middle', marginRight: 4 }} /> : null}{m.id}
                                                                 {m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
+                                                                {inUse ? <span className="bento-tag bento-tag-sm" style={{ marginLeft: 6, background: 'rgba(139,92,246,0.18)', color: '#c4b5fd' }}><Check size={10} style={{ verticalAlign: 'middle', marginRight: 2 }} />In use</span> : null}
                                                             </div>
                                                             <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
                                                                 {m.downloaded ? (
                                                                     <>
-                                                                        <button className="btn btn-secondary btn-sm" disabled={!cat.available} onClick={() => selectModel(cat.backend, m.id)}>Use</button>
+                                                                        <button className={`btn btn-sm ${inUse ? 'btn-primary' : 'btn-secondary'}`} disabled={!cat.available} onClick={() => selectModel(cat.backend, m.id)}>{inUse ? 'In use' : 'Use'}</button>
                                                                         <button className="btn btn-danger btn-sm" disabled={deleting === m.id} title="Delete to reclaim disk" onClick={() => deleteModel(cat.backend, m.id)}>
                                                                             {deleting === m.id ? <Loader2 size={12} className="chat-msg__spinner" /> : <Trash2 size={12} />}
                                                                         </button>
                                                                     </>
                                                                 ) : (
-                                                                    <button className="btn btn-secondary btn-sm" disabled={downloading === m.id} onClick={() => downloadModel(cat.backend, m.id)}>
+                                                                    <button className="btn btn-secondary btn-sm" disabled={!!downloading} onClick={() => downloadModel(cat.backend, m.id)}>
                                                                         {downloading === m.id ? <Loader2 size={12} className="chat-msg__spinner" /> : <Download size={12} />}
                                                                         <span style={{ marginLeft: 4 }}>{downloading === m.id ? 'Downloading' : 'Download'}</span>
                                                                     </button>
                                                                 )}
                                                             </div>
                                                         </div>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
-                                    {downloading && downloadStatus && <div className="text-muted" style={{ fontSize: '0.78rem', marginTop: '0.5rem' }}>⏳ {downloadStatus}</div>}
+                                    {downloading && (
+                                        <DownloadBar
+                                            name={downloading}
+                                            p={downloadProgress}
+                                            cancelling={cancelling}
+                                            canCancel={!!downloadJobId}
+                                            onCancel={cancelDownload}
+                                        />
+                                    )}
 
                                     {/* download any custom model */}
                                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
@@ -384,7 +438,7 @@ const Rag: React.FC = () => {
                                                 placeholder={customBackend === 'ollama' ? 'e.g. qwen2.5:7b' : customBackend === 'llama_cpp' ? 'repo:file.gguf' : 'e.g. mlx-community/Qwen2.5-7B-Instruct-4bit'}
                                                 onKeyDown={(e) => { if (e.key === 'Enter' && customModel.trim()) { downloadModel(customBackend, customModel); setCustomModel(''); } }}
                                                 style={{ ...inputStyle, flex: 1, minWidth: 200, fontFamily: 'var(--font-mono)' }} />
-                                            <button className="btn btn-secondary btn-sm" disabled={!customModel.trim() || downloading === customModel.trim()}
+                                            <button className="btn btn-secondary btn-sm" disabled={!customModel.trim() || !!downloading}
                                                 onClick={() => { downloadModel(customBackend, customModel); setCustomModel(''); }}>
                                                 <Download size={13} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Download
                                             </button>
@@ -398,18 +452,25 @@ const Rag: React.FC = () => {
                                                 Installed on this device <span className="text-muted" style={{ fontWeight: 400 }}>· {installed.hf.length + installed.ollama.length} models</span>
                                             </div>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                                                {[...installed.hf.map((m) => ({ ...m, source: 'transformers' })), ...installed.ollama.map((m) => ({ ...m, source: 'ollama' }))].map((m) => (
-                                                    <div key={m.source + m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
+                                                {[...installed.hf.map((m) => ({ ...m, source: 'transformers' })), ...installed.ollama.map((m) => ({ ...m, source: 'ollama' }))].map((m) => {
+                                                    const inUse = isActiveModel(m.source, m.id);
+                                                    return (
+                                                    <div key={m.source + m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'rgba(139,92,246,0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', borderLeft: inUse ? '3px solid #8b5cf6' : '1px solid rgba(255,255,255,0.07)' }}>
                                                         <div style={{ minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.id}{m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
                                                             <span className="text-muted"> · {m.source === 'ollama' ? 'Ollama' : 'HF'}</span>
+                                                            {inUse ? <span className="bento-tag bento-tag-sm" style={{ marginLeft: 6, background: 'rgba(139,92,246,0.18)', color: '#c4b5fd' }}><Check size={10} style={{ verticalAlign: 'middle', marginRight: 2 }} />In use</span> : null}
                                                         </div>
-                                                        <button className="btn btn-danger btn-sm" disabled={deleting === m.id} title="Delete to reclaim disk"
-                                                            onClick={() => deleteModel(m.source, m.id)} style={{ flexShrink: 0 }}>
-                                                            {deleting === m.id ? <Loader2 size={12} className="chat-msg__spinner" /> : <Trash2 size={12} />}
-                                                        </button>
+                                                        <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
+                                                            <button className={`btn btn-sm ${inUse ? 'btn-primary' : 'btn-secondary'}`} onClick={() => selectModel(m.source, m.id)}>{inUse ? 'In use' : 'Use'}</button>
+                                                            <button className="btn btn-danger btn-sm" disabled={deleting === m.id} title="Delete to reclaim disk"
+                                                                onClick={() => deleteModel(m.source, m.id)}>
+                                                                {deleting === m.id ? <Loader2 size={12} className="chat-msg__spinner" /> : <Trash2 size={12} />}
+                                                            </button>
+                                                        </div>
                                                     </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                     )}
@@ -545,5 +606,54 @@ const Stat: React.FC<{ label: string; v?: number; suffix: string }> = ({ label, 
         <span className="text-muted" style={{ marginLeft: 4 }}>{label}</span>
     </span>
 );
+
+// Real download progress: a percent-fill bar (indeterminate when total unknown),
+// "X.X / Y.Y GB", the live speed, the phase text, and a Cancel button.
+const DownloadBar: React.FC<{
+    name: string;
+    p: DownloadProgress | null;
+    cancelling: boolean;
+    canCancel: boolean;
+    onCancel: () => void;
+}> = ({ name, p, cancelling, canCancel, onCancel }) => {
+    const pct = p?.percent ?? null;
+    const determinate = pct != null && !Number.isNaN(pct);
+    const total = p?.total_bytes ?? null;
+    const downloaded = p?.downloaded_bytes ?? 0;
+    const speed = fmtSpeed(p?.speed_bps);
+    const phase = p?.phase || 'Downloading…';
+    const width = determinate ? Math.min(100, Math.max(0, pct as number)) : 100;
+    return (
+        <div style={{ marginTop: '0.6rem', padding: '0.55rem 0.7rem', background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                <div style={{ minWidth: 0, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <Download size={12} style={{ verticalAlign: 'middle', marginRight: 5, color: '#8b5cf6' }} />
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{name}</span>
+                    <span className="text-muted"> · {phase}</span>
+                </div>
+                <button className="btn btn-secondary btn-sm" style={{ flexShrink: 0 }} disabled={cancelling || !canCancel}
+                    onClick={onCancel} title="Cancel download">
+                    {cancelling ? <Loader2 size={12} className="chat-msg__spinner" /> : <X size={12} />}
+                    <span style={{ marginLeft: 4 }}>{cancelling ? 'Cancelling' : 'Cancel'}</span>
+                </button>
+            </div>
+            <div style={{ height: 8, borderRadius: 6, background: 'rgba(255,255,255,0.08)', overflow: 'hidden', position: 'relative' }}>
+                <div className={determinate ? '' : 'dl-indeterminate'}
+                    style={{
+                        height: '100%', width: `${width}%`,
+                        background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
+                        borderRadius: 6, transition: determinate ? 'width 0.2s ease' : undefined,
+                    }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.72rem' }}>
+                <span className="text-muted" style={{ fontFamily: 'var(--font-mono)' }}>
+                    {total ? `${fmtSize(downloaded)} / ${fmtSize(total)}` : (downloaded ? fmtSize(downloaded) : '')}
+                    {determinate ? ` · ${(pct as number).toFixed(0)}%` : ''}
+                </span>
+                <span className="text-muted" style={{ fontFamily: 'var(--font-mono)' }}>{speed}</span>
+            </div>
+        </div>
+    );
+};
 
 export default Rag;

@@ -171,6 +171,7 @@ _device_busy = {}  # device_id -> job_id   (which job currently occupies it)
 _queues = defaultdict(list)  # device_id -> [pending job dicts] (FIFO)
 _MAX_RESUME_ATTEMPTS = 1     # auto-restart an interrupted remote job this many times
 _rag_jobs = {}     # job_id -> {citations, chunks, backend, model, room} for remote RAG queries
+_rag_download_cancels = {}  # job_id -> threading.Event() for in-flight model downloads (local + remote)
 _chat_jobs = {}    # job_id -> {conversation_id, owner_user_id, citations, model, room} for remote chat turns
 _predict_jobs = {} # job_id -> {device, room} for remote neural-net inference
 
@@ -1353,26 +1354,72 @@ def rag_download_model(device_id):
     _join_job_room(socket_id, room)
 
     if device.is_shared:
+        cancel_event = threading.Event()
+        _rag_download_cancels[job_id] = cancel_event
+
         def run():
-            socketio.emit("rag_download", {"status": f"Starting download of {model}…"}, room=room)
+            socketio.emit("rag_download",
+                          {"status": "starting", "phase": f"Starting download of {model}…",
+                           "downloaded_bytes": 0, "total_bytes": None,
+                           "percent": None, "speed_bps": None}, room=room)
             try:
-                rag.download_model(backend, model,
-                                   progress=lambda m: socketio.emit("rag_download", {"status": m}, room=room))
+                rag.download_model(
+                    backend, model, cancel_event=cancel_event,
+                    progress=lambda p: socketio.emit("rag_download", p, room=room))
                 inv = rag.local_model_inventory()
                 socketio.emit("rag_download_complete",
                               {"model": model, "catalog": rag.device_model_catalog(inv),
                                "installed": rag.installed_models(inv)}, room=room)
+            except rag.DownloadCancelled:
+                # Best-effort remove partial files so a re-download starts clean.
+                try:
+                    rag.delete_model(backend, model)
+                except Exception:
+                    pass
+                socketio.emit("rag_download_cancelled",
+                              {"model": model, "error": "Download cancelled",
+                               "cancelled": True}, room=room)
             except Exception as e:
                 socketio.emit("rag_download_error", {"error": str(e)}, room=room)
+            finally:
+                _rag_download_cancels.pop(job_id, None)
         socketio.start_background_task(run)
         return jsonify({"status": "downloading", "mode": "local", "job_id": job_id, "room": room})
 
     node = _nodes.get(device.id)
     if not node:
         return jsonify({"error": f"'{device.nickname}' is offline. Start its node agent."}), 409
+    # Track the device sid so the cancel endpoint can target the right node.
+    _rag_download_cancels[job_id] = {"node_sid": node["sid"]}
     socketio.emit("node_rag_download", {"job_id": job_id, "backend": backend, "model": model},
                   room=node["sid"])
     return jsonify({"status": "downloading", "mode": "remote", "job_id": job_id, "room": room})
+
+
+@app.route("/api/rag/devices/<int:device_id>/models/download/cancel", methods=["POST"])
+def rag_cancel_download(device_id):
+    """Cancel an in-flight model download (shared/local or a remote node)."""
+    user, err = _require_user()
+    if err:
+        return err
+    device, derr = _resolve_rag_device(device_id, user.id)
+    if derr:
+        return derr
+    data = request.get_json(silent=True) or {}
+    job_id = data.get("job_id")
+    if not job_id:
+        return jsonify({"error": "job_id is required"}), 400
+
+    entry = _rag_download_cancels.get(job_id)
+    if entry is None:
+        # Already finished/cancelled — treat as success so the UI can reset.
+        return jsonify({"status": "not_found", "job_id": job_id})
+
+    if isinstance(entry, threading.Event):
+        entry.set()  # local download: the background task observes this and aborts
+    elif isinstance(entry, dict) and entry.get("node_sid"):
+        socketio.emit("node_rag_download_cancel", {"job_id": job_id}, room=entry["node_sid"])
+    return jsonify({"status": "cancelling", "job_id": job_id})
 
 
 @app.route("/api/rag/devices/<int:device_id>/models", methods=["DELETE"])
@@ -2180,13 +2227,21 @@ def on_node_rag_inventory(data):
 @socketio.on("node_rag_download_progress")
 def on_node_rag_download_progress(data):
     data = data or {}
-    socketio.emit("rag_download", {"status": data.get("status", "")},
-                  room=f"rag:{data.get('job_id')}")
+    progress = data.get("progress")
+    if isinstance(progress, dict):
+        payload = progress  # new structured shape — relay as-is
+    else:
+        # Backwards-tolerant: an older node sends {"status": "<free text>"}.
+        payload = {"status": "downloading", "phase": data.get("status", ""),
+                   "downloaded_bytes": 0, "total_bytes": None,
+                   "percent": None, "speed_bps": None}
+    socketio.emit("rag_download", payload, room=f"rag:{data.get('job_id')}")
 
 
 @socketio.on("node_rag_download_complete")
 def on_node_rag_download_complete(data):
     data = data or {}
+    _rag_download_cancels.pop(data.get("job_id"), None)
     dev_id = _node_sids.get(request.sid)
     if dev_id is not None and dev_id in _nodes and data.get("inventory"):
         _nodes[dev_id]["rag_inventory"] = data["inventory"]
@@ -2198,8 +2253,16 @@ def on_node_rag_download_complete(data):
 @socketio.on("node_rag_download_error")
 def on_node_rag_download_error(data):
     data = data or {}
-    socketio.emit("rag_download_error", {"error": data.get("error", "Download failed")},
-                  room=f"rag:{data.get('job_id')}")
+    _rag_download_cancels.pop(data.get("job_id"), None)
+    room = f"rag:{data.get('job_id')}"
+    if data.get("cancelled"):
+        socketio.emit("rag_download_cancelled",
+                      {"model": data.get("model"),
+                       "error": data.get("error", "Download cancelled"),
+                       "cancelled": True}, room=room)
+    else:
+        socketio.emit("rag_download_error", {"error": data.get("error", "Download failed")},
+                      room=room)
 
 
 @socketio.on("node_rag_stats")

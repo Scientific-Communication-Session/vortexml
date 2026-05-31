@@ -591,29 +591,204 @@ def delete_model(backend, model):
     raise ValueError(f"'{model}' is not downloaded on this device.")
 
 
-def download_model(backend, model, progress=None):
+class DownloadCancelled(Exception):
+    """Raised inside download_model when its cancel_event is set, to abort a
+    download cleanly (between files, mid-chunk via the tqdm hook, or mid-stream
+    for Ollama). Callers should treat this as a user-initiated cancel, not a
+    failure."""
+    pass
+
+
+def _hf_total_bytes(repo_id, filename=None):
+    """Best-effort total download size, in bytes, for a HF repo (whole snapshot)
+    or a single file. Returns None if it can't be determined (e.g. offline, no
+    file metadata) so the caller falls back to an indeterminate bar."""
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(repo_id, files_metadata=True)
+        if filename is not None:
+            for s in info.siblings:
+                if s.rfilename == filename:
+                    return int(s.size) if s.size else None
+            return None
+        total = 0
+        seen = False
+        for s in info.siblings:
+            if s.size:
+                total += int(s.size)
+                seen = True
+        return total if seen else None
+    except Exception:
+        return None
+
+
+def _make_progress_tqdm(emit_progress, total_bytes, cancel_event):
+    """Build a tqdm subclass to hand to snapshot_download/hf_hub_download.
+
+    HF drives one tqdm bar per file; we accumulate *all* bytes across every bar
+    into one shared counter so the UI sees a single overall percentage. update(n)
+    is where bytes actually flow, so that's where we: (a) honour cancellation
+    (raise DownloadCancelled — it propagates out of HF cleanly), and (b) emit
+    throttled structured progress with a smoothed speed."""
+    try:
+        from tqdm.auto import tqdm as _base_tqdm
+    except Exception:
+        from tqdm import tqdm as _base_tqdm
+
+    state = {
+        "downloaded": 0,
+        "last_emit_t": 0.0,
+        "last_emit_bytes": 0,
+        "speed": None,
+        "start_t": time.monotonic(),
+        "phase": "",
+    }
+
+    def _emit(force=False):
+        now = time.monotonic()
+        dt = now - state["last_emit_t"]
+        dbytes = state["downloaded"] - state["last_emit_bytes"]
+        # Throttle: at most ~3 emits/sec, OR when ≥1% more has arrived.
+        pct_step = (total_bytes and dbytes / total_bytes >= 0.01)
+        if not force and dt < 0.33 and not pct_step:
+            return
+        if dt > 0 and dbytes >= 0:
+            inst = dbytes / dt
+            # Light exponential smoothing so the number doesn't jitter.
+            state["speed"] = inst if state["speed"] is None else 0.6 * state["speed"] + 0.4 * inst
+        state["last_emit_t"] = now
+        state["last_emit_bytes"] = state["downloaded"]
+        percent = (state["downloaded"] / total_bytes * 100) if total_bytes else None
+        emit_progress({
+            "status": "downloading",
+            "phase": state["phase"],
+            "downloaded_bytes": state["downloaded"],
+            "total_bytes": total_bytes,
+            "percent": percent,
+            "speed_bps": state["speed"],
+        })
+
+    class ProgressTqdm(_base_tqdm):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            desc = (k.get("desc") or getattr(self, "desc", "") or "").strip()
+            if desc:
+                # HF's snapshot-level bar already reads "Fetching N files"; its
+                # per-file bars carry the filename (sometimes a path). Use the
+                # snapshot desc verbatim, else prefix the filename with "Fetching".
+                if desc.lower().startswith("fetching"):
+                    state["phase"] = desc
+                else:
+                    fname = desc.split("/")[-1].strip(":").strip()
+                    state["phase"] = f"Fetching {fname}" if fname else state["phase"]
+
+        def update(self, n=1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise DownloadCancelled()
+            if n:
+                state["downloaded"] += int(n)
+            _emit()
+            return super().update(n)
+
+        def close(self):
+            _emit(force=True)
+            return super().close()
+
+    return ProgressTqdm
+
+
+def download_model(backend, model, progress=None, cancel_event=None):
     """Download a model onto THIS machine. Blocking; meant to run in a background
-    task. `progress(msg)` is an optional status callback. Raises on failure."""
-    def emit(msg):
+    task.
+
+    `progress(payload)` is an optional callback that receives STRUCTURED dicts:
+        { "status": "starting"|"downloading"|"complete",
+          "phase": <str>, "downloaded_bytes": <int>, "total_bytes": <int|None>,
+          "percent": <float 0..100|None>, "speed_bps": <float|None> }
+    `cancel_event` is an optional threading.Event; when set the download aborts
+    by raising DownloadCancelled. Raises on failure."""
+    def emit(payload):
         if progress:
-            progress(msg)
+            progress(payload)
+
+    def _check_cancel():
+        if cancel_event is not None and cancel_event.is_set():
+            raise DownloadCancelled()
+
+    _check_cancel()
+
     if backend in ("mlx", "transformers", "llama_cpp"):
         from huggingface_hub import snapshot_download, hf_hub_download
-        if backend == "llama_cpp" and ":" in model:
+        single_file = backend == "llama_cpp" and ":" in model
+        if single_file:
             repo, filename = model.split(":", 1)
-            emit(f"Downloading {filename} from {repo}…")
-            hf_hub_download(repo_id=repo, filename=filename)
+            total = _hf_total_bytes(repo, filename)
+            phase = f"Fetching {filename}"
         else:
-            emit(f"Downloading {model} from Hugging Face…")
-            snapshot_download(repo_id=model)
-        emit("Download complete.")
+            repo, filename = model, None
+            total = _hf_total_bytes(model)
+            phase = f"Fetching {model}"
+
+        emit({"status": "starting", "phase": phase, "downloaded_bytes": 0,
+              "total_bytes": total, "percent": 0.0 if total else None,
+              "speed_bps": None})
+
+        tqdm_cls = _make_progress_tqdm(emit, total, cancel_event)
+        if single_file:
+            hf_hub_download(repo_id=repo, filename=filename, tqdm_class=tqdm_cls)
+        else:
+            snapshot_download(repo_id=model, tqdm_class=tqdm_cls)
+
+        _check_cancel()
+        emit({"status": "complete", "phase": "Download complete.",
+              "downloaded_bytes": total or 0, "total_bytes": total,
+              "percent": 100.0, "speed_bps": None})
+
     elif backend == "ollama":
-        emit(f"Pulling {model} via Ollama…")
-        payload = json.dumps({"model": model, "stream": False}).encode()
+        emit({"status": "starting", "phase": f"Pulling {model} via Ollama…",
+              "downloaded_bytes": 0, "total_bytes": None, "percent": None,
+              "speed_bps": None})
+        payload = json.dumps({"model": model, "stream": True}).encode()
         req = urllib.request.Request(f"{OLLAMA_URL}/api/pull", data=payload,
                                      headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=3600)
-        emit("Pull complete.")
+        last_t = time.monotonic()
+        last_bytes = 0
+        speed = None
+        last_emit_t = 0.0
+        with urllib.request.urlopen(req, timeout=3600) as resp:
+            for raw in resp:
+                _check_cancel()
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    line = json.loads(raw)
+                except Exception:
+                    continue
+                if line.get("error"):
+                    raise RuntimeError(line["error"])
+                total = line.get("total")
+                completed = line.get("completed") or 0
+                phase = line.get("status") or "Pulling…"
+                now = time.monotonic()
+                dt = now - last_t
+                if dt > 0 and completed >= last_bytes:
+                    inst = (completed - last_bytes) / dt
+                    speed = inst if speed is None else 0.6 * speed + 0.4 * inst
+                last_t, last_bytes = now, completed
+                # Throttle to ~3/sec.
+                if now - last_emit_t >= 0.33 or completed == total:
+                    last_emit_t = now
+                    percent = (completed / total * 100) if total else None
+                    emit({"status": "downloading", "phase": phase,
+                          "downloaded_bytes": int(completed),
+                          "total_bytes": int(total) if total else None,
+                          "percent": percent,
+                          "speed_bps": speed if total else None})
+        _check_cancel()
+        emit({"status": "complete", "phase": "Pull complete.",
+              "downloaded_bytes": last_bytes, "total_bytes": last_bytes or None,
+              "percent": 100.0, "speed_bps": None})
     else:
         raise ValueError(f"Backend '{backend}' has no downloadable local model.")
 

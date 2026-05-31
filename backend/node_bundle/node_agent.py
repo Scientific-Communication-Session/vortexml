@@ -246,19 +246,36 @@ def on_stop(data):
 
 
 # ── RAG: download a model onto this node, then run generation on it ──
+_rag_download_cancels = {}  # job_id -> threading.Event() for in-flight node downloads
+
+
 def _rag_download(payload):
     job_id = payload["job_id"]
+    cancel_event = threading.Event()
+    _rag_download_cancels[job_id] = cancel_event
     try:
         rag.download_model(
-            payload["backend"], payload["model"],
-            progress=lambda m: sio.emit("node_rag_download_progress", {"job_id": job_id, "status": m}),
+            payload["backend"], payload["model"], cancel_event=cancel_event,
+            progress=lambda p: sio.emit("node_rag_download_progress",
+                                        {"job_id": job_id, "progress": p}),
         )
         sio.emit("node_rag_download_complete",
                  {"job_id": job_id, "model": payload["model"],
                   "inventory": rag.local_model_inventory()})
+    except rag.DownloadCancelled:
+        # Best-effort remove partial files so a re-download starts clean.
+        try:
+            rag.delete_model(payload["backend"], payload["model"])
+        except Exception:
+            pass
+        sio.emit("node_rag_download_error",
+                 {"job_id": job_id, "model": payload["model"],
+                  "error": "Download cancelled", "cancelled": True})
     except Exception as e:
         traceback.print_exc()
         sio.emit("node_rag_download_error", {"job_id": job_id, "error": str(e)})
+    finally:
+        _rag_download_cancels.pop(job_id, None)
 
 
 @sio.on("node_rag_download")
@@ -268,6 +285,14 @@ def on_rag_download(payload):
                                              "error": "RAG support not bundled on this node."})
         return
     threading.Thread(target=_rag_download, args=(payload,), daemon=True).start()
+
+
+@sio.on("node_rag_download_cancel")
+def on_rag_download_cancel(payload):
+    job_id = (payload or {}).get("job_id")
+    ev = _rag_download_cancels.get(job_id)
+    if ev is not None:
+        ev.set()  # the download thread observes this and raises DownloadCancelled
 
 
 @sio.on("node_rag_delete")
