@@ -649,11 +649,11 @@ const Architect: React.FC = () => {
                         <div className="form-row">
                             <div className="form-group">
                                 <label className="form-label">Epochs <HelpButton topic="epochs" /><AskButton topic="epochs" /></label>
-                                <input type="number" className="form-input" value={epochs} onChange={e => setEpochs(parseInt(e.target.value) || 50)} />
+                                <input type="number" min="1" max="100000" step="1" className="form-input" value={epochs} onChange={e => { const v = parseInt(e.target.value); setEpochs(Number.isFinite(v) && v >= 1 ? v : 1); }} />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Learning Rate <HelpButton topic="learning_rate" /><AskButton topic="learning_rate" /></label>
-                                <input type="number" className="form-input" step="0.0001" value={lr} onChange={e => setLr(parseFloat(e.target.value) || 0.001)} />
+                                <input type="number" min="0.000001" max="10" className="form-input" step="0.0001" value={lr} onChange={e => { const v = parseFloat(e.target.value); setLr(Number.isFinite(v) && v > 0 ? v : 0.001); }} />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Batch Size <HelpButton topic="batch_size" /><AskButton topic="batch_size" /></label>

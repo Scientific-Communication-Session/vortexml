@@ -45,9 +45,27 @@ def save_uploaded_file(file_storage):
     return filename, filepath
 
 
+def _read_csv(path):
+    """Read a user-uploaded CSV robustly.
+
+    Real-world CSVs (especially Excel exports) are frequently Windows-1252 /
+    Latin-1 rather than UTF-8, so a strict utf-8 read raises UnicodeDecodeError
+    on a stray byte. Fall back to latin-1, which maps all 256 byte values and
+    never fails to decode. Empty/columnless or otherwise unparseable files are
+    re-raised as ValueError with a friendly message so callers can return a 400
+    instead of a 500 with a raw stack trace.
+    """
+    try:
+        return pd.read_csv(path)
+    except UnicodeDecodeError:
+        return pd.read_csv(path, encoding="latin-1")
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as e:
+        raise ValueError(f"Could not read this file as a CSV: {e}")
+
+
 def analyze_dataset(csv_path):
     """Analyze a CSV and return metadata for the Dataset Designer UI."""
-    df = pd.read_csv(csv_path)
+    df = _read_csv(csv_path)
 
     columns = []
     for col in df.columns:
@@ -109,7 +127,7 @@ def dataset_health(csv_path, feature_cols=None, target_col=None):
     Returns {"rows", "warnings": [{level, code, title, detail, columns}], "ok"}.
     Everything is best-effort and read-only.
     """
-    df = pd.read_csv(csv_path)
+    df = _read_csv(csv_path)
     n = len(df)
     feature_cols = [c for c in (feature_cols or []) if c in df.columns]
     warnings = []
@@ -208,7 +226,7 @@ def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size
     Prepare a dataset for training.
     Returns train_loader, val_loader, test_loader, input_dim, output_dim, task_type.
     """
-    df = pd.read_csv(csv_path)
+    df = _read_csv(csv_path)
 
     # Determine task type
     target_series = df[target_col]
@@ -264,13 +282,20 @@ def prepare_dataset(csv_path, feature_cols, target_col, batch_size=32, test_size
     X_test = scaler.transform(X_test)
 
     # Create DataLoaders
-    def make_loader(X_arr, y_arr, shuffle):
+    def make_loader(X_arr, y_arr, shuffle, drop_last=False):
         X_t = torch.tensor(X_arr)
         y_t = torch.tensor(y_arr)
         ds = TensorDataset(X_t, y_t)
-        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
+        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
 
-    train_loader = make_loader(X_train, y_train, shuffle=True)
+    # BatchNorm layers (DNN/ResNet) raise "Expected more than 1 value per
+    # channel" on a batch of exactly 1 sample in training mode. If the train
+    # split would leave a single-sample final batch, drop it — but only when
+    # there is more than one batch, so we never empty the loader on small data.
+    # Validation/test run under model.eval(), where BatchNorm is fine with a
+    # size-1 batch, so only the training loader needs this.
+    train_drop_last = (len(X_train) % batch_size == 1) and (len(X_train) > batch_size)
+    train_loader = make_loader(X_train, y_train, shuffle=True, drop_last=train_drop_last)
     val_loader = make_loader(X_val, y_val, shuffle=False)
     test_loader = make_loader(X_test, y_test, shuffle=False)
 

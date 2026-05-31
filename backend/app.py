@@ -39,7 +39,9 @@ from training_engine import (
     load_weights_for_inference, predict, export_model,
 )
 from device_specs import detect_specs
-from auto_config_rules import recommend_config, guard_config
+from auto_config_rules import (
+    recommend_config, guard_config, VALID_OPTIMIZERS, VALID_ACTIVATIONS,
+)
 import rag
 from system_stats import SystemMonitor, sample as sample_stats
 
@@ -319,8 +321,11 @@ def upload_file():
         st["dataset_path"] = filepath
         st["dataset_info"] = info
         return jsonify({"filename": filename, "info": info})
+    except ValueError as e:
+        # Unparseable/empty/garbled file — a client error, not a server fault.
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Could not process this file: {e}"}), 400
 
 
 @app.route("/api/dataset/analyze", methods=["GET"])
@@ -349,6 +354,20 @@ def configure_dataset():
         return jsonify({"error": "Select a target column"}), 400
 
     st = _get_state()
+    # Validate the chosen columns exist in the uploaded dataset. Otherwise a bad
+    # selection is accepted here and only blows up later inside the training
+    # thread when prepare_dataset does df[col] (KeyError), with no clean error
+    # surfaced to the user.
+    info = st.get("dataset_info")
+    if not info:
+        return jsonify({"error": "Upload a dataset first"}), 400
+    known = {c["name"] for c in info.get("columns", [])}
+    missing = [c for c in list(feature_cols) + [target_col] if c not in known]
+    if missing:
+        return jsonify({"error": f"Unknown column(s) for this dataset: {', '.join(missing)}"}), 400
+    if target_col in feature_cols:
+        return jsonify({"error": "The target column can't also be a feature column"}), 400
+
     st["feature_cols"] = feature_cols
     st["target_col"] = target_col
 
@@ -440,6 +459,42 @@ def configure_model():
 
     if arch_type not in MODEL_REGISTRY:
         return jsonify({"error": f"Unknown architecture: {arch_type}"}), 400
+
+    # Validate the hyperparameters before they reach the training loop. Without
+    # this, invalid values (e.g. epochs<=0, negative lr, non-positive layer
+    # widths, batch_size<=0) crash the background training thread with a cryptic
+    # error instead of returning a clean 400. The epochs/lr inputs in the UI are
+    # free number fields, so a negative value is reachable from the browser.
+    if not isinstance(layer_sizes, list) or not (1 <= len(layer_sizes) <= 16):
+        return jsonify({"error": "layer_sizes must be a list of 1–16 layer widths"}), 400
+    try:
+        layer_sizes = [int(n) for n in layer_sizes]
+    except (TypeError, ValueError):
+        return jsonify({"error": "layer_sizes must contain whole numbers"}), 400
+    if any(n < 1 or n > 8192 for n in layer_sizes):
+        return jsonify({"error": "each layer width must be between 1 and 8192"}), 400
+    try:
+        epochs = int(epochs)
+    except (TypeError, ValueError):
+        return jsonify({"error": "epochs must be a whole number"}), 400
+    if not (1 <= epochs <= 100000):
+        return jsonify({"error": "epochs must be between 1 and 100000"}), 400
+    try:
+        lr = float(lr)
+    except (TypeError, ValueError):
+        return jsonify({"error": "lr must be a number"}), 400
+    if not (0 < lr <= 10):
+        return jsonify({"error": "lr must be greater than 0 and at most 10"}), 400
+    try:
+        batch_size = int(batch_size)
+    except (TypeError, ValueError):
+        return jsonify({"error": "batch_size must be a whole number"}), 400
+    if not (1 <= batch_size <= 100000):
+        return jsonify({"error": "batch_size must be between 1 and 100000"}), 400
+    if optimizer not in VALID_OPTIMIZERS:
+        return jsonify({"error": f"Unknown optimizer: {optimizer}"}), 400
+    if activation not in VALID_ACTIVATIONS:
+        return jsonify({"error": f"Unknown activation: {activation}"}), 400
 
     st = _get_state()
     st["project_name"] = project_name
@@ -2265,6 +2320,7 @@ def on_node_complete(data):
     weight_filename = os.path.basename(meta.get("weight_filename") or "")
     meta["weight_filename"] = weight_filename
     weights_b64 = data.get("weights_b64")
+    saved = False
     if weight_filename and weights_b64:
         try:
             with open(os.path.join(WEIGHTS_DIR, weight_filename), "wb") as f:
@@ -2272,10 +2328,24 @@ def on_node_complete(data):
             pp = data.get("preprocess")
             if pp:
                 save_preprocess(os.path.join(WEIGHTS_DIR, weight_filename), pp)
+            saved = True
         except Exception as e:
             print(f"[node] failed to save weights {weight_filename}: {e}")
     state_key = job["state_key"]
     used_path = job.get("dataset_path")
+    if not saved:
+        # The node finished but shipped no usable weights (missing/corrupt
+        # payload or a disk error above). Persisting a Project here would create
+        # a row whose weight_filename points at a file that isn't on disk, so
+        # every later inference/export/download for it would 404. Surface a
+        # training error and clean up instead of recording a broken project.
+        print(f"[node] run {job['job_id']} completed without usable weights — not persisting")
+        socketio.emit("training_error",
+                      {"error": "The device finished but did not return usable model weights."},
+                      room=job["room"])
+        _finish_job(job["job_id"])
+        _cleanup_dataset(state_key, used_path)
+        return
     _states[state_key]["last_weights_file"] = weight_filename
     _persist_project(job["owner_user_id"], job["config"], meta)
     socketio.emit("training_complete", meta, room=job["room"])

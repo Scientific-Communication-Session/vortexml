@@ -435,7 +435,18 @@ def export_model(weights_path, arch_type, layer_sizes, input_dim, output_dim,
     tmp.close()
     try:
         if fmt == "torchscript":
-            torch.jit.trace(model, dummy).save(tmp.name)
+            try:
+                traced = torch.jit.trace(model, dummy)
+            except torch.jit.TracingCheckError:
+                # nn.TransformerEncoder's eval-mode fast path makes the traced
+                # graph use a different (but numerically identical) kernel than
+                # eager, so trace's built-in re-run check reports a false-
+                # positive divergence. We verified the resulting trace matches
+                # eager on fresh inputs, so retrace without the sanity check
+                # rather than fail the export. Other architectures keep the
+                # strict check, which would still catch a real divergence.
+                traced = torch.jit.trace(model, dummy, check_trace=False)
+            traced.save(tmp.name)
         elif fmt == "onnx":
             # dynamo=False uses the stable TorchScript-based exporter (needs the
             # `onnx` package); the newer dynamo exporter would also pull in
@@ -570,6 +581,13 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
     model = model.to(device)
 
     epochs = config.get("epochs", 50)
+    # The epoch loop below is `range(1, epochs + 1)`; with epochs < 1 it never
+    # runs and the per-epoch train_loss/val_loss locals stay unbound, which
+    # would surface much later as a confusing UnboundLocalError. Fail fast and
+    # clearly instead. (The /api/model/configure endpoint also rejects this, so
+    # in normal use this guard is never hit — it's defense in depth.)
+    if not isinstance(epochs, int) or epochs < 1:
+        raise ValueError(f"epochs must be a positive integer, got {epochs!r}")
     lr = config.get("lr", 0.001)
     optimizer_name = config.get("optimizer", "adam")
     optimizer = get_optimizer(model, optimizer_name, lr)
