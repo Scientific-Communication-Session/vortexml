@@ -1,9 +1,38 @@
-torch>=2.0
-pandas>=2.0
-numpy>=1.24
-scikit-learn>=1.3
-openpyxl>=3.1
-python-socketio[client]>=5.11
-websocket-client>=1.7
-requests>=2.31
-psutil>=5.9
+# ─────────────────────────────────────────────────────────
+#  VortexML Node Agent — Python dependencies.
+#  Floors are pinned to the major versions the central M4 runs, so a
+#  downloaded node has full capability parity: train, download models,
+#  and generate locally (RAG / chat / inference) — not just train.
+# ─────────────────────────────────────────────────────────
+
+# ── Core: neural-net training + dataset prep ──
+torch>=2.0                     # all 10 architectures + the training loop
+pandas>=2.0                    # CSV / tabular dataset loading
+numpy>=1.24                    # tensors / preprocessing math
+scikit-learn>=1.3             # split / scale / encode + TF-IDF RAG retrieval
+openpyxl>=3.1                  # read .xlsx datasets
+werkzeug>=3.0                  # data_processor imports werkzeug.utils.secure_filename
+                               #   at module load — WITHOUT this the agent can't even
+                               #   start (the M4 only had it because Flask pulls it in).
+
+# ── Agent transport: dial back to the central server ──
+python-socketio[client]>=5.11  # socket.io client the agent registers/relays over
+websocket-client>=1.7         # websocket transport for socket.io
+requests>=2.31                # HTTP fallback transport + misc
+psutil>=5.9                   # live CPU/RAM telemetry streamed during jobs
+
+# ── On-device RAG / chat / model-download (parity with the M4) ──
+huggingface_hub>=0.24         # rag.download_model: snapshot_download / hf_hub_download,
+                               #   and scan_cache_dir for the model inventory.
+transformers>=4.40            # cross-platform local generation backend (runs on the
+                               #   torch above via MPS/CUDA/CPU) — works on any node,
+                               #   not just Apple Silicon.
+accelerate>=0.30              # device_map="auto" + efficient weight loading that
+                               #   transformers generation relies on.
+anthropic>=0.102              # the 'cloud' backend (Claude); floor matches the M4 —
+                               #   rag._cloud_kwargs uses output_config.effort + adaptive
+                               #   thinking, which older SDKs reject with a TypeError.
+
+# Apple-Silicon nodes additionally get `mlx-lm` (the M4's native/fastest local
+# backend) installed by run.sh — it is Mac-only, so it is intentionally NOT
+# listed here. Non-Mac nodes generate locally via transformers instead.

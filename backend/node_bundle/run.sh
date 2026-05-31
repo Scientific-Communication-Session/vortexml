@@ -35,6 +35,26 @@ python -m pip install --upgrade pip -q --no-cache-dir
 echo "Installing dependencies — first run can take a few minutes…"
 python -m pip install -r requirements.txt -q --no-cache-dir
 
+# 2b. Apple-Silicon extra: MLX is the M4's native/fastest local LLM backend, so
+#     a Mac node installs it for full parity. It is Mac-only (it won't install on
+#     Linux/Windows or Intel Macs), so other platforms skip it and generate
+#     locally via Transformers instead. A failed optional install must NOT abort
+#     setup — the node still works without MLX — so we warn and continue.
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+if [ "$OS" = "Darwin" ] && [ "$ARCH" = "arm64" ]; then
+    echo "Apple Silicon detected — installing mlx-lm (fastest local backend on this Mac)…"
+    if python -m pip install -q --no-cache-dir "mlx-lm>=0.20"; then
+        echo "mlx-lm installed ✓"
+    else
+        echo "WARNING: mlx-lm install failed — the node will still run, using Transformers"
+        echo "         for local generation instead. You can retry 'pip install mlx-lm' later."
+    fi
+else
+    echo "Non-Apple-Silicon platform ($OS/$ARCH) — skipping MLX (Mac-only);"
+    echo "local generation will use Transformers."
+fi
+
 # 3. Folder layout VortexML's training engine expects.
 mkdir -p uploads/weights
 
