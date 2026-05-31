@@ -19,6 +19,15 @@ psutil>=5.9
 onnx>=1.16
 # RAG document ingestion (PDF). txt/md/csv need nothing extra.
 pypdf>=4.0
+# Broad file-format ingestion for both the dataset upload (table extraction) and
+# RAG document upload (text extraction). Each is imported lazily inside its
+# conversion branch and guarded with a friendly error if missing.
+python-docx>=1.1      # Word .docx → tables (datasets) / text (RAG)
+python-pptx>=1.0      # PowerPoint .pptx → slide text (RAG)
+pyarrow>=15.0         # Parquet .parquet → DataFrame (datasets)
+beautifulsoup4>=4.12  # HTML tag-stripping (RAG)
+lxml>=5.0             # HTML table parsing via pandas.read_html (datasets)
+striprtf>=0.0.26      # RTF .rtf → text (RAG)
 # RAG retrieval defaults to TF-IDF (scikit-learn, already above) and generation
 # can use the cloud (anthropic) key. The local generation backends are OPTIONAL
 # and intentionally NOT hard requirements (heavy / platform-specific):

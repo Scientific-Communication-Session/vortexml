@@ -302,7 +302,7 @@ const Rag: React.FC = () => {
                                     <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0 }}>
                                         {uploading ? <Loader2 size={14} className="chat-msg__spinner" style={{ marginRight: 4, verticalAlign: 'middle' }} /> : <Upload size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />}
                                         Add documents
-                                        <input ref={fileRef} type="file" multiple accept=".txt,.md,.markdown,.csv,.pdf" style={{ display: 'none' }}
+                                        <input ref={fileRef} type="file" multiple accept=".txt,.md,.markdown,.csv,.tsv,.json,.html,.htm,.pdf,.docx,.xlsx,.xls,.pptx,.rtf" style={{ display: 'none' }}
                                             onChange={(e) => { if (e.target.files?.length) uploadDocs(e.target.files); }} />
                                     </label>
                                 </div>
@@ -315,7 +315,7 @@ const Rag: React.FC = () => {
                                         ))}
                                     </div>
                                 ) : (
-                                    <p className="text-muted" style={{ fontSize: '0.84rem' }}>No documents yet. Add .txt, .md, .csv{embedders.length ? ', or .pdf' : ''} files to ground answers.</p>
+                                    <p className="text-muted" style={{ fontSize: '0.84rem' }}>No documents yet. Add text, Word, Excel, PowerPoint, PDF, HTML, Markdown, CSV/JSON, or RTF files to ground answers.</p>
                                 )}
                             </div>
 

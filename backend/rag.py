@@ -43,28 +43,112 @@ _llamacpp_cache = {}
 # ─────────────────────────────────────────────────────────
 # 1. Document extraction + chunking
 # ─────────────────────────────────────────────────────────
-SUPPORTED_EXTS = (".txt", ".md", ".markdown", ".text", ".csv", ".pdf")
+SUPPORTED_EXTS = (
+    ".txt", ".md", ".markdown", ".text", ".csv", ".tsv", ".json",
+    ".html", ".htm", ".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".rtf",
+)
 
 
 def extract_text(filename, raw_bytes):
-    """Pull plain text out of an uploaded document. Raises ValueError on
-    unsupported types or missing optional parsers."""
+    """Pull plain text out of an uploaded document for RAG ingestion.
+
+    Handles everything Claude can ingest, converting to plain text. Heavy/optional
+    parsers are imported lazily inside each branch and guarded with a friendly
+    ValueError if the library is missing. Unknown/binary types fall back to a
+    best-effort utf-8 'ignore' decode (the original behaviour).
+    """
+    import io
+
     ext = "." + filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
-    if ext in (".txt", ".md", ".markdown", ".text"):
+
+    # Plain-text-ish formats: decode directly. (.csv/.tsv/.json are already
+    # human-readable, so feeding the raw text to the chunker keeps every value
+    # searchable.)
+    if ext in (".txt", ".md", ".markdown", ".text", ".csv", ".tsv", ".json"):
         return raw_bytes.decode("utf-8", "ignore")
-    if ext == ".csv":
-        # Flatten rows into readable lines so each row becomes searchable text.
-        return raw_bytes.decode("utf-8", "ignore")
+
+    if ext in (".html", ".htm"):
+        # Strip tags to readable text. Prefer BeautifulSoup; fall back to a
+        # crude regex strip if it (and lxml) aren't installed.
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            import re
+            stripped = re.sub(r"<[^>]+>", " ", raw_bytes.decode("utf-8", "ignore"))
+            return re.sub(r"\s+\n", "\n", stripped)
+        soup = BeautifulSoup(raw_bytes, "html.parser")
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        return soup.get_text(separator="\n")
+
     if ext == ".pdf":
         if find_spec("pypdf") is None:
             raise ValueError("PDF support needs the 'pypdf' package "
                              "(pip install pypdf). Upload .txt/.md/.csv instead.")
-        import io
         import pypdf
         reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
         return "\n\n".join((page.extract_text() or "") for page in reader.pages)
-    raise ValueError(f"Unsupported file type '{ext}'. Supported: "
-                     f"{', '.join(SUPPORTED_EXTS)}")
+
+    if ext == ".docx":
+        try:
+            import docx  # python-docx
+        except ImportError:
+            raise ValueError("Word (.docx) support needs the 'python-docx' "
+                             "package (pip install python-docx).")
+        document = docx.Document(io.BytesIO(raw_bytes))
+        parts = [p.text for p in document.paragraphs if p.text.strip()]
+        # Include table cell text so tabular content is searchable too.
+        for table in document.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells:
+                    parts.append("\t".join(cells))
+        return "\n".join(parts)
+
+    if ext in (".xlsx", ".xls"):
+        # Render every sheet as readable rows. Reuse pandas (already a dep) which
+        # uses openpyxl for .xlsx; .xls needs xlrd.
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ValueError("Excel support needs 'pandas' and 'openpyxl'.")
+        try:
+            sheets = pd.read_excel(io.BytesIO(raw_bytes), sheet_name=None)
+        except ImportError:
+            raise ValueError("Reading this Excel file needs the 'openpyxl' "
+                             "(.xlsx) or 'xlrd' (.xls) package.")
+        out = []
+        for name, df in sheets.items():
+            out.append(f"# Sheet: {name}")
+            out.append(df.to_csv(index=False))
+        return "\n".join(out)
+
+    if ext == ".pptx":
+        try:
+            from pptx import Presentation  # python-pptx
+        except ImportError:
+            raise ValueError("PowerPoint (.pptx) support needs the 'python-pptx' "
+                             "package (pip install python-pptx).")
+        prs = Presentation(io.BytesIO(raw_bytes))
+        parts = []
+        for i, slide in enumerate(prs.slides, 1):
+            parts.append(f"# Slide {i}")
+            for shape in slide.shapes:
+                if shape.has_text_frame and shape.text_frame.text.strip():
+                    parts.append(shape.text_frame.text)
+        return "\n".join(parts)
+
+    if ext == ".rtf":
+        try:
+            from striprtf.striprtf import rtf_to_text
+        except ImportError:
+            raise ValueError("RTF support needs the 'striprtf' package "
+                             "(pip install striprtf).")
+        return rtf_to_text(raw_bytes.decode("utf-8", "ignore"))
+
+    # Unknown/binary type: best-effort decode rather than hard-failing, matching
+    # the codebase's lenient default.
+    return raw_bytes.decode("utf-8", "ignore")
 
 
 def chunk_text(text, chunk_size=900, overlap=150):

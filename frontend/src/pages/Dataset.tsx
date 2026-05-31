@@ -120,9 +120,9 @@ const Dataset: React.FC = () => {
     };
 
     const uploadFile = async (file: File) => {
-        const valid = /\.(csv|xlsx|xls)$/i.test(file.name);
+        const valid = /\.(csv|tsv|xlsx|xls|json|parquet|docx|html?|htm)$/i.test(file.name);
         if (!valid) {
-            showToast('Only CSV and Excel files are supported.', 'error');
+            showToast('Unsupported file. Upload CSV, TSV, Excel, JSON, Parquet, or a Word/HTML table.', 'error');
             return;
         }
 
@@ -272,12 +272,12 @@ const Dataset: React.FC = () => {
                 >
                     <div className="upload-icon">⬆️</div>
                     <h3>Drag & drop your file here</h3>
-                    <p>or click to browse — CSV, XLSX, XLS supported (max 100 MB)</p>
+                    <p>or click to browse — CSV, TSV, Excel, JSON, Parquet, Word/HTML tables (max 100 MB)</p>
                     <input
                         type="file"
                         ref={fileInputRef}
                         style={{ display: 'none' }}
-                        accept=".csv,.xlsx,.xls"
+                        accept=".csv,.tsv,.xlsx,.xls,.json,.parquet,.docx,.html,.htm"
                         onChange={handleFileInput}
                     />
                 </div>

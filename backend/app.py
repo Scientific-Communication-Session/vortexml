@@ -309,9 +309,14 @@ def upload_file():
     if file.filename == "":
         return jsonify({"error": "No file selected"}), 400
 
-    allowed = file.filename.lower().endswith((".csv", ".xlsx", ".xls"))
+    allowed = file.filename.lower().endswith((
+        ".csv", ".tsv", ".xlsx", ".xls", ".json", ".parquet",
+        ".docx", ".html", ".htm",
+    ))
     if not allowed:
-        return jsonify({"error": "Only CSV and Excel files are supported"}), 400
+        return jsonify({"error": "Unsupported file type. Upload a table as CSV, "
+                                 "TSV, Excel (.xlsx/.xls), JSON, Parquet, or a "
+                                 "Word/HTML file containing a table."}), 400
 
     try:
         filename, filepath = save_uploaded_file(file)

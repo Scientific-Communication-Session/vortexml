@@ -27,21 +27,154 @@ def safe_filename(name, default="upload.csv"):
     return base
 
 
+# Tabular-ish formats we accept for dataset upload. Everything that is not
+# already a CSV is converted to one so the analyze/prepare pipeline downstream
+# stays completely unchanged.
+TABULAR_EXTS = (".csv", ".tsv", ".xlsx", ".xls", ".json", ".parquet",
+                ".docx", ".html", ".htm")
+
+
+def _to_dataframe(filepath, ext):
+    """Load a non-CSV tabular file into a pandas DataFrame.
+
+    Heavy/optional parsers are imported lazily inside each branch and guarded
+    with a friendly ValueError so a missing dependency surfaces as a clean 400
+    rather than an ImportError 500. Formats with no tabular content raise
+    ValueError explaining there's no table to train on.
+    """
+    if ext == ".tsv":
+        return pd.read_csv(filepath, sep="\t")
+
+    if ext in (".xlsx", ".xls"):
+        # .xls (legacy) needs xlrd; .xlsx uses openpyxl. Let pandas pick the
+        # engine for .xls and fall back to a friendly message if it's missing.
+        if ext == ".xlsx":
+            return pd.read_excel(filepath, engine="openpyxl")
+        try:
+            return pd.read_excel(filepath)
+        except ImportError:
+            raise ValueError("Reading legacy .xls files needs the 'xlrd' "
+                             "package. Re-save as .xlsx or .csv and try again.")
+
+    if ext == ".json":
+        # Accept an array of record objects (the common export shape) or a
+        # column-oriented dict. Anything else has no table to train on.
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+                data = json.load(fh)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"Could not parse this file as JSON: {e}")
+        if isinstance(data, list):
+            df = pd.json_normalize(data)
+        elif isinstance(data, dict):
+            # {"records": [...]} or {"data": [...]} wrappers, else treat the
+            # dict itself as column->values.
+            for key in ("records", "data", "rows"):
+                if isinstance(data.get(key), list):
+                    df = pd.json_normalize(data[key])
+                    break
+            else:
+                df = pd.json_normalize(data)
+        else:
+            raise ValueError("This JSON file has no table to train on — "
+                             "expected an array of objects (records).")
+        if df.shape[1] == 0:
+            raise ValueError("This JSON file has no columns to train on.")
+        return df
+
+    if ext == ".parquet":
+        try:
+            return pd.read_parquet(filepath)
+        except ImportError:
+            raise ValueError("Reading .parquet files needs the 'pyarrow' "
+                             "package (pip install pyarrow).")
+
+    if ext == ".docx":
+        try:
+            import docx  # python-docx
+        except ImportError:
+            raise ValueError("Reading tables from Word .docx files needs the "
+                             "'python-docx' package (pip install python-docx).")
+        document = docx.Document(filepath)
+        if not document.tables:
+            raise ValueError("This Word document has no table to train on. "
+                             "Upload a .docx that contains a table, or use a "
+                             "CSV/Excel file.")
+        # Use the first table; first row is treated as the header.
+        table = document.tables[0]
+        rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+        if len(rows) < 2:
+            raise ValueError("The table in this Word document has no data rows "
+                             "to train on.")
+        return pd.DataFrame(rows[1:], columns=rows[0])
+
+    if ext in (".html", ".htm"):
+        # Parse <table> elements directly with BeautifulSoup (using the 'lxml'
+        # parser). We avoid pandas.read_html here because in this pandas build it
+        # pulls in the optional html5lib parser and raises a misleading
+        # ImportError on table-less pages.
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            raise ValueError("Reading tables from HTML needs the "
+                             "'beautifulsoup4' and 'lxml' packages.")
+        with open(filepath, "rb") as fh:
+            soup = BeautifulSoup(fh.read(), "lxml")
+        table = soup.find("table")
+        if table is None:
+            raise ValueError("This HTML file has no table to train on.")
+        rows = []
+        for tr in table.find_all("tr"):
+            cells = tr.find_all(["th", "td"])
+            if cells:
+                rows.append([c.get_text(strip=True) for c in cells])
+        if len(rows) < 2:
+            raise ValueError("The table in this HTML file has no data rows "
+                             "to train on.")
+        # First row is the header; pad/truncate ragged rows to header width.
+        header = rows[0]
+        width = len(header)
+        body = [(r + [""] * width)[:width] for r in rows[1:]]
+        return pd.DataFrame(body, columns=header)
+
+    # Should be unreachable — callers gate on TABULAR_EXTS.
+    raise ValueError(f"Unsupported file type '{ext}'.")
+
+
 def save_uploaded_file(file_storage):
-    """Save an uploaded file. If Excel, convert to CSV automatically."""
+    """Save an uploaded file, auto-converting tabular formats to CSV.
+
+    CSV is saved as-is (existing flow, unchanged). Every other supported format
+    (TSV, Excel, JSON, Parquet, Word/HTML tables) is loaded into a DataFrame and
+    written out as CSV so the downstream analyze/prepare pipeline keeps working.
+    """
     filename = safe_filename(file_storage.filename)
     filepath = os.path.join(UPLOAD_DIR, filename)
     file_storage.save(filepath)
 
-    # Auto-convert Excel to CSV
-    if filename.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(filepath, engine="openpyxl")
+    ext = os.path.splitext(filename)[1].lower()
+
+    # CSV: keep exactly as before.
+    if ext == ".csv":
+        return filename, filepath
+
+    if ext in TABULAR_EXTS:
+        try:
+            df = _to_dataframe(filepath, ext)
+        except Exception:
+            # Clean up the original upload on any failure so we don't leave a
+            # stray non-CSV in the uploads dir, then re-raise for the caller.
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            raise
         csv_filename = os.path.splitext(filename)[0] + ".csv"
         csv_path = os.path.join(UPLOAD_DIR, csv_filename)
         df.to_csv(csv_path, index=False)
-        os.remove(filepath)  # Remove original Excel file
+        # Remove the original non-CSV upload (unless it WAS the csv target name).
+        if os.path.exists(filepath) and filepath != csv_path:
+            os.remove(filepath)
         return csv_filename, csv_path
-    
+
     return filename, filepath
 
 
