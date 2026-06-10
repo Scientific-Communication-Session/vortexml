@@ -142,6 +142,18 @@ limiter = Limiter(
 )
 
 
+# Return JSON (not the default HTML body) for the framework errors the frontend
+# may hit, so its `{error}` toast renders instead of choking on res.json().
+@app.errorhandler(429)
+def _handle_rate_limited(e):
+    return jsonify({"error": "Too many requests — please slow down and try again shortly."}), 429
+
+
+@app.errorhandler(413)
+def _handle_too_large(e):
+    return jsonify({"error": "That upload is too large (100 MB maximum)."}), 413
+
+
 def _ensure_columns():
     """Lightweight, idempotent column migration.
 
