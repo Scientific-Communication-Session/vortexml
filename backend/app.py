@@ -212,6 +212,8 @@ def _default_state():
 
 
 _states = defaultdict(_default_state)
+# state_key -> last access epoch, so abandoned anonymous state can be evicted.
+_state_last_seen = {}
 
 
 def _state_key():
@@ -232,7 +234,9 @@ def _state_key():
 
 def _get_state():
     """The caller's working-state dict. Must run in a request context."""
-    return _states[_state_key()]
+    key = _state_key()
+    _state_last_seen[key] = time.time()
+    return _states[key]
 
 # ── Device / remote-training runtime registries (this is a single process) ──
 _nodes = {}        # device_id -> {"sid": <node socket id>}
@@ -245,6 +249,53 @@ _rag_jobs = {}     # job_id -> {citations, chunks, backend, model, room} for rem
 _rag_download_cancels = {}  # job_id -> threading.Event() for in-flight model downloads (local + remote)
 _chat_jobs = {}    # job_id -> {conversation_id, owner_user_id, citations, model, room} for remote chat turns
 _predict_jobs = {} # job_id -> {device, room} for remote neural-net inference
+
+
+# Anonymous working-state lives only in memory; without eviction every
+# not-logged-in visitor leaks a dict (and possibly an uploaded file) forever.
+_ANON_STATE_TTL = 6 * 3600  # seconds of inactivity before an anon entry is dropped
+
+
+def _active_state_keys():
+    """state_keys referenced by a running or queued job — never evict these."""
+    keys = {j.get("state_key") for j in _jobs.values()}
+    for q in _queues.values():
+        keys.update(j.get("state_key") for j in q)
+    keys.discard(None)
+    return keys
+
+
+def _evict_stale_state():
+    """Drop abandoned anonymous state (and any orphaned upload it points at).
+
+    Logged-in (`user:`) state is kept; so is any state tied to a live/queued job.
+    """
+    now = time.time()
+    active = _active_state_keys()
+    for key in list(_states.keys()):
+        if not key.startswith("anon:") or key in active:
+            continue
+        if now - _state_last_seen.get(key, 0) <= _ANON_STATE_TTL:
+            continue
+        st = _states.pop(key, None)
+        _state_last_seen.pop(key, None)
+        # Reclaim a non-shared upload file the abandoned state still referenced.
+        p = st.get("dataset_path") if st else None
+        if p and "queued_" not in os.path.basename(p) and os.path.exists(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def _state_evictor_loop():
+    """Background sweeper: prune stale anonymous state every 30 minutes."""
+    while True:
+        socketio.sleep(1800)
+        try:
+            _evict_stale_state()
+        except Exception as e:
+            logger.warning("state evictor failed: %s", e)
 
 
 def _utcnow():
@@ -3865,4 +3916,7 @@ if __name__ == "__main__":
     debug = os.environ.get("FLASK_DEBUG") == "1"
     host = os.environ.get("VORTEX_BIND", "127.0.0.1")
     port = int(os.environ.get("VORTEX_PORT", "5050"))
+    # Periodically prune abandoned anonymous working-state so memory doesn't
+    # grow without bound on a long-running public instance.
+    socketio.start_background_task(_state_evictor_loop)
     socketio.run(app, host=host, port=port, debug=debug)
