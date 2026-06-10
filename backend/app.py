@@ -880,13 +880,10 @@ def download_weights_file(filename):
     if not os.path.exists(filepath):
         return jsonify({"error": "Weights file not found on disk"}), 404
 
-    with open(filepath, "rb") as f:
-        data = f.read()
-    response = make_response(data)
-    response.headers["Content-Type"] = "application/octet-stream"
-    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    response.headers["Content-Length"] = len(data)
-    return response
+    # Stream from disk rather than buffering the whole file in memory — a large
+    # weights file would otherwise double peak memory and stall the event loop.
+    return send_file(filepath, mimetype="application/octet-stream",
+                     as_attachment=True, download_name=filename)
 
 
 @app.route("/api/weights/upload", methods=["POST"])
@@ -1144,7 +1141,15 @@ def predict_project(project_id):
         try:
             import pandas as pd
             if f.filename.lower().endswith(".csv"):
-                df = pd.read_csv(f)
+                # Match the dataset pipeline's robust read: many real-world CSVs
+                # (Excel exports) are Windows-1252/Latin-1, not UTF-8, so a strict
+                # read would 400 on a file that trained fine. Latin-1 maps all 256
+                # byte values and never fails to decode.
+                data = f.read()
+                try:
+                    df = pd.read_csv(io.BytesIO(data))
+                except UnicodeDecodeError:
+                    df = pd.read_csv(io.BytesIO(data), encoding="latin-1")
             else:
                 df = pd.read_excel(f, engine="openpyxl")
             rows = df.to_dict(orient="records")
