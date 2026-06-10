@@ -176,7 +176,6 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 @app.context_processor
 def inject_cache_buster():
-    import time
     return {"cache_version": int(time.time())}
 
 # `max_http_buffer_size` is bumped so node agents can ship datasets and
@@ -2726,23 +2725,8 @@ def chat():
     if not isinstance(raw_messages, list) or not raw_messages:
         return jsonify({"error": "messages array required"}), 400
 
-    # Sanitise + cap incoming messages.
-    cleaned = []
-    for m in raw_messages[-_CHAT_MAX_HISTORY:]:
-        if not isinstance(m, dict):
-            continue
-        role = m.get("role")
-        content = m.get("content")
-        if role not in ("user", "assistant"):
-            continue
-        if not isinstance(content, str):
-            continue
-        content = content.strip()
-        if not content:
-            continue
-        if len(content) > _CHAT_MAX_MESSAGE_CHARS:
-            content = content[:_CHAT_MAX_MESSAGE_CHARS]
-        cleaned.append({"role": role, "content": content})
+    # Sanitise + cap incoming messages (shared with the auto-config bots).
+    cleaned = _sanitize_chat_messages(raw_messages)
 
     if not cleaned or cleaned[0]["role"] != "user":
         return jsonify({"error": "First message must be from the user."}), 400
