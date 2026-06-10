@@ -53,23 +53,94 @@ _run_blocking = tpool.execute
 from models import (db, User, Project, Device, KnowledgeBase, Document,
                     Conversation, ChatMessage)
 
-app = Flask(__name__)
-# Enable CORS with credentials support for session cookies pointing to the frontend
-CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://127.0.0.1:5173"])
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("vortex")
 
-app.secret_key = "vortex-ml-secret-key-2026"
+
+def _internal_error(context, exc, status=500, public_msg=None):
+    """Log the full exception server-side and return a generic client error.
+
+    Avoids leaking internal exception text (stack details, paths, library
+    internals) to the browser while keeping the real cause in the logs.
+    """
+    logger.exception("%s: %s", context, exc)
+    return jsonify({"error": public_msg or "Something went wrong on the server. "
+                    "Please try again."}), status
+
+
+app = Flask(__name__)
+
+# ── Allowed web origins (CORS + SocketIO) ─────────────────
+# The frontends that may talk to this API. Extra origins can be added via the
+# comma-separated VORTEX_ALLOWED_ORIGINS env var (e.g. the production tunnel).
+_DEFAULT_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+_extra_origins = [o.strip() for o in
+                  os.environ.get("VORTEX_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+# The public tunnel URL is a legitimate browser origin too.
+_public_origin = os.environ.get("VORTEX_PUBLIC_URL", "https://vortexml.andreinita.com")
+ALLOWED_ORIGINS = list(dict.fromkeys(_DEFAULT_ORIGINS + _extra_origins + [_public_origin]))
+
+# Enable CORS with credentials support for session cookies pointing to the frontend
+CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
+
+# Session signing key. MUST come from the environment in any real deployment —
+# a hardcoded key lets anyone forge a session cookie for any account. In dev we
+# fall back to a random per-process key (sessions won't survive a restart).
+app.secret_key = os.environ.get("VORTEX_SECRET_KEY")
+if not app.secret_key:
+    if os.environ.get("FLASK_ENV") == "production":
+        raise RuntimeError(
+            "VORTEX_SECRET_KEY must be set in production (see .env.example).")
+    app.secret_key = secrets.token_hex(32)
+    print("[security] VORTEX_SECRET_KEY not set — using an ephemeral dev key; "
+          "sessions will reset on restart.")
+
+# Harden the session cookie. SECURE is opt-in (off for local HTTP dev) and must
+# be enabled in production behind HTTPS via VORTEX_COOKIE_SECURE=1.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("VORTEX_COOKIE_SECURE", "0") == "1",
+)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB max upload
 
-# Database configuration — use SQLite fallback when PostgreSQL is unavailable
-if os.environ.get("VORTEX_USE_SQLITE") == "1" or os.environ.get("SQLALCHEMY_DATABASE_URI"):
-    _db_uri = os.environ.get("SQLALCHEMY_DATABASE_URI",
-        "sqlite:///" + os.path.join(os.path.dirname(__file__), "vortex.db"))
-    app.config['SQLALCHEMY_DATABASE_URI'] = _db_uri
-else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://andrei:2006@localhost:5432/vortex_db'
+# Database configuration. Order of precedence:
+#   1. SQLALCHEMY_DATABASE_URI / VORTEX_DATABASE_URL from the environment
+#   2. SQLite fallback under backend/ — no credentials are ever hardcoded here.
+# Point VORTEX_DATABASE_URL at PostgreSQL in deployment; start.sh sets
+# VORTEX_USE_SQLITE when Postgres is unreachable so this falls through to SQLite.
+_db_uri = (os.environ.get("SQLALCHEMY_DATABASE_URI")
+           or os.environ.get("VORTEX_DATABASE_URL"))
+if not _db_uri:
+    _db_uri = "sqlite:///" + os.path.join(os.path.dirname(__file__), "vortex.db")
+app.config['SQLALCHEMY_DATABASE_URI'] = _db_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
+
+# ── Rate limiting ─────────────────────────────────────────
+# Guards auth endpoints against brute force and the paid-LLM endpoints against
+# cost abuse. Identity is the logged-in user when available, else the client IP.
+# In-memory storage is fine for this single-process eventlet server; point
+# RATELIMIT_STORAGE_URI at Redis if this is ever horizontally scaled.
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+
+def _rate_key():
+    uid = session.get("user_id")
+    return f"user:{uid}" if uid else get_remote_address()
+
+
+limiter = Limiter(
+    key_func=_rate_key,
+    app=app,
+    default_limits=[],  # opt-in per route; no blanket limit
+    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+    headers_enabled=True,
+)
+
 
 def _ensure_columns():
     """Lightweight, idempotent column migration.
@@ -110,7 +181,7 @@ def inject_cache_buster():
 
 # `max_http_buffer_size` is bumped so node agents can ship datasets and
 # trained weights to/from the server as base64 payloads over the socket.
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet",
+socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS, async_mode="eventlet",
                     max_http_buffer_size=100 * 1024 * 1024)
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
@@ -194,6 +265,7 @@ def index():
 # ─────────────────────────────────────────────────────────
 
 @app.route("/api/auth/signup", methods=["POST"])
+@limiter.limit("10 per hour", key_func=get_remote_address)
 def signup():
     data = request.get_json(silent=True) or {}
     email = data.get("email")
@@ -222,6 +294,7 @@ def signup():
 
 
 @app.route("/api/auth/signin", methods=["POST"])
+@limiter.limit("10 per minute; 50 per hour", key_func=get_remote_address)
 def signin():
     data = request.get_json(silent=True) or {}
     email = data.get("email")
@@ -401,7 +474,8 @@ def dataset_health_route():
     try:
         result = dataset_health(st["dataset_path"], feature_cols, target_col)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _internal_error("dataset_health failed", e,
+                               public_msg="Could not analyze this dataset.")
     return jsonify(result)
 
 
@@ -1085,7 +1159,8 @@ def predict_project(project_id):
         out = predict(model, X, pp["task_type"])
         elapsed = time.time() - t0
     except Exception as e:
-        return jsonify({"error": f"Prediction failed: {e}"}), 500
+        return _internal_error("inference failed", e,
+                               public_msg="Prediction failed — check the input rows and try again.")
 
     from training_engine import format_predictions, evaluate_predictions
     predictions = format_predictions(pp, out)
@@ -1457,6 +1532,7 @@ def rag_delete_model(device_id):
 
 
 @app.route("/api/rag/kb/<int:kb_id>/query", methods=["POST"])
+@limiter.limit("30 per minute")
 def query_kb(kb_id):
     """Retrieve-then-generate against a knowledge base, on the chosen device.
 
@@ -1526,7 +1602,8 @@ def query_kb(kb_id):
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 409  # backend not available
     except Exception as e:
-        return jsonify({"error": f"Generation failed: {e}"}), 500
+        return _internal_error("RAG generation failed", e,
+                               public_msg="Generation failed — please try again.")
     finally:
         monitor.stop()
     result["mode"] = "local"
@@ -1739,6 +1816,7 @@ def _dispatch_chat(conv, user, messages, citations, socket_id, temperature):
 
 
 @app.route("/api/conversations/<int:conv_id>/message", methods=["POST"])
+@limiter.limit("30 per minute")
 def send_message(conv_id):
     """Add a user message and stream the assistant reply."""
     user, err = _require_user()
@@ -1769,6 +1847,7 @@ def send_message(conv_id):
 
 
 @app.route("/api/conversations/<int:conv_id>/regenerate", methods=["POST"])
+@limiter.limit("30 per minute")
 def regenerate_message(conv_id):
     """Drop the last assistant reply and generate a fresh one for the same
     last user turn."""
@@ -2182,9 +2261,18 @@ def download_agent(device_id):
 # ── Node-agent SocketIO protocol ──────────────────────────
 @socketio.on("subscribe_job")
 def on_subscribe_job(data):
-    """A browser asks to receive a specific job's live events."""
+    """A browser asks to receive a specific job's live events.
+
+    Only the job's owner may join its room — otherwise any connected client
+    could subscribe to another user's training stream by guessing a job id.
+    """
     job_id = (data or {}).get("job_id")
-    if job_id:
+    if not job_id:
+        return
+    job = _jobs.get(job_id)
+    # Allow the join only if the caller's working-state key matches the job's
+    # owner. Unknown jobs (not yet started / already finished) are refused.
+    if job is not None and job.get("state_key") == _state_key():
         join_room(f"job:{job_id}")
 
 
@@ -2541,6 +2629,7 @@ def chat_status():
 
 
 @app.route("/api/chat", methods=["POST"])
+@limiter.limit("30 per minute")
 def chat():
     user, err = _require_user()
     if err:
@@ -2605,7 +2694,8 @@ def chat():
     except anthropic.APIError as e:
         return jsonify({"error": f"Chatbot error: {e}"}), 502
     except Exception as e:
-        return jsonify({"error": f"Chatbot error: {e}"}), 500
+        return _internal_error("chatbot call failed", e,
+                               public_msg="Chatbot error — please try again.")
 
     text = ""
     for block in resp.content:
@@ -2901,6 +2991,7 @@ def auto_config_status():
 
 
 @app.route("/api/auto-config/chat", methods=["POST"])
+@limiter.limit("30 per minute")
 def auto_config_chat():
     user, err = _require_user()
     if err:
@@ -2945,7 +3036,8 @@ def auto_config_chat():
     except anthropic.APIError as e:
         return jsonify({"error": f"Auto-Configure error: {e}"}), 502
     except Exception as e:
-        return jsonify({"error": f"Auto-Configure error: {e}"}), 500
+        return _internal_error("auto-configure call failed", e,
+                               public_msg="Auto-Configure error — please try again.")
 
     text = ""
     for block in resp.content:
@@ -2956,6 +3048,7 @@ def auto_config_chat():
 
 
 @app.route("/api/auto-config/decide", methods=["POST"])
+@limiter.limit("10 per minute")
 def auto_config_decide():
     user, err = _require_user()
     if err:
@@ -3032,7 +3125,8 @@ def auto_config_decide():
     except anthropic.APIError as e:
         return jsonify({"error": f"Auto-Configure error: {e}"}), 502
     except Exception as e:
-        return jsonify({"error": f"Auto-Configure error: {e}"}), 500
+        return _internal_error("auto-configure call failed", e,
+                               public_msg="Auto-Configure error — please try again.")
 
     config = None
     for block in resp.content:
@@ -3104,6 +3198,7 @@ def _summarize_run(name, cfg, task_type, history, final):
 
 
 @app.route("/api/explain-results", methods=["POST"])
+@limiter.limit("20 per minute")
 def explain_results():
     """Plain-English verdict on a finished run. Accepts either {project_id}
     (loads a saved project) or the just-finished run's {config, history,
@@ -3169,7 +3264,8 @@ def explain_results():
     except anthropic.APIError as e:
         return jsonify({"error": f"Explain error: {e}"}), 502
     except Exception as e:
-        return jsonify({"error": f"Explain error: {e}"}), 500
+        return _internal_error("explain-results call failed", e,
+                               public_msg="Explain error — please try again.")
 
     text = ""
     for block in resp.content:
@@ -3762,4 +3858,11 @@ def on_disconnect():
 # Run
 # ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5050, debug=True)
+    # Debug mode exposes the Werkzeug debugger (arbitrary code execution on an
+    # unhandled error) and must stay OFF unless explicitly opted in. Likewise,
+    # bind to localhost by default and let a reverse proxy / tunnel own any
+    # public exposure; override with VORTEX_BIND=0.0.0.0 when that's intended.
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    host = os.environ.get("VORTEX_BIND", "127.0.0.1")
+    port = int(os.environ.get("VORTEX_PORT", "5050"))
+    socketio.run(app, host=host, port=port, debug=debug)

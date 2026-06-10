@@ -123,28 +123,33 @@ info "Installing Python dependencies (this may take a while on first run)…"
 ok "Python dependencies installed."
 
 # ── Check database connectivity ─────────────────────────
-# Retry briefly: when launched as a boot service, PostgreSQL's own launchd
-# job may still be starting up — don't fall back to SQLite prematurely.
-info "Checking PostgreSQL connectivity…"
-PG_REACHABLE=0
-for _ in $(seq 1 12); do
-    if $PYTHON -c "import psycopg2; psycopg2.connect('postgresql://andrei:2006@localhost:5432/vortex_db').close()" 2>/dev/null; then
-        PG_REACHABLE=1
-        break
-    fi
-    sleep 1
-done
-if [ "$PG_REACHABLE" -eq 1 ]; then
-    ok "PostgreSQL is reachable."
-else
-    warn "PostgreSQL is not reachable — switching backend to SQLite."
-    warn "Auth features will use a local SQLite database (backend/vortex.db)."
-
-    # Patch the database URI in app.py for this session via env var
-    export SQLALCHEMY_DATABASE_URI="sqlite:///$BACKEND_DIR/vortex.db"
-
-    # Create a tiny wrapper so app.py picks up the env var
+# The full database URL (with credentials) is read from .env as
+# VORTEX_DATABASE_URL — never hardcoded here. If it's unset, skip Postgres
+# entirely and use SQLite. Retry briefly: when launched as a boot service,
+# PostgreSQL's own launchd job may still be starting up.
+if [ -z "${VORTEX_DATABASE_URL:-}" ]; then
+    info "VORTEX_DATABASE_URL not set — using local SQLite (backend/vortex.db)."
     export VORTEX_USE_SQLITE=1
+else
+    info "Checking PostgreSQL connectivity…"
+    PG_REACHABLE=0
+    for _ in $(seq 1 12); do
+        if VORTEX_DATABASE_URL="$VORTEX_DATABASE_URL" $PYTHON -c \
+            "import os, psycopg2; psycopg2.connect(os.environ['VORTEX_DATABASE_URL']).close()" 2>/dev/null; then
+            PG_REACHABLE=1
+            break
+        fi
+        sleep 1
+    done
+    if [ "$PG_REACHABLE" -eq 1 ]; then
+        ok "PostgreSQL is reachable."
+    else
+        warn "PostgreSQL is not reachable — switching backend to SQLite."
+        warn "Auth features will use a local SQLite database (backend/vortex.db)."
+        # Force SQLite for this session; app.py falls back when no DB URL is set.
+        unset VORTEX_DATABASE_URL
+        export VORTEX_USE_SQLITE=1
+    fi
 fi
 
 echo ""

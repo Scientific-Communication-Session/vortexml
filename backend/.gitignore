@@ -215,3 +215,7 @@ uploads/
 weights/
 test_data.csv
 *.pt
+
+# Local SQLite database — never commit (holds password hashes + device tokens)
+*.db
+vortex.db

@@ -247,3 +247,7 @@ uploads/
 weights/
 test_data.csv
 *.pt
+
+# SQLite databases
+*.db
+backend/vortex.db
