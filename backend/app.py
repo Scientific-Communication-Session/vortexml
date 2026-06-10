@@ -729,13 +729,16 @@ def start_training():
                         "device": device.to_dict()})
 
     if device.is_shared:
+        # Returns immediately; dataset prep + training run in the background and
+        # stream `training_info` / `training_update` over the job's socket room.
         try:
-            training_info = _start_local_job(job)
+            _start_local_job(job)
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            return _internal_error("failed to start local training", e,
+                                   public_msg="Could not start training.")
         st["training_thread"] = True
         return jsonify({"status": "started", "job_id": job_id, "mode": "local",
-                        "device": device.to_dict(), "info": training_info})
+                        "device": device.to_dict()})
 
     # ── Remote training on the user's own node ──
     node = _nodes.get(device.id)
@@ -2019,40 +2022,63 @@ def _delete_job_snapshot(job):
 
 
 def _start_local_job(job):
-    """Begin a local (shared-M4) run NOW. Raises on setup error so the immediate
-    caller can return 500; the queue drainer catches and reports to the room."""
+    """Begin a local (shared-M4) run.
+
+    The device is reserved synchronously so concurrent starts / the queue drainer
+    see it as busy, but the heavy dataset prep (CSV read, split, scaling) and the
+    training loop run in a background task — and prep is offloaded to a real OS
+    thread via `_run_blocking` so a large dataset never stalls the single eventlet
+    hub that also streams everyone else's training/chat updates. Setup errors are
+    reported to the job room rather than raised, and `training_info` is emitted
+    once prep completes (the frontend builds its visualisation from that event).
+    """
     config = job["config"]
-    data = prepare_dataset(job["dataset_path"], job["feature_cols"],
-                           job["target_col"], batch_size=config["batch_size"])
-    model = create_model(config["arch_type"], config["layer_sizes"],
-                         data["input_dim"], data["output_dim"],
-                         activation=config.get("activation", "relu"))
-    torch_device = get_torch_device()
     room = job["room"]
     state_key = job["state_key"]
     owner_user_id = job["owner_user_id"]
     ds_path = job["dataset_path"]
     job_id = job["job_id"]
 
-    training_info = {
-        "arch_type": config["arch_type"],
-        "layer_sizes": config["layer_sizes"],
-        "input_dim": data["input_dim"],
-        "output_dim": data["output_dim"],
-        "task_type": data["task_type"],
-        "train_size": data["train_size"],
-        "val_size": data["val_size"],
-        "test_size": data["test_size"],
-        "epochs": config["epochs"],
-        "early_stopping": config.get("early_stopping", {}),
-        "device": str(torch_device),
-    }
-
+    # Reserve the device up front, before any blocking work, so the queueing
+    # logic and any concurrent request observe it as occupied immediately.
     job["started_at"] = _utcnow().isoformat() + "Z"
     _jobs[job_id] = job
     _device_busy[job["device_id"]] = job_id
 
     def run():
+        # ── Dataset prep + model build off the event loop (real thread) ──
+        try:
+            data = _run_blocking(prepare_dataset, ds_path, job["feature_cols"],
+                                 job["target_col"], batch_size=config["batch_size"])
+            model = _run_blocking(create_model, config["arch_type"],
+                                  config["layer_sizes"], data["input_dim"],
+                                  data["output_dim"],
+                                  activation=config.get("activation", "relu"))
+            torch_device = get_torch_device()
+        except Exception as e:
+            # Prep failure: free the device and (for a queued run) drop its
+            # private snapshot, but leave the user's live dataset intact so they
+            # can fix the selection and retry.
+            socketio.emit("training_error",
+                          {"message": f"Could not prepare the dataset: {e}"}, room=room)
+            _finish_job(job_id)
+            _delete_job_snapshot(job)
+            return
+
+        socketio.emit("training_info", {
+            "arch_type": config["arch_type"],
+            "layer_sizes": config["layer_sizes"],
+            "input_dim": data["input_dim"],
+            "output_dim": data["output_dim"],
+            "task_type": data["task_type"],
+            "train_size": data["train_size"],
+            "val_size": data["val_size"],
+            "test_size": data["test_size"],
+            "epochs": config["epochs"],
+            "early_stopping": config.get("early_stopping", {}),
+            "device": str(torch_device),
+        }, room=room)
+
         monitor = SystemMonitor(
             emit_fn=lambda s: socketio.emit("system_stats", s, room=room),
             sleep_fn=socketio.sleep, run_blocking=_run_blocking,
@@ -2081,9 +2107,7 @@ def _start_local_job(job):
         _finish_job(job_id)
         _cleanup_dataset(state_key, ds_path)
 
-    socketio.emit("training_info", training_info, room=room)
     socketio.start_background_task(run)
-    return training_info
 
 
 def _start_remote_job(job, node_sid):
