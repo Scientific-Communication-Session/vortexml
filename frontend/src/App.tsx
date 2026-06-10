@@ -1,22 +1,26 @@
-import React from 'react';
+import React, { lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
-import Home from './pages/Home';
-import Dataset from './pages/Dataset';
-import Architect from './pages/Architect';
-import Training from './pages/Training';
-import Leaderboard from './pages/Leaderboard';
-import Playground from './pages/Playground';
-import Rag from './pages/Rag';
-import Chat from './pages/Chat';
-import Courses from './pages/Courses';
-import CourseDetail from './pages/CourseDetail';
-import Learn from './pages/Learn';
-import Signin from './pages/Signin';
-import Signup from './pages/Signup';
-import Survey from './pages/Survey';
-import Profile from './pages/Profile';
 import { AuthProvider } from './context/AuthContext';
+
+// Code-split each page into its own chunk so the initial load doesn't ship the
+// whole app (chart.js, KaTeX, react-markdown, etc.) up front. The Suspense
+// boundary lives in Layout, around the routed <Outlet />.
+const Home = lazy(() => import('./pages/Home'));
+const Dataset = lazy(() => import('./pages/Dataset'));
+const Architect = lazy(() => import('./pages/Architect'));
+const Training = lazy(() => import('./pages/Training'));
+const Leaderboard = lazy(() => import('./pages/Leaderboard'));
+const Playground = lazy(() => import('./pages/Playground'));
+const Rag = lazy(() => import('./pages/Rag'));
+const Chat = lazy(() => import('./pages/Chat'));
+const Courses = lazy(() => import('./pages/Courses'));
+const CourseDetail = lazy(() => import('./pages/CourseDetail'));
+const Learn = lazy(() => import('./pages/Learn'));
+const Signin = lazy(() => import('./pages/Signin'));
+const Signup = lazy(() => import('./pages/Signup'));
+const Survey = lazy(() => import('./pages/Survey'));
+const Profile = lazy(() => import('./pages/Profile'));
 
 const App: React.FC = () => {
   return (

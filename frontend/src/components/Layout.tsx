@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Footer from './Footer';
@@ -152,7 +152,15 @@ const Layout: React.FC = () => {
 
             <ChatProvider>
                 <main className={isFullBleed ? 'flex-grow relative' : 'main-content flex-grow'}>
-                    <Outlet />
+                    {/* Pages are code-split (React.lazy); keep the chrome visible
+                        while a route's chunk loads. */}
+                    <Suspense fallback={
+                        <div className="flex items-center justify-center min-h-[60vh] text-white/50 text-sm">
+                            Loading…
+                        </div>
+                    }>
+                        <Outlet />
+                    </Suspense>
                 </main>
                 <ChatDrawer />
                 <ChatButton />
