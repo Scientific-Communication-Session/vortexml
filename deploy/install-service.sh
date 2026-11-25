@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
-#  VortexML — install as a launchd service (macOS).
+#  VortexML — install as a launchd (macOS) or systemd user (Linux) service.
 #
 #  launchd is macOS's equivalent of Linux systemd. This installs a
 #  LaunchAgent so VortexML starts automatically and is kept alive
@@ -9,6 +9,49 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ── Linux: systemd user service ─────────────────────────
+# Same behaviour as the launchd agent below: start on boot/login and restart
+# if it ever exits. Lingering (enabled once with sudo) lets the user manager,
+# and so VortexML, start at boot without anyone logging in.
+if [ "$(uname -s)" = "Linux" ]; then
+    UNIT_DIR="$HOME/.config/systemd/user"
+    UNIT="$UNIT_DIR/vortexml.service"
+    mkdir -p "$UNIT_DIR" "$ROOT/logs"
+    echo "Writing systemd user unit → $UNIT"
+    cat > "$UNIT" <<EOF
+[Unit]
+Description=VortexML server (Flask backend :5050 + Vite frontend :5173)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=$ROOT
+Environment=PATH=$PATH
+ExecStart=/bin/bash $ROOT/start.sh
+Restart=always
+RestartSec=15
+KillMode=control-group
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload
+    systemctl --user enable vortexml.service
+    systemctl --user restart vortexml.service
+    echo ""
+    echo "✓ VortexML service installed and started (vortexml.service)."
+    if [ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]; then
+        echo "  ⚠ Lingering is off, so it only starts once you log in. To start"
+        echo "    it at boot:  sudo loginctl enable-linger $USER"
+    fi
+    echo ""
+    echo "  status :  systemctl --user status vortexml"
+    echo "  logs   :  journalctl --user -u vortexml -f"
+    echo "  restart:  systemctl --user restart vortexml"
+    echo "  remove :  bash deploy/uninstall-service.sh"
+    exit 0
+fi
 LABEL="com.vortexml.server"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOGDIR="$ROOT/logs"

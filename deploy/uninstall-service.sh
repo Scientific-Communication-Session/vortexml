@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
-#  VortexML — remove the launchd service (macOS).
+#  VortexML — remove the launchd (macOS) or systemd user (Linux) service.
 #  Run with:  bash deploy/uninstall-service.sh
 # ─────────────────────────────────────────────────────────
 LABEL="com.vortexml.server"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
+
+if [ "$(uname -s)" = "Linux" ]; then
+    echo "Stopping + disabling vortexml.service…"
+    systemctl --user disable --now vortexml.service 2>/dev/null || true
+    rm -f "$HOME/.config/systemd/user/vortexml.service"
+    systemctl --user daemon-reload
+    echo "✓ VortexML service removed. It will no longer start automatically."
+    exit 0
+fi
 
 echo "Stopping + unloading $LABEL…"
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
