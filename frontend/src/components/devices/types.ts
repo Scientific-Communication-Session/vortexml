@@ -33,4 +33,6 @@ export interface Device {
     online: boolean;
     status: DeviceStatus;
     job: DeviceJob | null;
+    /** Runs waiting behind the one currently training. */
+    queue_length?: number;
 }

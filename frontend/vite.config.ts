@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Where the Flask backend lives. Override (e.g. VORTEX_BACKEND_URL=http://127.0.0.1:5051)
+// to run a second dev instance next to the live one.
+const backend = process.env.VORTEX_BACKEND_URL || 'http://127.0.0.1:5050'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -12,9 +16,9 @@ export default defineConfig({
     // so vortexml.andreinita.com (and any future subdomain) is accepted.
     allowedHosts: ['.andreinita.com', 'localhost', '127.0.0.1'],
     proxy: {
-      '/api': 'http://127.0.0.1:5050',
+      '/api': backend,
       '/socket.io': {
-        target: 'http://127.0.0.1:5050',
+        target: backend,
         ws: true
       }
     }

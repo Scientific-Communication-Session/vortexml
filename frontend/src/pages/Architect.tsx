@@ -41,6 +41,48 @@ interface SavedProject {
     final_val_acc: number | null;
 }
 
+interface NumericInputProps {
+    value: number;
+    onValue: (v: number) => void;
+    parse: (text: string) => number;
+    valid: (v: number) => boolean;
+    min?: string;
+    max?: string;
+    step?: string;
+}
+
+/**
+ * A number field you can actually type in. The text is kept as typed — so the
+ * "0" and "0." on the way to "0.005", or an empty box while replacing a value,
+ * aren't snapped back to a default mid-keystroke — and the parsed number is
+ * only handed up once it is valid. Leaving the field restores the last valid
+ * value.
+ */
+const NumericInput: React.FC<NumericInputProps> = ({ value, onValue, parse, valid, ...rest }) => {
+    const [text, setText] = useState(String(value));
+
+    // Follow changes made elsewhere (loading a saved model, AI Auto-Configure).
+    useEffect(() => {
+        setText((t) => (parse(t) === value ? t : String(value)));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [value]);
+
+    return (
+        <input
+            type="number"
+            className="form-input"
+            {...rest}
+            value={text}
+            onChange={(e) => {
+                setText(e.target.value);
+                const v = parse(e.target.value);
+                if (Number.isFinite(v) && valid(v)) onValue(v);
+            }}
+            onBlur={() => setText(String(value))}
+        />
+    );
+};
+
 const Architect: React.FC = () => {
     const navigate = useNavigate();
     const { user } = useAuth();
@@ -649,11 +691,13 @@ const Architect: React.FC = () => {
                         <div className="form-row">
                             <div className="form-group">
                                 <label className="form-label">Epochs <HelpButton topic="epochs" /><AskButton topic="epochs" /></label>
-                                <input type="number" min="1" max="100000" step="1" className="form-input" value={epochs} onChange={e => { const v = parseInt(e.target.value); setEpochs(Number.isFinite(v) && v >= 1 ? v : 1); }} />
+                                <NumericInput min="1" max="100000" step="1" value={epochs} onValue={setEpochs}
+                                    parse={(t) => parseInt(t, 10)} valid={(v) => v >= 1} />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Learning Rate <HelpButton topic="learning_rate" /><AskButton topic="learning_rate" /></label>
-                                <input type="number" min="0.000001" max="10" className="form-input" step="0.0001" value={lr} onChange={e => { const v = parseFloat(e.target.value); setLr(Number.isFinite(v) && v > 0 ? v : 0.001); }} />
+                                <NumericInput min="0.000001" max="10" step="0.0001" value={lr} onValue={setLr}
+                                    parse={parseFloat} valid={(v) => v > 0} />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Batch Size <HelpButton topic="batch_size" /><AskButton topic="batch_size" /></label>

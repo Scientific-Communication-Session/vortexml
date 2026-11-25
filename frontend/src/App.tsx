@@ -7,6 +7,8 @@ import { AuthProvider } from './context/AuthContext';
 // whole app (chart.js, KaTeX, react-markdown, etc.) up front. The Suspense
 // boundary lives in Layout, around the routed <Outlet />.
 const Home = lazy(() => import('./pages/Home'));
+const Demo = lazy(() => import('./pages/Demo'));
+const Tutorial = lazy(() => import('./pages/Tutorial'));
 const Dataset = lazy(() => import('./pages/Dataset'));
 const Architect = lazy(() => import('./pages/Architect'));
 const Training = lazy(() => import('./pages/Training'));
@@ -32,6 +34,8 @@ const App: React.FC = () => {
           <Route path="signup" element={<Signup />} />
           <Route path="survey" element={<Survey />} />
           <Route path="profile" element={<Profile />} />
+          <Route path="demo" element={<Demo />} />
+          <Route path="tutorial" element={<Tutorial />} />
           <Route path="learn" element={<Learn />} />
           <Route path="courses" element={<Courses />} />
           <Route path="courses/:id" element={<CourseDetail />} />

@@ -1,7 +1,10 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { Trophy } from 'lucide-react';
+import { useTrainingSession } from '../context/TrainingSessionContext';
 
 const Footer: React.FC = () => {
+    const { openEnterprise } = useTrainingSession();
     return (
         <footer className="relative z-10 w-full border-t border-white/10 bg-[#04040a]">
             {/* Top hairline accent */}
@@ -21,12 +24,20 @@ const Footer: React.FC = () => {
                             <em className="font-display italic font-normal text-text-primary">train</em>{' '}
                             models without extreme complexity.
                         </p>
+                        <p className="mt-5 flex items-start gap-2 text-[12.5px] leading-[1.5] text-amber-200/80 max-w-xs">
+                            <Trophy className="mt-[2px] h-[14px] w-[14px] shrink-0" strokeWidth={1.8} />
+                            <span>
+                                1st place, Scientific Communication Session 2026 —
+                                Politehnica University of Bucharest
+                            </span>
+                        </p>
                     </div>
 
                     {[
                         {
                             title: 'Product',
                             links: [
+                                { to: '/demo', label: 'Live Demo' },
                                 { to: '/architect', label: 'Architect Builder' },
                                 { to: '/dataset', label: 'Dataset Processing' },
                                 { to: '/training', label: 'Live Training' },
@@ -35,8 +46,8 @@ const Footer: React.FC = () => {
                         {
                             title: 'Resources',
                             links: [
+                                { to: '/tutorial', label: 'Tutorial' },
                                 { to: '/courses', label: 'ML Courses' },
-                                { to: '#', label: 'Documentation' },
                                 { to: '#', label: 'Community' },
                             ],
                         },
@@ -45,7 +56,7 @@ const Footer: React.FC = () => {
                             links: [
                                 { to: '#', label: 'About Us' },
                                 { to: '#', label: 'Blog' },
-                                { to: '#', label: 'Contact' },
+                                { to: 'sales', label: 'Contact Sales' },
                             ],
                         },
                     ].map((col) => (
@@ -63,6 +74,16 @@ const Footer: React.FC = () => {
                                             >
                                                 {l.label}
                                             </Link>
+                                        </li>
+                                    ) : l.to === 'sales' ? (
+                                        <li key={l.label}>
+                                            <button
+                                                type="button"
+                                                onClick={openEnterprise}
+                                                className="p-0 border-0 bg-transparent cursor-pointer font-[inherit] text-[13.5px] text-text-secondary hover:text-white transition-colors duration-300 tracking-[-0.003em]"
+                                            >
+                                                {l.label}
+                                            </button>
                                         </li>
                                     ) : (
                                         <li key={l.label}>

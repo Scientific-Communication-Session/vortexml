@@ -166,6 +166,75 @@ You can exercise the whole remote path on one machine — no tunnel needed:
 
 5. The device appears as Available; pick it on the Training page and train.
 
+## Background sessions, the queue and the demo
+
+**Runs belong to the server, not to a browser tab.** Starting a run returns
+immediately; the job trains in the background and records everything it emits
+(model info, every epoch, recent hardware samples). Any browser that belongs to
+the same account — or, for visitors without an account, the same browser — can
+ask what is going on and re-attach:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/training/active` | The caller's running + queued runs, and their last finished run (kept 24 h). Polled by every page. |
+| `POST /api/training/jobs/<id>/attach` | Join the run's socket room and get a snapshot to redraw it from the first epoch. |
+| `DELETE /api/training/queue/<id>` | Leave the queue. |
+| `POST /api/training/stop` | Stop a run (owner only). |
+
+In the UI this is the **Training n%** pill in the navbar, the **Welcome back**
+prompt shown when a tab discovers a run it did not start, and the Training
+dashboard restoring the full curve.
+
+**The queue.** Each device trains one model at a time; further runs wait in a
+FIFO queue per device and start on their own. The shared Mac mini is the free
+tier, so this is where queueing happens — a personal node only ever runs its
+owner's jobs. Queued runs keep a private copy of their dataset.
+
+**Limits to know about**
+
+- Jobs, queues and the replay buffers live in the server process's memory.
+  **Restarting the service ends any run in progress and empties the queue** —
+  check `GET /api/devices` (or the Training page) is idle before deploying.
+- Following a run from a *different* browser requires an account. An anonymous
+  visitor's runs are tied to their session cookie.
+
+**Demo + tutorial data.** `sample-data/` holds the datasets served by
+`/api/demo/*` (see `sample-data/README.md`). The Demo page trains on the shared
+device through the normal queue, so demo visitors and real users wait in the
+same line.
+
+**Sales enquiries.** The "Talk to sales" form stores rows in the
+`sales_inquiries` table (`POST /api/sales/contact`, rate-limited to 5/hour per
+caller). Nothing is emailed — read them from the database, e.g.
+
+```sh
+sqlite3 backend/vortex.db "SELECT created_at, name, email, company, interest, message FROM sales_inquiries ORDER BY id DESC;"
+```
+
+**Tutorial recordings.** The GIFs under `frontend/public/tutorial/` are
+captured from the running app by `tools/tutorial-recorder` (headless Chromium
++ ffmpeg). Re-record after a UI change:
+
+```sh
+cd tools/tutorial-recorder && npm install
+VORTEX_URL=http://127.0.0.1:5173 node record.mjs
+```
+
+The AI Auto-Configure clip is only recorded when the server has
+`ANTHROPIC_API_KEY` set (`node record.mjs --only autoconfig`); the Tutorial page
+shows it automatically once `03-autoconfig.gif` exists.
+
+**A second instance for development.** To work on the app without touching the
+live one, run a copy on other ports:
+
+```sh
+# backend (own database, own port)
+VORTEX_PORT=5051 SQLALCHEMY_DATABASE_URI=sqlite:////tmp/vortex-dev.db \
+VORTEX_ALLOWED_ORIGINS=http://127.0.0.1:5174 backend/venv/bin/python backend/app.py
+# frontend, proxied to it
+cd frontend && VORTEX_BACKEND_URL=http://127.0.0.1:5051 npx vite --port 5174 --host 127.0.0.1
+```
+
 ## Notes / limitations
 
 - The dataset + model configuration still use a single in-memory session on
@@ -173,5 +242,5 @@ You can exercise the whole remote path on one machine — no tunnel needed:
   effectively one active session at a time. The **device registry and job
   tracking are fully per-user** — each node is private to its owner, and the
   shared M4 reports busy/ETA to everyone.
-- A node runs one job at a time. While busy, its card is unselectable and
-  shows an ETA.
+- A node runs one job at a time. While busy, its card shows the running job's
+  progress, ETA and how many runs are waiting; picking it queues your run.

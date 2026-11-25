@@ -1,78 +1,72 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import Chart from 'chart.js/auto';
-import { Plus } from 'lucide-react';
-import { apiGet, apiPost, formatTime, showToast } from '../utils/helpers';
+import { CloudCog, History, Plus } from 'lucide-react';
+import { apiGet, formatTime, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
+import { useTrainingSession } from '../context/TrainingSessionContext';
 import HelpButton from '../components/help/HelpButton';
 import AskButton from '../components/chatbot/AskButton';
 import DeviceCard, { DEVICE_CARD_HEIGHT } from '../components/devices/DeviceCard';
-import AddDeviceModal from '../components/devices/AddDeviceModal';
 import ExplainModal from '../components/explain/ExplainModal';
+import ResumePrompt from '../components/session/ResumePrompt';
+import { RunsPanel, TierStrip } from '../components/session/RunsPanel';
+import { jobPercent, queueLine, timeAgo } from '../components/session/format';
+import { isActive, isTerminal, type JobView } from '../components/session/types';
 import type { Device } from '../components/devices/types';
 
-interface LogEntry {
-    id: number;
-    html: string;
-    type?: string;
+interface AppState {
+    has_dataset: boolean;
+    has_features: boolean;
+    has_model: boolean;
+    model_config: Record<string, unknown> | null;
+    last_weights_file: string | null;
 }
 
-interface QueueJob {
-    job_id: string;
-    device_id: number;
-    is_local: boolean;
-    project_name: string;
-    status: 'running' | 'queued';
-    position: number;
-    epoch: number;
-    total_epochs: number;
+interface LogLine {
+    key: string;
+    className?: string;
+    content: React.ReactNode;
 }
+
+// The log keeps the page light on very long runs by showing the latest epochs.
+const LOG_TAIL = 300;
 
 const Training: React.FC = () => {
-    // Top Stats
-    const [epoch, setEpoch] = useState(0);
-    const [totalEpochs, setTotalEpochs] = useState(0);
-    const [trainLoss, setTrainLoss] = useState<string>('—');
-    const [valLoss, setValLoss] = useState<string>('—');
-    const [valAcc, setValAcc] = useState<string>('—');
-    const [eta, setEta] = useState<string>('—');
-    const [hasAcc, setHasAcc] = useState(false);
+    const navigate = useNavigate();
+    const { user } = useAuth();
+    const {
+        jobs, focusRun: run, setFocus, start, stop, cancel, hydrate, version,
+        openEnterprise, openAddDevice, deviceEpoch,
+    } = useTrainingSession();
 
-    // Progress
-    const [progressPct, setProgressPct] = useState(0);
-    const [esInfo, setEsInfo] = useState<{ patience: number, counter: number } | null>(null);
+    // The run on screen. Its data lives in the session provider (which follows
+    // the server), so it survives leaving this page, closing the tab, or opening
+    // the dashboard from another browser.
+    const job = run?.job ?? null;
+    const jobId = job?.job_id ?? null;
+    const status = job?.status ?? null;
+    const history = run?.history ?? [];
+    const lastPoint = history.length ? history[history.length - 1] : null;
+    const isTraining = status === 'running';
+    const isQueued = status === 'queued';
+    const isComplete = status === 'complete';
 
-    // Flow
-    const [isTraining, setIsTraining] = useState(false);
-    const [isComplete, setIsComplete] = useState(false);
-    const [lastWeightFilename, setLastWeightFilename] = useState<string | null>(null);
-    const [btnState, setBtnState] = useState<'idle' | 'starting' | 'training' | 'complete'>('idle');
+    // What is set up and ready to train (dataset + model in the working state)
+    const [appState, setAppState] = useState<AppState | null>(null);
+    const [starting, setStarting] = useState(false);
+    const [busyPrompt, setBusyPrompt] = useState<JobView | null>(null);
+    const [explainOpen, setExplainOpen] = useState(false);
 
     // Compute device selection
-    const { user } = useAuth();
     const [devices, setDevices] = useState<Device[]>([]);
     const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
-    const [jobId, setJobId] = useState<string | null>(null);
-    const [showAddDevice, setShowAddDevice] = useState(false);
-    const [queueJobs, setQueueJobs] = useState<QueueJob[]>([]);
-
-    // Live system metrics (from whichever machine is training)
-    const [cpuPct, setCpuPct] = useState<number | null>(null);
-    const [gpuPct, setGpuPct] = useState<number | null>(null);
-    const [ramPct, setRamPct] = useState<number | null>(null);
-    const [cpuTemp, setCpuTemp] = useState<number | null>(null);
-    const [gpuTemp, setGpuTemp] = useState<number | null>(null);
-
-    // Logs
-    const [logs, setLogs] = useState<LogEntry[]>([{ id: 0, html: '<span class="text-muted">Waiting to start training...</span>' }]);
-    const logCounter = useRef(1);
-    const logEndRef = useRef<HTMLDivElement>(null);
 
     // Network & Chart Refs
     const chartRef = useRef<Chart | null>(null);
     const chartCanvasRef = useRef<HTMLCanvasElement>(null);
     const networkCanvasRef = useRef<HTMLCanvasElement>(null);
-    const socketRef = useRef<Socket | null>(null);
+    const chartJobRef = useRef<string | null>(null);
 
     // System-monitor charts (temperature + utilization)
     const tempChartRef = useRef<Chart | null>(null);
@@ -84,38 +78,31 @@ const Training: React.FC = () => {
     const isTrainingRef = useRef(false);
     const layerSizesRef = useRef<number[]>([4, 128, 64, 2]);
 
-    // Run capture for "Explain results" (the just-finished run, sent to the tutor)
-    const runHistoryRef = useRef<Array<Record<string, number | null>>>([]);
-    const modelConfigRef = useRef<Record<string, unknown>>({});
-    const runInfoRef = useRef<{ arch_type?: string; layer_sizes?: number[]; task_type?: string }>({});
-    const completeMetaRef = useRef<Record<string, unknown>>({});
-    const [completedRun, setCompletedRun] = useState(false);
-    const [explainOpen, setExplainOpen] = useState(false);
-
     useEffect(() => {
         isTrainingRef.current = isTraining;
     }, [isTraining]);
 
-    // Add log helper
-    const addLog = (html: string, type?: string) => {
-        setLogs(prev => [...prev, { id: logCounter.current++, html, type }]);
-    };
-
     // Log container ref for scoped scrolling
     const logContainerRef = useRef<HTMLDivElement>(null);
 
-    // Auto-scroll logs — scroll only within the log container, not the whole page
-    useEffect(() => {
-        const container = logContainerRef.current;
-        if (container) {
-            container.scrollTop = container.scrollHeight;
-        }
-    }, [logs]);
+    // ── Derived top stats ──
+    const cfg = (run?.config ?? appState?.model_config ?? null) as Record<string, unknown> | null;
+    const epoch = job?.epoch ?? 0;
+    const totalEpochs = job?.total_epochs || (cfg?.epochs as number | undefined) || 0;
+    const hasAcc = lastPoint?.val_acc != null;
+    const progressPct = job ? jobPercent(job) : 0;
+    const eta = isTraining && job?.eta_seconds != null ? formatTime(job.eta_seconds) : '—';
+    const esInfo = lastPoint?.es_patience !== undefined
+        ? { patience: lastPoint.es_patience, counter: lastPoint.es_patience_counter ?? 0 }
+        : run?.info?.early_stopping?.enabled && isActive(status ?? 'complete')
+            ? { patience: run.info.early_stopping.patience ?? 0, counter: 0 }
+            : null;
+    const lastStat = run?.stats.length ? run.stats[run.stats.length - 1] : null;
+    const weightFilename = run?.final?.weight_filename
+        ?? (!run ? appState?.last_weights_file ?? null : null);
 
-    // Init Socket & Chart
+    // Init charts
     useEffect(() => {
-        socketRef.current = io();
-
         const ctx = chartCanvasRef.current?.getContext('2d');
         if (ctx) {
             chartRef.current = new Chart(ctx, {
@@ -259,225 +246,108 @@ const Training: React.FC = () => {
             });
         }
 
-        // Socket listeners
-        socketRef.current.on('training_update', (data) => {
-            const { epoch: ep, total_epochs, train_loss, val_loss, val_acc, eta_seconds } = data;
-
-            setEpoch(ep);
-            setTotalEpochs(total_epochs);
-            setTrainLoss(train_loss.toFixed(4));
-            setEta(formatTime(eta_seconds));
-
-            setProgressPct(Math.round((ep / total_epochs) * 100));
-
-            const hasAccuracyData = val_acc !== null && val_acc !== undefined;
-            setHasAcc(hasAccuracyData);
-
-            if (hasAccuracyData) {
-                setValAcc(val_acc.toFixed(1) + '%');
-                if (chartRef.current) chartRef.current.data.datasets[2].hidden = false;
-            } else {
-                setValLoss(val_loss.toFixed(4));
-            }
-
-            if (data.es_patience !== undefined) {
-                setEsInfo({ patience: data.es_patience, counter: data.es_patience_counter });
-            }
-
-            // Capture history for the post-run "Explain results" tutor review.
-            runHistoryRef.current.push({
-                epoch: ep,
-                train_loss: train_loss ?? null,
-                val_loss: val_loss ?? null,
-                val_acc: val_acc ?? null,
-            });
-
-            // Update chart
-            if (chartRef.current) {
-                chartRef.current.data.labels?.push(ep.toString());
-                chartRef.current.data.datasets[0].data.push(train_loss);
-                chartRef.current.data.datasets[1].data.push(val_loss);
-                chartRef.current.data.datasets[2].data.push(val_acc);
-                chartRef.current.update('none');
-            }
-
-            // Log entry
-            let logLine = `<span class="log-epoch">Epoch ${ep}/${total_epochs}</span>`;
-            logLine += ` — <span class="log-loss">loss: ${train_loss.toFixed(4)}</span>`;
-            logLine += ` · <span class="log-loss">val_loss: ${val_loss.toFixed(4)}</span>`;
-            if (hasAccuracyData) logLine += ` · <span class="log-acc">acc: ${val_acc.toFixed(1)}%</span>`;
-            if (data.es_patience !== undefined) logLine += ` · <span class="log-es">patience: ${data.es_patience_counter}/${data.es_patience}</span>`;
-
-            addLog(logLine);
-        });
-
-        const refreshQueue = () => apiGet('/api/training/queue').then((d) => setQueueJobs(d.jobs || [])).catch(() => { });
-
-        socketRef.current.on('training_complete', (data) => {
-            setIsTraining(false);
-            setBtnState('complete');
-            setIsComplete(true);
-            setJobId(null);
-            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
-            refreshQueue();
-
-            if (data.weight_filename) {
-                setLastWeightFilename(data.weight_filename);
-            }
-
-            completeMetaRef.current = {
-                final_train_loss: data.final_train_loss,
-                final_val_loss: data.final_val_loss,
-                final_val_acc: data.final_val_acc ?? null,
-                early_stopped: data.early_stopped,
-                stopped_epoch: data.stopped_epoch ?? null,
-            };
-            setCompletedRun(true);
-
-            if (data.early_stopped) {
-                showToast(`Early stopping at epoch ${data.stopped_epoch}! 🛑`, 'warning');
-                addLog(`<span class="log-es-msg">🛑 Early stopping triggered at epoch ${data.stopped_epoch}. Best weights restored.</span>`, 'log-entry-es');
-            } else {
-                showToast('Training complete! 🎉', 'success');
-            }
-
-            addLog(`<span class="log-final">✅ ${data.message} — Final loss: ${data.final_train_loss.toFixed(4)} · Val loss: ${data.final_val_loss.toFixed(4)}</span>`, 'log-entry-final');
-        });
-
-        socketRef.current.on('training_info', (data) => {
-            if (data.layer_sizes) {
-                layerSizesRef.current = [
-                    data.input_dim || 4,
-                    ...(data.layer_sizes || [128, 64]),
-                    data.output_dim || 2,
-                ];
-            }
-            runInfoRef.current = {
-                arch_type: data.arch_type,
-                layer_sizes: data.layer_sizes,
-                task_type: data.task_type,
-            };
-            if (data.early_stopping?.enabled) {
-                setEsInfo({ patience: data.early_stopping.patience, counter: 0 });
-            }
-        });
-
-        socketRef.current.on('training_stopped', () => {
-            setIsTraining(false);
-            setBtnState('idle');
-            setJobId(null);
-            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
-            refreshQueue();
-            showToast('Training stopped.', 'warning');
-        });
-
-        socketRef.current.on('training_error', (data) => {
-            setIsTraining(false);
-            setBtnState('idle');
-            setJobId(null);
-            apiGet('/api/devices').then((d) => setDevices(d.devices || [])).catch(() => { });
-            refreshQueue();
-            showToast('Training error: ' + data.message, 'error');
-        });
-
-        // A remote run was interrupted (node dropped) — it will auto-resume when
-        // the node reconnects.
-        socketRef.current.on('training_requeued', (data) => {
-            setIsTraining(false);
-            setBtnState('idle');
-            refreshQueue();
-            showToast(data?.message || 'Run requeued — will resume when the device reconnects.', 'warning');
-        });
-
-        // Live hardware telemetry from the training machine
-        socketRef.current.on('system_stats', (data) => {
-            const { cpu_percent, gpu_percent, ram_percent, cpu_temp, gpu_temp } = data;
-            setCpuPct(cpu_percent ?? null);
-            setGpuPct(gpu_percent ?? null);
-            setRamPct(ram_percent ?? null);
-            setCpuTemp(cpu_temp ?? null);
-            setGpuTemp(gpu_temp ?? null);
-
-            const pushPair = (chart: Chart | null, a: number | null, b: number | null) => {
-                if (!chart) return;
-                chart.data.labels?.push('');
-                chart.data.datasets[0].data.push(a);
-                chart.data.datasets[1].data.push(b);
-                if ((chart.data.labels?.length ?? 0) > 60) {
-                    chart.data.labels?.shift();
-                    chart.data.datasets.forEach((ds) => ds.data.shift());
-                }
-                chart.update('none');
-            };
-            pushPair(utilChartRef.current, cpu_percent ?? null, gpu_percent ?? null);
-            pushPair(tempChartRef.current, cpu_temp ?? null, gpu_temp ?? null);
-        });
-
         return () => {
-            socketRef.current?.disconnect();
             chartRef.current?.destroy();
             tempChartRef.current?.destroy();
             utilChartRef.current?.destroy();
         };
     }, []);
 
-    // Load initial state for network viz
+    // Keep the loss/accuracy chart in step with the run's history. It only ever
+    // appends — unless the run on screen changed (or restarted), in which case
+    // it is redrawn from the replayed history.
     useEffect(() => {
+        const chart = chartRef.current;
+        if (!chart) return;
+        const labels = (chart.data.labels ?? []) as string[];
+        if (chartJobRef.current !== jobId || labels.length > history.length
+            || (labels.length > 0 && history.length > 0 && labels[0] !== String(history[0].epoch))) {
+            chart.data.labels = [];
+            chart.data.datasets.forEach((ds) => { ds.data = []; });
+            chartJobRef.current = jobId;
+        }
+        const have = (chart.data.labels as string[]).length;
+        for (let i = have; i < history.length; i++) {
+            const p = history[i];
+            chart.data.labels?.push(p.epoch.toString());
+            chart.data.datasets[0].data.push(p.train_loss);
+            chart.data.datasets[1].data.push(p.val_loss);
+            chart.data.datasets[2].data.push(p.val_acc);
+        }
+        chart.data.datasets[2].hidden = !hasAcc;
+        chart.update('none');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [version, jobId]);
+
+    // Hardware telemetry from whichever machine is training (last ~90 seconds)
+    useEffect(() => {
+        const stats = run?.stats ?? [];
+        const sync = (chart: Chart | null, a: (number | null)[], b: (number | null)[]) => {
+            if (!chart) return;
+            chart.data.labels = a.map(() => '');
+            chart.data.datasets[0].data = a;
+            chart.data.datasets[1].data = b;
+            chart.update('none');
+        };
+        sync(utilChartRef.current, stats.map((s) => s.cpu_percent ?? null), stats.map((s) => s.gpu_percent ?? null));
+        sync(tempChartRef.current, stats.map((s) => s.cpu_temp ?? null), stats.map((s) => s.gpu_temp ?? null));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [version, jobId]);
+
+    // A run restored from the server (finished while away, or picked from the
+    // list) arrives as a summary — pull its full history in.
+    useEffect(() => {
+        if (jobId && run && !run.hydrated) void hydrate(jobId);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [jobId, run?.hydrated]);
+
+    // Network viz follows the run on screen, else the model that is set up.
+    useEffect(() => {
+        const info = run?.info;
+        if (info?.layer_sizes) {
+            layerSizesRef.current = [info.input_dim || 4, ...info.layer_sizes, info.output_dim || 2];
+        } else if (cfg?.layer_sizes) {
+            layerSizesRef.current = [
+                (cfg.input_dim as number) || 4,
+                ...(cfg.layer_sizes as number[]),
+                (cfg.output_dim as number) || 2,
+            ];
+        }
+    }, [run?.info, cfg]);
+
+    // ── Working state: is there a dataset + model ready to train? ──
+    const loadState = useCallback(() => {
         apiGet('/api/state')
-            .then((state) => {
-                if (state.has_model && state.model_config) {
-                    const cfg = state.model_config;
-                    modelConfigRef.current = cfg;
-                    layerSizesRef.current = [cfg.input_dim || 4, ...(cfg.layer_sizes || [128, 64]), cfg.output_dim || 2];
-                }
-                if (state.last_weights_file) {
-                    setLastWeightFilename(state.last_weights_file);
-                    setIsComplete(true);
-                }
-            })
+            .then((state) => setAppState(state))
             .catch(() => { });
     }, []);
 
+    // Reload when a run ends (the server clears the finished run's dataset).
+    useEffect(() => {
+        loadState();
+    }, [loadState, jobs.length, status]);
+
     // Load + poll the compute-device list (keeps status / ETA fresh)
-    const loadDevices = () => {
+    const loadDevices = useCallback(() => {
         apiGet('/api/devices')
             .then((data) => {
                 const list: Device[] = data.devices || [];
                 setDevices(list);
                 setSelectedDeviceId((prev) => {
-                    if (prev != null && list.some((d) => d.id === prev)) return prev;
-                    const free = list.find((d) => d.status === 'available');
-                    return free ? free.id : prev;
+                    if (prev != null && list.some((d) => d.id === prev && d.status !== 'offline')) return prev;
+                    const pick = list.find((d) => d.status === 'available')
+                        ?? list.find((d) => d.status === 'busy');
+                    return pick ? pick.id : null;
                 });
             })
             .catch(() => { });
-    };
-
-    const loadQueue = () => {
-        apiGet('/api/training/queue')
-            .then((data) => setQueueJobs(data.jobs || []))
-            .catch(() => { });
-    };
+    }, []);
 
     useEffect(() => {
         loadDevices();
-        loadQueue();
-        const timer = setInterval(() => { loadDevices(); loadQueue(); }, 5000);
+        const timer = setInterval(loadDevices, 5000);
         return () => clearInterval(timer);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    const cancelQueued = async (id: string) => {
-        try {
-            const res = await fetch(`/api/training/queue/${id}`, { method: 'DELETE', credentials: 'include' });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) { showToast(data.error || 'Could not cancel', 'error'); return; }
-            showToast('Queued run cancelled', 'success');
-            loadQueue();
-        } catch (e) {
-            showToast('Cancel failed: ' + (e instanceof Error ? e.message : String(e)), 'error');
-        }
-    };
+    }, [loadDevices, deviceEpoch, jobs.length]);
 
     // Network visualization
     useEffect(() => {
@@ -624,118 +494,166 @@ const Training: React.FC = () => {
         return () => cancelAnimationFrame(frame);
     }, []);
 
-    const handleStart = async () => {
-        if (selectedDeviceId == null) {
+    // ── Log: derived from the run, so a re-attached run shows its whole story ──
+    const logLines = useMemo<LogLine[]>(() => {
+        const muted = (key: string, text: React.ReactNode): LogLine => ({
+            key, content: <span className="text-muted">{text}</span>,
+        });
+        if (!run || !job) return [muted('idle', 'Waiting to start training...')];
+
+        const lines: LogLine[] = [];
+        const device = job.device_name || 'the selected device';
+        if (isQueued) {
+            lines.push(muted('queued', `Queued on ${device} — ${queueLine(job)}. Training starts automatically.`));
+            return lines;
+        }
+        if (history.length === 0 && isTraining) {
+            lines.push(muted('prep', run.info
+                ? `Training on ${device}…`
+                : `Preparing the dataset on ${device}…`));
+        }
+        if (history.length > LOG_TAIL) {
+            lines.push(muted('trimmed', `… ${history.length - LOG_TAIL} earlier epochs not shown`));
+        }
+        for (const p of history.slice(-LOG_TAIL)) {
+            lines.push({
+                key: `e${p.epoch}`,
+                content: (
+                    <>
+                        <span className="log-epoch">Epoch {p.epoch}/{p.total_epochs}</span>
+                        {' — '}<span className="log-loss">loss: {p.train_loss.toFixed(4)}</span>
+                        {' · '}<span className="log-loss">val_loss: {p.val_loss.toFixed(4)}</span>
+                        {p.val_acc != null && <>{' · '}<span className="log-acc">acc: {p.val_acc.toFixed(1)}%</span></>}
+                        {p.es_patience !== undefined && (
+                            <>{' · '}<span className="log-es">patience: {p.es_patience_counter}/{p.es_patience}</span></>
+                        )}
+                    </>
+                ),
+            });
+        }
+        const final = run.final;
+        if (status === 'complete' && final) {
+            if (final.early_stopped) {
+                lines.push({
+                    key: 'es', className: 'log-entry-es',
+                    content: <span className="log-es-msg">🛑 Early stopping triggered at epoch {final.stopped_epoch}. Best weights restored.</span>,
+                });
+            }
+            lines.push({
+                key: 'final', className: 'log-entry-final',
+                content: (
+                    <span className="log-final">
+                        ✅ {final.message || 'Training complete!'}
+                        {final.final_train_loss != null && <> — Final loss: {final.final_train_loss.toFixed(4)}</>}
+                        {final.final_val_loss != null && <> · Val loss: {final.final_val_loss.toFixed(4)}</>}
+                    </span>
+                ),
+            });
+        } else if (status === 'stopped') {
+            lines.push({
+                key: 'stopped', className: 'log-entry-es',
+                content: <span className="log-es-msg">⏹ Training stopped{epoch ? ` at epoch ${epoch}` : ''}.</span>,
+            });
+        } else if (status === 'error') {
+            lines.push({
+                key: 'error', className: 'log-entry-es',
+                content: <span className="log-es-msg">⚠️ {run.message || 'Training failed.'}</span>,
+            });
+        }
+        return lines;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [version, jobId, status]);
+
+    // Auto-scroll logs — scroll only within the log container, not the whole page
+    useEffect(() => {
+        const container = logContainerRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
+    }, [logLines]);
+
+    // ── Actions ──
+    const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || null;
+    const setupReady = Boolean(appState?.has_dataset && appState.has_features && appState.has_model);
+    const deviceUsable = selectedDevice != null && selectedDevice.status !== 'offline';
+    const willQueue = selectedDevice?.status === 'busy' || (selectedDevice?.queue_length ?? 0) > 0;
+    const hasActiveRun = jobs.length > 0;
+
+    const launch = async (confirmedQueue = false) => {
+        if (!selectedDevice) {
             showToast('Pick a compute device first.', 'warning');
             return;
         }
+        // Free tier: the shared Mac mini trains one model at a time. If you
+        // already have a run there, say so — and offer the ways around it —
+        // before quietly lining up another.
+        const mine = jobs.find((j) => j.device_id === selectedDevice.id);
+        if (selectedDevice.is_shared && mine && !confirmedQueue) {
+            setBusyPrompt(mine);
+            return;
+        }
+        setBusyPrompt(null);
+        setStarting(true);
         try {
-            setBtnState('starting');
-            setIsComplete(false);
-            setCompletedRun(false);
-            runHistoryRef.current = [];
-            completeMetaRef.current = {};
-            setLogs([]);
-            addLog('<span class="text-muted">Starting training...</span>');
-
-            if (chartRef.current) {
-                chartRef.current.data.labels = [];
-                chartRef.current.data.datasets.forEach(ds => ds.data = []);
-                chartRef.current.data.datasets[2].hidden = true;
-                chartRef.current.update();
-            }
-            [tempChartRef.current, utilChartRef.current].forEach((c) => {
-                if (c) {
-                    c.data.labels = [];
-                    c.data.datasets.forEach(ds => ds.data = []);
-                    c.update();
-                }
-            });
-
-            setEpoch(0); setTotalEpochs(0); setTrainLoss('—'); setValLoss('—');
-            setValAcc('—'); setEta('—'); setProgressPct(0); setEsInfo(null); setHasAcc(false);
-            setCpuPct(null); setGpuPct(null); setRamPct(null);
-            setCpuTemp(null); setGpuTemp(null);
-
-            const data = await apiPost('/api/training/start', {
-                device_id: selectedDeviceId,
-                socket_id: socketRef.current?.id,
-            });
-
+            const data = await start(selectedDevice.id);
             if (data.error) {
                 showToast(data.error, 'error');
-                setBtnState('idle');
-                return;
+            } else if (data.status === 'queued') {
+                showToast(
+                    data.ahead === 1
+                        ? 'Queued — 1 run ahead of you. It starts automatically.'
+                        : `Queued — ${data.ahead} runs ahead of you. It starts automatically.`,
+                    'info',
+                );
             }
-
-            if (data.job_id) {
-                setJobId(data.job_id);
-                socketRef.current?.emit('subscribe_job', { job_id: data.job_id });
-            }
-
-            // The device was busy — the run was queued and will start (and emit
-            // live updates) automatically when the device frees.
-            if (data.status === 'queued') {
-                showToast(`Device busy — queued at position ${data.position}.`, 'info');
-                setBtnState('idle');
-                loadQueue();
-                return;
-            }
-
-            setIsTraining(true);
-            setBtnState('training');
-
-            if (data.info) {
-                layerSizesRef.current = [
-                    data.info.input_dim || 4,
-                    ...(data.info.layer_sizes || [128, 64]),
-                    data.info.output_dim || 2,
-                ];
-                if (data.info.early_stopping?.enabled) {
-                    setEsInfo({ patience: data.info.early_stopping.patience, counter: 0 });
-                }
-            }
-
         } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            showToast('Error: ' + msg, 'error');
-            setBtnState('idle');
+            showToast('Error: ' + (e instanceof Error ? e.message : String(e)), 'error');
+        } finally {
+            setStarting(false);
+            loadDevices();
+            loadState();
         }
     };
 
-    const handleStop = async () => {
-        try {
-            await apiPost('/api/training/stop', { job_id: jobId });
-        } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            showToast('Error: ' + msg, 'error');
+    const enroll = () => {
+        if (!user) {
+            showToast('Sign in to link your own server to your account.', 'warning');
+            navigate('/signin');
+            return;
         }
+        openAddDevice();
     };
 
     const handleSaveWeights = () => {
-        if (!lastWeightFilename) {
+        if (!weightFilename) {
             showToast('No weights file available.', 'error');
             return;
         }
-        window.location.href = `/api/weights/file/${encodeURIComponent(lastWeightFilename)}`;
-        showToast('Downloading: ' + lastWeightFilename, 'success');
+        window.location.href = `/api/weights/file/${encodeURIComponent(weightFilename)}`;
+        showToast('Downloading: ' + weightFilename, 'success');
     };
 
     const buildExplainRequest = () => ({
         config: {
-            ...modelConfigRef.current,
-            arch_type: runInfoRef.current.arch_type ?? modelConfigRef.current.arch_type,
-            layer_sizes: runInfoRef.current.layer_sizes ?? modelConfigRef.current.layer_sizes,
+            ...(cfg || {}),
+            arch_type: run?.info?.arch_type ?? cfg?.arch_type,
+            layer_sizes: run?.info?.layer_sizes ?? cfg?.layer_sizes,
         },
-        history: runHistoryRef.current,
-        task_type: runInfoRef.current.task_type ?? (modelConfigRef.current.task_type as string | undefined),
-        metrics: completeMetaRef.current,
+        history: history.map((p) => ({
+            epoch: p.epoch,
+            train_loss: p.train_loss ?? null,
+            val_loss: p.val_loss ?? null,
+            val_acc: p.val_acc ?? null,
+        })),
+        task_type: run?.info?.task_type ?? run?.final?.task_type ?? (cfg?.task_type as string | undefined),
+        metrics: {
+            final_train_loss: run?.final?.final_train_loss,
+            final_val_loss: run?.final?.final_val_loss,
+            final_val_acc: run?.final?.final_val_acc ?? null,
+            early_stopped: run?.final?.early_stopped,
+            stopped_epoch: run?.final?.stopped_epoch ?? null,
+        },
     });
 
-    const selectedDevice = devices.find((d) => d.id === selectedDeviceId) || null;
-    const deviceReady = selectedDevice?.status === 'available';
-
-    const sysMetric = (label: string, value: number | null, suffix: string, color: string) => (
+    const sysMetric = (label: string, value: number | null | undefined, suffix: string, color: string) => (
         <div style={{ textAlign: 'center', flex: '1 1 70px', minWidth: 70 }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700, color }}>
                 {value == null ? '—' : Math.round(value) + suffix}
@@ -746,6 +664,19 @@ const Training: React.FC = () => {
         </div>
     );
 
+    const startLabel = starting
+        ? '⏳ Starting...'
+        : hasActiveRun
+            ? '＋ Queue another run'
+            : willQueue ? '▶ Join the queue' : '▶ Start Training';
+    const startTitle = !deviceUsable
+        ? 'Select an online device above'
+        : !setupReady
+            ? 'Set up a dataset and a model first'
+            : willQueue
+                ? 'This device is busy — your run waits in its queue and starts automatically'
+                : undefined;
+
     return (
         <>
             <div className="page-header">
@@ -753,13 +684,52 @@ const Training: React.FC = () => {
                 <p>Watch your neural network learn in real-time.</p>
             </div>
 
+            {/* Background-session notices */}
+            {job && isActive(job.status) && (
+                <div className="vx-banner">
+                    <CloudCog size={18} />
+                    <span>
+                        <strong>{job.project_name || 'This run'}</strong> is{' '}
+                        {isQueued ? 'queued for' : 'training on'} {job.device_name || 'the server'} as a background
+                        session. You can close this tab or switch device — it keeps going, and this dashboard picks
+                        it up wherever it is when you come back.
+                    </span>
+                </div>
+            )}
+            {job && isTerminal(job.status) && job.finished_at && (
+                <div className="vx-banner vx-banner--muted">
+                    <History size={18} />
+                    <span>
+                        Showing your last run — <strong>{job.project_name || 'Untitled'}</strong>,{' '}
+                        {job.status === 'complete' ? 'finished' : job.status === 'stopped' ? 'stopped' : 'ended with an error'}{' '}
+                        {timeAgo(job.finished_at)} on {job.device_name || 'the server'}.
+                    </span>
+                    <span className="vx-banner__actions">
+                        <Link to="/dataset" className="vx-ghost-btn">＋ New run</Link>
+                    </span>
+                </div>
+            )}
+            {!job && appState && !setupReady && (
+                <div className="vx-banner vx-banner--muted">
+                    <History size={18} />
+                    <span>
+                        Nothing is set up to train yet. Upload a dataset and choose an architecture — or watch a
+                        real model train in the live demo.
+                    </span>
+                    <span className="vx-banner__actions">
+                        <Link to="/dataset" className="vx-ghost-btn">Upload a dataset</Link>
+                        <Link to="/demo" className="vx-ghost-btn vx-ghost-btn--accent">Try the live demo</Link>
+                    </span>
+                </div>
+            )}
+
             {/* Compute Device Picker */}
             <div className="glass-panel">
                 <div className="flex-between mb-1">
                     <div className="panel-title mb-0"><span className="pt-icon">🖥️</span> Compute Device</div>
                     <span className="text-muted" style={{ fontSize: '0.8rem' }}>
                         {selectedDevice
-                            ? <>Selected: <strong>{selectedDevice.nickname}</strong></>
+                            ? <>Selected: <strong>{selectedDevice.nickname}</strong>{willQueue ? ' — busy, your run will queue' : ''}</>
                             : 'Choose where to train'}
                     </span>
                 </div>
@@ -778,10 +748,7 @@ const Training: React.FC = () => {
                     ))}
                     <button
                         type="button"
-                        onClick={() => {
-                            if (!user) { showToast('Sign in to link your own device.', 'warning'); return; }
-                            setShowAddDevice(true);
-                        }}
+                        onClick={enroll}
                         style={{
                             display: 'flex', flexDirection: 'column', alignItems: 'center',
                             justifyContent: 'center', gap: '0.4rem', height: DEVICE_CARD_HEIGHT,
@@ -793,46 +760,28 @@ const Training: React.FC = () => {
                     >
                         <Plus size={22} />
                         <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Add your own device</span>
-                        <span style={{ fontSize: '0.74rem', opacity: 0.7 }}>Train on a machine you own</span>
+                        <span style={{ fontSize: '0.74rem', opacity: 0.7 }}>Train on a machine you own — no queue</span>
                     </button>
                 </div>
+                <TierStrip onEnroll={enroll} onSales={openEnterprise} />
             </div>
 
-            {/* Training Queue */}
-            {queueJobs.length > 0 && (
+            {/* Your runs: what is training and what is waiting in line */}
+            {jobs.length > 0 && (
                 <div className="glass-panel">
-                    <div className="panel-title"><span className="pt-icon">📋</span> Training Queue</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        {queueJobs
-                            .slice()
-                            .sort((a, b) => (a.status === b.status ? a.position - b.position : a.status === 'running' ? -1 : 1))
-                            .map((j) => {
-                                const dev = devices.find((d) => d.id === j.device_id);
-                                return (
-                                    <div key={j.job_id} style={{
-                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                        gap: '0.75rem', padding: '0.6rem 0.85rem', borderRadius: 10,
-                                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
-                                    }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0 }}>
-                                            <span className="bento-tag bento-tag-sm">
-                                                {j.status === 'running' ? '▶ Running' : `#${j.position} Queued`}
-                                            </span>
-                                            <strong style={{ fontSize: '0.92rem' }}>{j.project_name}</strong>
-                                            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
-                                                on {dev ? dev.nickname : (j.is_local ? 'Shared M4' : `device #${j.device_id}`)}
-                                                {j.status === 'running' && j.total_epochs ? ` · epoch ${j.epoch}/${j.total_epochs}` : ''}
-                                            </span>
-                                        </div>
-                                        {j.status === 'queued' && (
-                                            <button className="btn btn-danger btn-sm" onClick={() => cancelQueued(j.job_id)}>
-                                                Cancel
-                                            </button>
-                                        )}
-                                    </div>
-                                );
-                            })}
+                    <div className="flex-between mb-1">
+                        <div className="panel-title mb-0"><span className="pt-icon">📋</span> Your Runs</div>
+                        <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                            {jobs.length === 1 ? '1 background session' : `${jobs.length} background sessions`}
+                        </span>
                     </div>
+                    <RunsPanel
+                        jobs={jobs}
+                        focusedId={jobId}
+                        onFocus={setFocus}
+                        onStop={stop}
+                        onCancel={cancel}
+                    />
                 </div>
             )}
 
@@ -843,12 +792,14 @@ const Training: React.FC = () => {
                     <div className="stat-label">Epoch <HelpButton topic="metric_epoch" size={12} /><AskButton topic="metric_epoch" size={12} /></div>
                 </div>
                 <div className="stat-card">
-                    <div className="stat-value" style={{ color: 'var(--accent-2)' }}>{trainLoss}</div>
+                    <div className="stat-value" style={{ color: 'var(--accent-2)' }}>
+                        {lastPoint ? lastPoint.train_loss.toFixed(4) : '—'}
+                    </div>
                     <div className="stat-label">Train Loss <HelpButton topic="metric_train_loss" size={12} /><AskButton topic="metric_train_loss" size={12} /></div>
                 </div>
                 <div className="stat-card">
                     <div className="stat-value" style={{ color: hasAcc ? '#22c55e' : 'inherit' }}>
-                        {hasAcc ? valAcc : valLoss}
+                        {!lastPoint ? '—' : hasAcc ? lastPoint.val_acc!.toFixed(1) + '%' : lastPoint.val_loss.toFixed(4)}
                     </div>
                     <div className="stat-label">{hasAcc ? 'Val Accuracy' : 'Val Loss'} <HelpButton topic="metric_val" size={12} /><AskButton topic="metric_val" size={12} /></div>
                 </div>
@@ -865,11 +816,11 @@ const Training: React.FC = () => {
                         ⚙ System
                     </span>
                     <div style={{ display: 'flex', flex: 1, gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'space-around' }}>
-                        {sysMetric('CPU', cpuPct, '%', '#8b5cf6')}
-                        {sysMetric('GPU', gpuPct, '%', '#06b6d4')}
-                        {sysMetric('RAM', ramPct, '%', '#22c55e')}
-                        {sysMetric('CPU Temp', cpuTemp, '°', '#f59e0b')}
-                        {sysMetric('GPU Temp', gpuTemp, '°', '#ef4444')}
+                        {sysMetric('CPU', lastStat?.cpu_percent, '%', '#8b5cf6')}
+                        {sysMetric('GPU', lastStat?.gpu_percent, '%', '#06b6d4')}
+                        {sysMetric('RAM', lastStat?.ram_percent, '%', '#22c55e')}
+                        {sysMetric('CPU Temp', lastStat?.cpu_temp, '°', '#f59e0b')}
+                        {sysMetric('GPU Temp', lastStat?.gpu_temp, '°', '#ef4444')}
                     </div>
                 </div>
             </div>
@@ -881,7 +832,7 @@ const Training: React.FC = () => {
                         className="text-muted"
                         style={{ fontSize: '0.85rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
                     >
-                        Training Progress
+                        {isQueued ? 'Waiting in the queue' : 'Training Progress'}
                         {isTraining && (
                             <span
                                 className="training-spinner"
@@ -904,10 +855,12 @@ const Training: React.FC = () => {
                                 🛑 ES
                             </span>
                         )}
-                        <span className="text-muted" style={{ fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>{progressPct}%</span>
+                        <span className="text-muted" style={{ fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>
+                            {isQueued && job ? `#${job.position} in line` : `${progressPct}%`}
+                        </span>
                     </div>
                 </div>
-                <div className="progress-bar-container" style={{ height: '10px' }}>
+                <div className={`progress-bar-container ${isQueued ? 'vx-bar--waiting' : ''}`} style={{ height: '10px' }}>
                     <div className="progress-bar" style={{ width: `${progressPct}%` }}></div>
                 </div>
             </div>
@@ -930,43 +883,46 @@ const Training: React.FC = () => {
             <div className="glass-panel">
                 <div className="flex-between mb-1">
                     <div className="panel-title mb-0"><span className="pt-icon">📝</span> Training Log</div>
-                    <div className="flex gap-1" style={{ display: 'flex', gap: '1rem' }}>
-                        {isComplete && lastWeightFilename && (
+                    <div className="flex gap-1" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {(isComplete || !run) && weightFilename && (
                             <button className="btn btn-save btn-sm" onClick={handleSaveWeights}>💾 Save Weights</button>
                         )}
 
-                        {completedRun && runHistoryRef.current.length > 0 && (
+                        {isComplete && history.length > 0 && (
                             <button className="btn btn-secondary btn-sm" onClick={() => setExplainOpen(true)}>
                                 ✨ Explain Results
                             </button>
                         )}
 
-                        {btnState === 'training' && (
-                            <button className="btn btn-danger btn-sm" onClick={handleStop}>⏹ Stop Training</button>
+                        {isTraining && jobId && (
+                            <button className="btn btn-danger btn-sm" onClick={() => stop(jobId)}>⏹ Stop Training</button>
                         )}
 
-                        {btnState !== 'training' && (
+                        {isQueued && jobId && (
+                            <button className="btn btn-secondary btn-sm" onClick={() => cancel(jobId)}>✕ Leave queue</button>
+                        )}
+
+                        {(setupReady || !job || !isTerminal(job.status)) && (
                             <button
-                                className="btn btn-primary btn-sm"
-                                onClick={handleStart}
-                                disabled={btnState === 'starting' || btnState === 'complete' || !deviceReady}
-                                title={!deviceReady ? 'Select an available device above' : undefined}
+                                className={`btn btn-sm ${hasActiveRun ? 'btn-secondary' : 'btn-primary'}`}
+                                onClick={() => launch()}
+                                disabled={starting || !deviceUsable || !setupReady}
+                                title={startTitle}
                             >
-                                {btnState === 'starting' ? '⏳ Starting...' : btnState === 'complete' ? '✓ Complete' : '▶ Start Training'}
+                                {startLabel}
                             </button>
                         )}
 
-                        {btnState === 'complete' && (
-                            <button className="btn btn-primary btn-sm" onClick={() => window.location.assign('/dataset')}>＋ New Run</button>
+                        {job && isTerminal(job.status) && !setupReady && (
+                            <button className="btn btn-primary btn-sm" onClick={() => navigate('/dataset')}>＋ New Run</button>
                         )}
                     </div>
                 </div>
 
                 <div className="training-log" ref={logContainerRef}>
-                    {logs.map(log => (
-                        <div key={log.id} className={`log-entry ${log.type || ''}`} dangerouslySetInnerHTML={{ __html: log.html }} />
+                    {logLines.map((line) => (
+                        <div key={line.key} className={`log-entry ${line.className || ''}`}>{line.content}</div>
                     ))}
-                    <div ref={logEndRef} />
                 </div>
             </div>
 
@@ -993,16 +949,21 @@ const Training: React.FC = () => {
                 </div>
             </div>
 
-            {showAddDevice && (
-                <AddDeviceModal
-                    onClose={() => setShowAddDevice(false)}
-                    onCreated={loadDevices}
+            {busyPrompt && (
+                <ResumePrompt
+                    mode="busy"
+                    job={jobs.find((j) => j.job_id === busyPrompt.job_id) ?? busyPrompt}
+                    onClose={() => setBusyPrompt(null)}
+                    onView={() => { setFocus(busyPrompt.job_id); setBusyPrompt(null); }}
+                    onQueue={() => launch(true)}
+                    onEnroll={() => { setBusyPrompt(null); enroll(); }}
+                    onSales={() => { setBusyPrompt(null); openEnterprise(); }}
                 />
             )}
 
             {explainOpen && (
                 <ExplainModal
-                    title={(modelConfigRef.current.project_name as string) || 'this run'}
+                    title={job?.project_name || (cfg?.project_name as string) || 'this run'}
                     request={buildExplainRequest()}
                     onClose={() => setExplainOpen(false)}
                 />

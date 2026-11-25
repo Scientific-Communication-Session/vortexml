@@ -17,7 +17,7 @@ import zipfile
 import secrets
 import shutil
 import threading
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 
 from flask import Flask, request, jsonify, session, send_file, make_response
@@ -43,6 +43,7 @@ from auto_config_rules import (
     recommend_config, guard_config, VALID_OPTIMIZERS, VALID_ACTIVATIONS,
 )
 import rag
+import demo_data
 from system_stats import SystemMonitor, sample as sample_stats
 
 # Run blocking hardware sampling (ioreg/nvidia-smi subprocesses, IOKit ctypes)
@@ -51,7 +52,7 @@ from system_stats import SystemMonitor, sample as sample_stats
 from eventlet import tpool
 _run_blocking = tpool.execute
 from models import (db, User, Project, Device, KnowledgeBase, Document,
-                    Conversation, ChatMessage)
+                    Conversation, ChatMessage, SalesInquiry)
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -219,6 +220,9 @@ def _default_state():
         "training_thread": None,
         "project_name": "VortexProject",
         "last_weights_file": None,
+        # Key of the bundled demo dataset currently loaded (see demo_data.py),
+        # or None for a dataset the user uploaded themselves.
+        "demo_key": None,
     }
 
 
@@ -243,6 +247,21 @@ def _state_key():
     return f"anon:{anon}"
 
 
+def _peek_state_key():
+    """Like `_state_key`, but never mints an anonymous id.
+
+    Read-only endpoints that every page polls (e.g. /api/training/active) use
+    this so a first-time visitor isn't handed a session cookie — and a state
+    entry — just for looking at the landing page. Returns None when the caller
+    has no identity yet (and therefore can't own any jobs).
+    """
+    uid = session.get("user_id")
+    if uid is not None:
+        return f"user:{uid}"
+    anon = session.get("anon_id")
+    return f"anon:{anon}" if anon else None
+
+
 def _get_state():
     """The caller's working-state dict. Must run in a request context."""
     key = _state_key()
@@ -255,6 +274,10 @@ _node_sids = {}    # node socket id -> device_id   (reverse lookup on disconnect
 _jobs = {}         # job_id -> live job dict (epoch/eta/room/owner/config)
 _device_busy = {}  # device_id -> job_id   (which job currently occupies it)
 _queues = defaultdict(list)  # device_id -> [pending job dicts] (FIFO)
+# state_key -> the owner's most recent finished run (history + outcome), kept so
+# a browser that comes back after the run ended can still show how it went.
+_recent_runs = {}
+_RECENT_RUN_TTL = 24 * 3600  # seconds a finished run stays replayable
 _MAX_RESUME_ATTEMPTS = 1     # auto-restart an interrupted remote job this many times
 _rag_jobs = {}     # job_id -> {citations, chunks, backend, model, room} for remote RAG queries
 _rag_download_cancels = {}  # job_id -> threading.Event() for in-flight model downloads (local + remote)
@@ -290,6 +313,7 @@ def _evict_stale_state():
             continue
         st = _states.pop(key, None)
         _state_last_seen.pop(key, None)
+        _recent_runs.pop(key, None)
         # Reclaim a non-shared upload file the abandoned state still referenced.
         p = st.get("dataset_path") if st else None
         if p and "queued_" not in os.path.basename(p) and os.path.exists(p):
@@ -297,6 +321,14 @@ def _evict_stale_state():
                 os.remove(p)
             except OSError:
                 pass
+        # An anonymous run's weights are only reachable through this state, so
+        # once it is gone they are orphaned — reclaim them too.
+        if st:
+            _remove_orphan_weights(st.get("last_weights_file"))
+    # Finished runs are only kept for replay for a day.
+    for key in [k for k, r in _recent_runs.items()
+                if now - r.get("finished_ts", 0) > _RECENT_RUN_TTL]:
+        _recent_runs.pop(key, None)
 
 
 def _state_evictor_loop():
@@ -461,6 +493,7 @@ def upload_file():
         st["dataset_file"] = filename
         st["dataset_path"] = filepath
         st["dataset_info"] = info
+        st["demo_key"] = None
         return jsonify({"filename": filename, "info": info})
     except ValueError as e:
         # Unparseable/empty/garbled file — a client error, not a server fault.
@@ -721,8 +754,16 @@ def start_training():
         "epoch": 0,
         "total_epochs": config.get("epochs", 50),
         "eta_seconds": None,
+        "queued_at": _utcnow().isoformat() + "Z",
         "started_at": None,
         "attempts": 0,
+        "device_name": device.nickname,
+        "demo_key": st.get("demo_key"),
+        # Replay buffer: everything a browser needs to redraw this run when it
+        # (re)attaches later — see `_emit_job` / `_job_snapshot`.
+        "info": None,
+        "history": [],
+        "stats": deque(maxlen=60),
     }
 
     # The device is occupied (running or has a queue) → enqueue behind it.
@@ -735,9 +776,10 @@ def start_training():
 
     if busy:
         _queues[device.id].append(job)
+        view = _job_view(job)
         return jsonify({"status": "queued", "job_id": job_id,
-                        "position": len(_queues[device.id]),
-                        "device": device.to_dict()})
+                        "position": view["position"], "ahead": view["ahead"],
+                        "job": view, "device": device.to_dict()})
 
     if device.is_shared:
         # Returns immediately; dataset prep + training run in the background and
@@ -749,7 +791,7 @@ def start_training():
                                    public_msg="Could not start training.")
         st["training_thread"] = True
         return jsonify({"status": "started", "job_id": job_id, "mode": "local",
-                        "device": device.to_dict()})
+                        "job": _job_view(job), "device": device.to_dict()})
 
     # ── Remote training on the user's own node ──
     node = _nodes.get(device.id)
@@ -762,22 +804,33 @@ def start_training():
         _delete_job_snapshot(job)
         return jsonify({"error": f"Could not read dataset: {e}"}), 500
     return jsonify({"status": "started", "job_id": job_id, "mode": "remote",
-                    "device": device.to_dict()})
+                    "job": _job_view(job), "device": device.to_dict()})
 
 
 @app.route("/api/training/stop", methods=["POST"])
 def stop_training_route():
     body = request.get_json(silent=True) or {}
     job_id = body.get("job_id")
+    key = _peek_state_key()
     job = _jobs.get(job_id) if job_id else None
-    # If the caller didn't say which job, and exactly one is running, stop that.
-    if job is None and len(_jobs) == 1:
-        job = next(iter(_jobs.values()))
+    # A run can only be stopped by whoever started it — otherwise anyone could
+    # kill the job currently occupying the shared device.
+    if job is not None and job.get("state_key") != key:
+        return jsonify({"error": "Not your job"}), 403
+    # If the caller didn't say which job, and they have exactly one running,
+    # stop that.
+    if job is None and not job_id:
+        mine = [j for j in _jobs.values() if key and j.get("state_key") == key]
+        if len(mine) == 1:
+            job = mine[0]
 
     if job is None:
-        stop_training()  # nothing tracked — still poke the local stop flag
         return jsonify({"status": "stopped"})
 
+    # Remembered on the job as well as signalled to the engine: the engine
+    # clears its stop flag when its loop starts, so a stop that lands while the
+    # dataset is still being prepared would otherwise be lost.
+    job["stop_requested"] = True
     if job["is_local"]:
         stop_training()
     else:
@@ -790,30 +843,66 @@ def stop_training_route():
 @app.route("/api/training/queue", methods=["GET"])
 def list_queue():
     """The caller's running + queued jobs (across all their devices)."""
-    key = _state_key()
-    jobs = []
-    for j in _jobs.values():
-        if j.get("state_key") == key:
-            jobs.append(_queue_view(j, "running", 0))
-    for q in _queues.values():
-        for pos, j in enumerate(q):
-            if j.get("state_key") == key:
-                jobs.append(_queue_view(j, "queued", pos + 1))
-    return jsonify({"jobs": jobs})
+    return jsonify({"jobs": _caller_jobs(_peek_state_key())})
+
+
+@app.route("/api/training/active", methods=["GET"])
+def training_active():
+    """Everything a browser needs to know about the caller's training activity.
+
+    Runs live on the server, not in the tab that started them, so any browser
+    signed in to the same account (or the same anonymous session) can ask what
+    is going on: `jobs` are the running + queued runs, `last_run` is the most
+    recent one that finished (so "it completed while you were away" can be
+    shown). Cheap enough to poll.
+    """
+    key = _peek_state_key()
+    run = _recent_runs.get(key) if key else None
+    return jsonify({
+        "jobs": _caller_jobs(key),
+        "last_run": _run_view(run) if run else None,
+    })
+
+
+@app.route("/api/training/jobs/<job_id>/attach", methods=["POST"])
+def attach_job(job_id):
+    """(Re)attach a browser to one of the caller's runs.
+
+    Body: {"socket_id": <str>} (optional). Joins that socket to the run's room
+    so live events flow to it, and returns a snapshot — the model info, every
+    epoch so far and the recent hardware samples — so the page can redraw the
+    run exactly as if it had been watching from the start. Also serves the
+    caller's last finished run (snapshot only; there is nothing left to stream).
+    """
+    key = _peek_state_key()
+    body = request.get_json(silent=True) or {}
+    job = _find_job(job_id)
+    if job is not None and key and job.get("state_key") == key:
+        # Join first, snapshot second: nothing yields in between, so the
+        # snapshot and the live stream can't have a gap (the client drops any
+        # epoch it already has).
+        _join_job_room(body.get("socket_id"), job["room"])
+        return jsonify(_job_snapshot(job))
+    run = _recent_runs.get(key) if key else None
+    if run and run["job_id"] == job_id:
+        return jsonify(_run_snapshot(run))
+    # Same answer for "doesn't exist" and "not yours" — don't confirm job ids.
+    return jsonify({"error": "Run not found"}), 404
 
 
 @app.route("/api/training/queue/<job_id>", methods=["DELETE"])
 def cancel_queued(job_id):
     """Remove a job that is still waiting in a device queue (not yet running)."""
-    key = _state_key()
-    for q in _queues.values():
+    key = _peek_state_key()
+    for device_id, q in _queues.items():
         for i, j in enumerate(q):
             if j["job_id"] == job_id:
                 if j.get("state_key") != key:
                     return jsonify({"error": "Not your job"}), 403
                 q.pop(i)
                 _delete_job_snapshot(j)
-                socketio.emit("training_stopped", {}, room=j["room"])
+                _emit_job(j, "training_stopped", {"cancelled": True})
+                _notify_queue(device_id)
                 return jsonify({"status": "cancelled"})
     return jsonify({"error": "Queued job not found (it may have already started)"}), 404
 
@@ -836,6 +925,7 @@ def reset_state():
         st["dataset_info"] = None
         st["feature_cols"] = []
         st["target_col"] = None
+        st["demo_key"] = None
 
     if scope in ("model", "all"):
         st["model_config"] = None
@@ -942,6 +1032,216 @@ def upload_weights():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Failed to parse weights: {str(e)}"}), 500
+
+
+# ─────────────────────────────────────────────────────────
+# Demo datasets + "try the model you just trained"
+# ─────────────────────────────────────────────────────────
+@app.route("/api/demo/datasets", methods=["GET"])
+def demo_datasets():
+    """The bundled sample datasets, each with a real preview and a preset
+    model configuration (see demo_data.py)."""
+    return jsonify({"datasets": demo_data.list_demos()})
+
+
+@app.route("/api/demo/datasets/<key>/download", methods=["GET"])
+def demo_dataset_download(key):
+    """Download a sample dataset as CSV (the tutorial hands this to learners)."""
+    entry = demo_data.get_demo(key)
+    path = demo_data.demo_path(key)
+    if not entry or not path:
+        return jsonify({"error": "Unknown sample dataset"}), 404
+    return send_file(path, mimetype="text/csv", as_attachment=True,
+                     download_name=entry["file"])
+
+
+@app.route("/api/demo/load", methods=["POST"])
+@limiter.limit("30 per minute")
+def demo_load():
+    """Load a sample dataset into the caller's working state.
+
+    Body: {"key": <dataset key>, "configure": <bool, default true>}.
+    With `configure` the feature/target columns and a preset model are filled
+    in too, so the very next call can be /api/training/start. Without it only
+    the dataset is loaded — exactly as if the visitor had uploaded the file —
+    and they pick the columns and build the model themselves.
+    """
+    body = request.get_json(silent=True) or {}
+    key = body.get("key")
+    entry = demo_data.get_demo(key)
+    src = demo_data.demo_path(key)
+    if not entry or not src:
+        return jsonify({"error": "Unknown sample dataset"}), 404
+
+    st = _get_state()
+    # Each visitor trains on a private copy: a finished run deletes its dataset,
+    # and that must never be the bundled original.
+    dst = os.path.join(UPLOAD_DIR, f"demo_{key}_{uuid.uuid4().hex[:10]}.csv")
+    try:
+        shutil.copy(src, dst)
+        info = analyze_dataset(dst)
+    except Exception as e:
+        return _internal_error("demo dataset load failed", e,
+                               public_msg="Could not load that sample dataset.")
+
+    # Drop the copy from a previous click, unless a run is still reading it.
+    prev = st.get("dataset_path")
+    if (prev and prev != dst and os.path.basename(prev).startswith("demo_")
+            and os.path.exists(prev)
+            and not any(j.get("dataset_path") == prev for j in _jobs.values())):
+        try:
+            os.remove(prev)
+        except OSError:
+            pass
+
+    st["dataset_file"] = entry["file"]
+    st["dataset_path"] = dst
+    st["dataset_info"] = info
+    st["demo_key"] = key
+    configure = body.get("configure", True) is not False
+    if configure:
+        st["feature_cols"] = [c["name"] for c in info["columns"]
+                              if c["name"] != entry["target"]]
+        st["target_col"] = entry["target"]
+        st["model_config"] = dict(entry["config"])
+        st["project_name"] = entry["config"]["project_name"]
+    else:
+        st["feature_cols"] = []
+        st["target_col"] = None
+
+    return jsonify({
+        "status": "ok",
+        "filename": entry["file"],
+        "info": info,
+        "configured": configure,
+        "feature_cols": st["feature_cols"],
+        "target_col": st["target_col"],
+        "config": st["model_config"] if configure else None,
+    })
+
+
+def _last_run_model(key):
+    """(run, preprocess, weights_path) for the caller's last completed run, or
+    (None, None, None) when there is nothing usable to predict with."""
+    run = _recent_runs.get(key) if key else None
+    if not run or run["status"] != "complete":
+        return None, None, None
+    filename = os.path.basename((run.get("final") or {}).get("weight_filename") or "")
+    if not filename:
+        return None, None, None
+    weights_path = os.path.join(WEIGHTS_DIR, filename)
+    pp = load_preprocess(weights_path)
+    if pp is None or not os.path.exists(weights_path):
+        return None, None, None
+    return run, pp, weights_path
+
+
+@app.route("/api/training/last-run/inference", methods=["GET"])
+def last_run_inference():
+    """Describe the inputs of the model the caller just trained.
+
+    Works without an account (the run is found through the session), which is
+    what lets a visitor try their freshly trained demo model. When that run
+    used a sample dataset, real rows from it are included as ready-made
+    examples — each with the true answer, so a prediction can be checked.
+    """
+    run, pp, _ = _last_run_model(_peek_state_key())
+    if run is None:
+        return jsonify({"ready": False})
+    return jsonify({
+        "ready": True,
+        "job_id": run["job_id"],
+        "project_name": run.get("project_name"),
+        "task_type": pp["task_type"],
+        "target_col": pp.get("target_col"),
+        "target_classes": pp.get("target_classes"),
+        "fields": _inference_fields(pp),
+        "examples": demo_data.examples(run["demo_key"], n=12) if run.get("demo_key") else [],
+    })
+
+
+@app.route("/api/training/last-run/predict", methods=["POST"])
+@limiter.limit("120 per minute")
+def last_run_predict():
+    """Run the caller's last trained model on {"rows": [{col: value}, ...]}."""
+    run, pp, weights_path = _last_run_model(_peek_state_key())
+    if run is None:
+        return jsonify({"error": "No trained model to predict with yet — "
+                                 "finish a training run first."}), 409
+    body = request.get_json(silent=True) or {}
+    rows = body.get("rows") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not rows or not all(isinstance(r, dict) for r in rows):
+        return jsonify({"error": "No input rows provided"}), 400
+    if len(rows) > 200:
+        return jsonify({"error": "Too many rows (max 200 per request)"}), 400
+
+    cfg = run["config"]
+    try:
+        X = apply_preprocess(pp, rows)
+        model = load_weights_for_inference(
+            weights_path, cfg["arch_type"], cfg["layer_sizes"],
+            pp["input_dim"], pp["output_dim"],
+            activation=cfg.get("activation", "relu"),
+        )
+        t0 = time.time()
+        out = predict(model, X, pp["task_type"])
+        elapsed = time.time() - t0
+    except Exception as e:
+        return _internal_error("last-run inference failed", e,
+                               public_msg="Prediction failed — check the input values and try again.")
+
+    from training_engine import format_predictions, evaluate_predictions
+    predictions = format_predictions(pp, out)
+    return jsonify({
+        "task_type": pp["task_type"],
+        "target_col": pp.get("target_col"),
+        "count": len(predictions),
+        "predictions": predictions,
+        "evaluation": evaluate_predictions(pp, rows, predictions),
+        "inference_ms": round(elapsed * 1000, 2),
+    })
+
+
+# ─────────────────────────────────────────────────────────
+# Sales / enterprise enquiries
+# ─────────────────────────────────────────────────────────
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@app.route("/api/sales/contact", methods=["POST"])
+@limiter.limit("5 per hour")
+def sales_contact():
+    """Store an enterprise enquiry so the team can follow up.
+
+    Open to signed-out visitors too (the form asks for an email). Nothing is
+    sent anywhere from here — enquiries land in the `sales_inquiries` table.
+    """
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()[:120]
+    email = (body.get("email") or "").strip()[:200]
+    company = (body.get("company") or "").strip()[:160]
+    message = (body.get("message") or "").strip()[:4000]
+    interest = (body.get("interest") or "").strip()[:60]
+
+    if not name:
+        return jsonify({"error": "Please tell us your name."}), 400
+    if not _EMAIL_RE.match(email):
+        return jsonify({"error": "Please enter a valid email address."}), 400
+    if len(message) < 10:
+        return jsonify({"error": "Tell us a little about what you need "
+                                 "(at least a sentence)."}), 400
+
+    inquiry = SalesInquiry(
+        user_id=session.get("user_id"),
+        name=name, email=email, company=company or None,
+        interest=interest or None, message=message,
+    )
+    db.session.add(inquiry)
+    db.session.commit()
+    logger.info("[sales] new enquiry #%s from %s", inquiry.id, email)
+    return jsonify({"status": "received", "id": inquiry.id}), 201
 
 
 # ─────────────────────────────────────────────────────────
@@ -1070,6 +1370,18 @@ def _project_preprocess(proj):
     return load_preprocess(os.path.join(WEIGHTS_DIR, proj.weight_filename))
 
 
+def _inference_fields(pp):
+    """The input form a saved model expects, derived from its preprocessing."""
+    fields = []
+    for col in pp["feature_cols"]:
+        meta = pp["features"].get(col, {"kind": "numeric"})
+        field = {"name": col, "kind": meta.get("kind", "numeric")}
+        if meta.get("kind") == "categorical":
+            field["options"] = [c for c in meta.get("classes", []) if c != "__MISSING__"]
+        fields.append(field)
+    return fields
+
+
 def _inference_resource(elapsed, n_rows):
     """Resource-consumption summary for a forward pass: timing, throughput, and a
     one-shot hardware snapshot (sampled off the event loop so it doesn't stall)."""
@@ -1105,20 +1417,12 @@ def inference_schema(project_id):
             "task_type": proj.task_type,
         })
 
-    fields = []
-    for col in pp["feature_cols"]:
-        meta = pp["features"].get(col, {"kind": "numeric"})
-        field = {"name": col, "kind": meta.get("kind", "numeric")}
-        if meta.get("kind") == "categorical":
-            field["options"] = [c for c in meta.get("classes", []) if c != "__MISSING__"]
-        fields.append(field)
-
     return jsonify({
         "ready": True,
         "task_type": pp["task_type"],
         "target_col": pp.get("target_col"),
         "target_classes": pp.get("target_classes"),
-        "fields": fields,
+        "fields": _inference_fields(pp),
     })
 
 
@@ -2003,6 +2307,7 @@ def _cleanup_dataset(state_key, used_path=None):
     st["dataset_info"] = None
     st["feature_cols"] = []
     st["target_col"] = None
+    st["demo_key"] = None
 
 
 def _finish_job(job_id):
@@ -2011,6 +2316,263 @@ def _finish_job(job_id):
     if job:
         _device_busy.pop(job["device_id"], None)
         _drain_queue(job["device_id"])
+
+
+# ── Background sessions: replayable job events ────────────
+# A run belongs to the server, not to the browser tab that started it. Every
+# event a run produces goes through `_emit_job`, which mirrors it into the job
+# record before broadcasting, so a browser that attaches later (a reopened tab,
+# another device signed in to the same account) can be handed the whole story
+# so far and then follow along live.
+_TERMINAL_EVENTS = {
+    "training_complete": "complete",
+    "training_stopped": "stopped",
+    "training_error": "error",
+}
+_HISTORY_REPLAY_MAX = 1500  # most epochs sent in one snapshot (longer runs are thinned)
+
+
+def _emit_job(job, event, payload=None):
+    """Record a run's event on its job, then send it to everyone watching."""
+    payload = dict(payload or {})
+    payload["job_id"] = job["job_id"]
+    if event == "training_update":
+        job["epoch"] = payload.get("epoch", job["epoch"])
+        job["total_epochs"] = payload.get("total_epochs", job["total_epochs"])
+        job["eta_seconds"] = payload.get("eta_seconds")
+        job["history"].append(payload)
+    elif event == "training_info":
+        job["info"] = payload
+    elif event == "system_stats":
+        job["stats"].append(payload)
+    elif event in _TERMINAL_EVENTS:
+        _archive_run(job, _TERMINAL_EVENTS[event], payload)
+    socketio.emit(event, payload, room=job["room"])
+
+
+def _conclude_job(job, event, payload=None):
+    """End a running job: record the outcome, free the device, then announce it.
+
+    In that order, so there is never a moment where the run is gone from the
+    live registry but not yet the owner's "last run" (a status poll landing in
+    that gap would make the run look like it vanished), and so a browser that
+    reacts to the announcement finds the device already released.
+    """
+    payload = dict(payload or {})
+    payload["job_id"] = job["job_id"]
+    _archive_run(job, _TERMINAL_EVENTS[event], payload)
+    _finish_job(job["job_id"])
+    socketio.emit(event, payload, room=job["room"])
+
+
+class _JobEmitter:
+    """The `socketio` stand-in handed to `train_model` for a local run.
+
+    Routes the engine's events through `_emit_job`, but holds back the terminal
+    ones: the caller sends those itself (via `_conclude_job`) once the weights'
+    sidecar is written and the project row is saved — so a browser that reacts
+    to "complete" never races the bookkeeping behind it.
+    """
+
+    def __init__(self, job):
+        self.job = job
+        self.held = {}
+
+    def emit(self, event, data=None, room=None):
+        if event in _TERMINAL_EVENTS:
+            self.held[event] = data or {}
+            return
+        _emit_job(self.job, event, data)
+
+    def sleep(self, seconds=0):
+        socketio.sleep(seconds)
+
+
+def _mark_started(job):
+    """Flip a job to running: reserve its device and tell its watchers."""
+    job["started_at"] = _utcnow().isoformat() + "Z"
+    # A re-queued run starts over from epoch 1 — drop anything from the
+    # interrupted attempt so the replay buffer matches what is on screen.
+    job["epoch"] = 0
+    job["eta_seconds"] = None
+    job["info"] = None
+    job["history"] = []
+    job["stats"].clear()
+    _jobs[job["job_id"]] = job
+    _device_busy[job["device_id"]] = job["job_id"]
+    _emit_job(job, "training_started", {"job": _job_view(job)})
+
+
+def _archive_run(job, status, payload):
+    """Keep a finished run around as its owner's "last run"."""
+    if not job.get("started_at"):
+        return  # cancelled while still queued — there is nothing to show
+    final = {k: v for k, v in payload.items()
+             if k not in ("history", "model_path", "job_id")}
+    _recent_runs[job["state_key"]] = {
+        "job_id": job["job_id"],
+        "status": status,
+        "project_name": job.get("project_name"),
+        "device_id": job["device_id"],
+        "device_name": job.get("device_name"),
+        "is_local": job["is_local"],
+        "demo_key": job.get("demo_key"),
+        "config": job["config"],
+        "info": job.get("info"),
+        "history": job["history"],
+        "stats": list(job["stats"]),
+        "final": final,
+        "epoch": job.get("epoch", 0),
+        "total_epochs": job.get("total_epochs", 0),
+        "queued_at": job.get("queued_at"),
+        "started_at": job.get("started_at"),
+        "finished_at": _utcnow().isoformat() + "Z",
+        "finished_ts": time.time(),
+    }
+
+
+def _find_job(job_id):
+    """A running or queued job by id, or None."""
+    job = _jobs.get(job_id)
+    if job is not None:
+        return job
+    for q in _queues.values():
+        for j in q:
+            if j["job_id"] == job_id:
+                return j
+    return None
+
+
+def _job_view(job):
+    """Light, JSON-safe description of a running or queued job."""
+    running = _jobs.get(job["job_id"]) is job
+    position, ahead, wait_seconds = 0, 0, None
+    if not running:
+        q = _queues.get(job["device_id"]) or []
+        idx = next((i for i, j in enumerate(q) if j is job), 0)
+        position = idx + 1
+        busy_id = _device_busy.get(job["device_id"])
+        ahead = idx + (1 if busy_id else 0)
+        # Only the run at the front of the line has an honest estimate: the
+        # time left on the one currently training. Further back we don't know
+        # how long the runs in between will take, so we don't pretend to.
+        if idx == 0 and busy_id and busy_id in _jobs:
+            wait_seconds = _jobs[busy_id].get("eta_seconds")
+        elif idx == 0 and not busy_id:
+            wait_seconds = 0
+    return {
+        "job_id": job["job_id"],
+        "device_id": job["device_id"],
+        "device_name": job.get("device_name"),
+        "is_local": job["is_local"],
+        "project_name": job.get("project_name"),
+        "status": "running" if running else "queued",
+        "position": position,
+        "ahead": ahead,
+        "wait_seconds": wait_seconds,
+        "epoch": job.get("epoch", 0),
+        "total_epochs": job.get("total_epochs", 0),
+        "eta_seconds": job.get("eta_seconds"),
+        "queued_at": job.get("queued_at"),
+        "started_at": job.get("started_at"),
+        "demo_key": job.get("demo_key"),
+    }
+
+
+def _run_view(run):
+    """Light description of an archived (finished) run."""
+    return {
+        "job_id": run["job_id"],
+        "device_id": run["device_id"],
+        "device_name": run.get("device_name"),
+        "is_local": run["is_local"],
+        "project_name": run.get("project_name"),
+        "status": run["status"],
+        "position": 0,
+        "ahead": 0,
+        "wait_seconds": None,
+        "epoch": run.get("epoch", 0),
+        "total_epochs": run.get("total_epochs", 0),
+        "eta_seconds": None,
+        "queued_at": run.get("queued_at"),
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "demo_key": run.get("demo_key"),
+        "final": run.get("final"),
+    }
+
+
+def _thin_history(history):
+    """Cap a replayed history at `_HISTORY_REPLAY_MAX` points, keeping the last."""
+    n = len(history)
+    if n <= _HISTORY_REPLAY_MAX:
+        return list(history)
+    step = -(-n // _HISTORY_REPLAY_MAX)  # ceil
+    thinned = history[::step]
+    if thinned[-1] is not history[-1]:
+        thinned.append(history[-1])
+    return thinned
+
+
+def _job_snapshot(job):
+    return {
+        "job": _job_view(job),
+        "config": job["config"],
+        "info": job.get("info"),
+        "history": _thin_history(job["history"]),
+        "stats": list(job["stats"]),
+        "final": None,
+    }
+
+
+def _run_snapshot(run):
+    return {
+        "job": _run_view(run),
+        "config": run["config"],
+        "info": run.get("info"),
+        "history": _thin_history(run["history"]),
+        "stats": run.get("stats") or [],
+        "final": run.get("final"),
+    }
+
+
+def _caller_jobs(key):
+    """Views of every running + queued job owned by `key` (running first)."""
+    if not key:
+        return []
+    jobs = [_job_view(j) for j in _jobs.values() if j.get("state_key") == key]
+    for q in _queues.values():
+        jobs += [_job_view(j) for j in q if j.get("state_key") == key]
+    return jobs
+
+
+def _notify_queue(device_id):
+    """Tell everyone waiting on a device where they now stand in line."""
+    for j in list(_queues.get(device_id) or []):
+        socketio.emit("queue_update", {"job_id": j["job_id"], "job": _job_view(j)},
+                      room=j["room"])
+
+
+def _remove_orphan_weights(filename):
+    """Delete a weights file (and its sidecar) that no saved project points at.
+
+    Anonymous runs aren't persisted as projects, so their weights are only
+    reachable through the visitor's working state; once that moves on, the file
+    is dead weight on disk.
+    """
+    if not filename:
+        return
+    filename = os.path.basename(filename)
+    with app.app_context():
+        if Project.query.filter_by(weight_filename=filename).first() is not None:
+            return
+    path = os.path.join(WEIGHTS_DIR, filename)
+    for p in (path, path[:-3] + ".preprocess.json" if path.endswith(".pt") else None):
+        if p and os.path.exists(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
 
 
 # ── Job launch + queue plumbing ───────────────────────────
@@ -2044,7 +2606,6 @@ def _start_local_job(job):
     once prep completes (the frontend builds its visualisation from that event).
     """
     config = job["config"]
-    room = job["room"]
     state_key = job["state_key"]
     owner_user_id = job["owner_user_id"]
     ds_path = job["dataset_path"]
@@ -2052,9 +2613,7 @@ def _start_local_job(job):
 
     # Reserve the device up front, before any blocking work, so the queueing
     # logic and any concurrent request observe it as occupied immediately.
-    job["started_at"] = _utcnow().isoformat() + "Z"
-    _jobs[job_id] = job
-    _device_busy[job["device_id"]] = job_id
+    _mark_started(job)
 
     def run():
         # ── Dataset prep + model build off the event loop (real thread) ──
@@ -2070,13 +2629,18 @@ def _start_local_job(job):
             # Prep failure: free the device and (for a queued run) drop its
             # private snapshot, but leave the user's live dataset intact so they
             # can fix the selection and retry.
-            socketio.emit("training_error",
-                          {"message": f"Could not prepare the dataset: {e}"}, room=room)
-            _finish_job(job_id)
             _delete_job_snapshot(job)
+            _conclude_job(job, "training_error",
+                          {"message": f"Could not prepare the dataset: {e}"})
             return
 
-        socketio.emit("training_info", {
+        # Stopped while the dataset was being prepared — don't start at all.
+        if job.get("stop_requested"):
+            _conclude_job(job, "training_stopped", {"epoch": 0})
+            _cleanup_dataset(state_key, ds_path)
+            return
+
+        _emit_job(job, "training_info", {
             "arch_type": config["arch_type"],
             "layer_sizes": config["layer_sizes"],
             "input_dim": data["input_dim"],
@@ -2088,34 +2652,46 @@ def _start_local_job(job):
             "epochs": config["epochs"],
             "early_stopping": config.get("early_stopping", {}),
             "device": str(torch_device),
-        }, room=room)
+        })
 
         monitor = SystemMonitor(
-            emit_fn=lambda s: socketio.emit("system_stats", s, room=room),
+            emit_fn=lambda s: _emit_job(job, "system_stats", s),
             sleep_fn=socketio.sleep, run_blocking=_run_blocking,
         )
         socketio.start_background_task(monitor.loop)
+        emitter = _JobEmitter(job)
+        error = None
         try:
             result = train_model(
                 model, data["train_loader"], data["val_loader"],
-                data["task_type"], config, socketio,
+                data["task_type"], config, emitter,
                 input_dim=data["input_dim"], output_dim=data["output_dim"],
-                device=torch_device, room=room,
+                device=torch_device, room=job["room"],
             )
         except Exception as e:
-            socketio.emit("training_error", {"message": str(e)}, room=room)
+            error = str(e)
             result = None
         finally:
             monitor.stop()
         if result:
-            _states[state_key]["last_weights_file"] = result["weight_filename"]
+            st = _states[state_key]
+            previous = st.get("last_weights_file")
+            st["last_weights_file"] = result["weight_filename"]
             try:
                 save_preprocess(os.path.join(WEIGHTS_DIR, result["weight_filename"]),
                                 data["preprocess"])
             except Exception as e:
                 print(f"[train] failed to save preprocess sidecar: {e}")
             _persist_project(owner_user_id, config, result)
-        _finish_job(job_id)
+            if owner_user_id is None and previous != result["weight_filename"]:
+                _remove_orphan_weights(previous)
+        if result:
+            _conclude_job(job, "training_complete",
+                          emitter.held.get("training_complete") or result)
+        elif error is not None:
+            _conclude_job(job, "training_error", {"message": error})
+        else:
+            _conclude_job(job, "training_stopped", emitter.held.get("training_stopped"))
         _cleanup_dataset(state_key, ds_path)
 
     socketio.start_background_task(run)
@@ -2125,9 +2701,7 @@ def _start_remote_job(job, node_sid):
     """Dispatch a job to a node agent NOW. Raises if the dataset can't be read."""
     with open(job["dataset_path"], "rb") as f:
         csv_b64 = base64.b64encode(f.read()).decode()
-    job["started_at"] = _utcnow().isoformat() + "Z"
-    _jobs[job["job_id"]] = job
-    _device_busy[job["device_id"]] = job["job_id"]
+    _mark_started(job)
     socketio.emit("node_run_job", {
         "job_id": job["job_id"],
         "config": job["config"],
@@ -2150,9 +2724,10 @@ def _drain_queue(device_id):
         try:
             _start_local_job(job)
         except Exception as e:
-            socketio.emit("training_error", {"message": str(e)}, room=job["room"])
+            _emit_job(job, "training_error", {"message": str(e)})
             _delete_job_snapshot(job)
             _drain_queue(device_id)  # skip the broken one, try the next
+            return
     else:
         node = _nodes.get(device_id)
         if not node:
@@ -2161,23 +2736,12 @@ def _drain_queue(device_id):
         try:
             _start_remote_job(job, node["sid"])
         except Exception as e:
-            socketio.emit("training_error", {"message": str(e)}, room=job["room"])
+            _emit_job(job, "training_error", {"message": str(e)})
             _delete_job_snapshot(job)
             _drain_queue(device_id)
-
-
-def _queue_view(job, status, position):
-    return {
-        "job_id": job["job_id"],
-        "device_id": job["device_id"],
-        "is_local": job["is_local"],
-        "project_name": job.get("project_name"),
-        "status": status,
-        "position": position,
-        "epoch": job.get("epoch", 0),
-        "total_epochs": job.get("total_epochs", 0),
-        "started_at": job.get("started_at"),
-    }
+            return
+    # Everyone still waiting just moved up one place.
+    _notify_queue(device_id)
 
 
 def _persist_project(owner_user_id, config, result):
@@ -2222,7 +2786,8 @@ def _device_runtime(device):
     online = True if device.is_shared else (device.id in _nodes)
     status = "busy" if job else ("available" if online else "offline")
 
-    rt = {"online": online, "status": status, "job": None}
+    rt = {"online": online, "status": status, "job": None,
+          "queue_length": len(_queues.get(device.id) or [])}
     if job:
         rt["job"] = {
             "project_name": job.get("project_name"),
@@ -2360,11 +2925,14 @@ def on_subscribe_job(data):
     job_id = (data or {}).get("job_id")
     if not job_id:
         return
-    job = _jobs.get(job_id)
+    job = _find_job(job_id)
     # Allow the join only if the caller's working-state key matches the job's
-    # owner. Unknown jobs (not yet started / already finished) are refused.
-    if job is not None and job.get("state_key") == _state_key():
+    # owner. Unknown jobs (already finished) are refused. Queued jobs are fine:
+    # the room is where the queued → running hand-off is announced.
+    if job is not None and job.get("state_key") == _peek_state_key():
         join_room(f"job:{job_id}")
+        return True
+    return False
 
 
 @socketio.on("node_register")
@@ -2547,11 +3115,11 @@ def on_node_relay(data):
         return
     event = data.get("event")
     payload = data.get("data") or {}
-    if event == "training_update":
-        job["epoch"] = payload.get("epoch", job["epoch"])
-        job["total_epochs"] = payload.get("total_epochs", job["total_epochs"])
-        job["eta_seconds"] = payload.get("eta_seconds")
-    socketio.emit(event, payload, room=job["room"])
+    # Terminal outcomes arrive through node_complete / node_stopped / node_error
+    # (which also do the bookkeeping) — never take them from a bare relay.
+    if not isinstance(event, str) or event in _TERMINAL_EVENTS:
+        return
+    _emit_job(job, event, payload if isinstance(payload, dict) else {})
 
 
 @socketio.on("node_complete")
@@ -2587,16 +3155,13 @@ def on_node_complete(data):
         # every later inference/export/download for it would 404. Surface a
         # training error and clean up instead of recording a broken project.
         print(f"[node] run {job['job_id']} completed without usable weights — not persisting")
-        socketio.emit("training_error",
-                      {"error": "The device finished but did not return usable model weights."},
-                      room=job["room"])
-        _finish_job(job["job_id"])
+        _conclude_job(job, "training_error",
+                      {"message": "The device finished but did not return usable model weights."})
         _cleanup_dataset(state_key, used_path)
         return
     _states[state_key]["last_weights_file"] = weight_filename
     _persist_project(job["owner_user_id"], job["config"], meta)
-    socketio.emit("training_complete", meta, room=job["room"])
-    _finish_job(job["job_id"])
+    _conclude_job(job, "training_complete", meta)
     _cleanup_dataset(state_key, used_path)
 
 
@@ -2607,8 +3172,7 @@ def on_node_stopped(data):
         return
     state_key = job["state_key"]
     used_path = job.get("dataset_path")
-    socketio.emit("training_stopped", {}, room=job["room"])
-    _finish_job(job["job_id"])
+    _conclude_job(job, "training_stopped", {})
     _cleanup_dataset(state_key, used_path)
 
 
@@ -2620,10 +3184,8 @@ def on_node_error(data):
         return
     state_key = job["state_key"]
     used_path = job.get("dataset_path")
-    socketio.emit("training_error",
-                  {"message": data.get("error", "Remote training failed")},
-                  room=job["room"])
-    _finish_job(job["job_id"])
+    _conclude_job(job, "training_error",
+                  {"message": data.get("error", "Remote training failed")})
     _cleanup_dataset(state_key, used_path)
 
 
@@ -3914,17 +4476,18 @@ def on_disconnect():
             _jobs.pop(busy_job_id, None)
             _device_busy.pop(dev_id, None)
             _queues[dev_id].insert(0, job)
-            socketio.emit("training_requeued",
-                          {"message": "Node disconnected — will resume when it reconnects."},
-                          room=job["room"])
+            _emit_job(job, "training_requeued",
+                      {"message": "Node disconnected — will resume when it reconnects.",
+                       "job": _job_view(job)})
+            _notify_queue(dev_id)
         else:
             state_key = job.get("state_key") if job else None
             used_path = job.get("dataset_path") if job else None
             if job:
-                socketio.emit("training_error",
-                              {"message": "Node disconnected during training"},
-                              room=job["room"])
-            _finish_job(busy_job_id)
+                _conclude_job(job, "training_error",
+                              {"message": "Node disconnected during training"})
+            else:
+                _finish_job(busy_job_id)
             if state_key:
                 _cleanup_dataset(state_key, used_path)
     print(f"[node] disconnected: device #{dev_id}")

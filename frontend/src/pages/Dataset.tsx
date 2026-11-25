@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { DragEvent, ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import HelpButton from '../components/help/HelpButton';
@@ -18,6 +18,17 @@ interface DatasetInfo {
     cols: number;
     columns: ColumnInfo[];
     preview: Record<string, unknown>[];
+}
+
+interface SampleDataset {
+    key: string;
+    title: string;
+    file: string;
+    rows: number;
+    features: string[];
+    task_type: string;
+    synthetic: boolean;
+    available: boolean;
 }
 
 interface HealthWarning {
@@ -46,6 +57,40 @@ const Dataset: React.FC = () => {
     const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
     const [health, setHealth] = useState<HealthWarning[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Bundled sample datasets — a way to try the app without a file of your own
+    const [samples, setSamples] = useState<SampleDataset[]>([]);
+    const [loadingSample, setLoadingSample] = useState<string | null>(null);
+
+    useEffect(() => {
+        apiGet('/api/demo/datasets')
+            .then((d) => setSamples((d.datasets || []).filter((s: SampleDataset) => s.available)))
+            .catch(() => { });
+    }, []);
+
+    // Loads the sample exactly as if it had been uploaded: the columns and the
+    // model are still the user's to choose.
+    const loadSample = async (key: string) => {
+        if (loadingSample) return;
+        setLoadingSample(key);
+        try {
+            const data = await apiPost('/api/demo/load', { key, configure: false });
+            if (data.error) {
+                showToast(data.error, 'error');
+                return;
+            }
+            setFilename(data.filename);
+            setDatasetInfo(data.info);
+            setSelectedFeatures(new Set());
+            setSelectedTarget(null);
+            setStep(3);
+            showToast(`Loaded ${data.filename}`, 'success');
+        } catch (err) {
+            showToast('Could not load the sample: ' + (err instanceof Error ? err.message : String(err)), 'error');
+        } finally {
+            setLoadingSample(null);
+        }
+    };
 
     // Initial state check
     useEffect(() => {
@@ -281,6 +326,26 @@ const Dataset: React.FC = () => {
                         onChange={handleFileInput}
                     />
                 </div>
+
+                {samples.length > 0 && !uploading && (
+                    <div className="sample-row">
+                        <span className="sample-row__label">No file handy? Try a sample:</span>
+                        {samples.map((s) => (
+                            <button
+                                key={s.key}
+                                type="button"
+                                className="sample-chip"
+                                onClick={() => loadSample(s.key)}
+                                disabled={loadingSample !== null}
+                                title={`${s.rows} rows · ${s.features.length} features · ${s.task_type}`}
+                            >
+                                {loadingSample === s.key ? 'Loading…' : s.title}
+                                <span>{s.rows} rows</span>
+                            </button>
+                        ))}
+                        <Link to="/tutorial" className="sample-row__link">New here? Follow the 5-minute tutorial →</Link>
+                    </div>
+                )}
 
                 {uploading && (
                     <div className="upload-progress active">

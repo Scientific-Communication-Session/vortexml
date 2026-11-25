@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion';
-import { Database, Activity, ArrowRight, Layers, Cpu } from 'lucide-react';
+import { Database, Activity, ArrowRight, Layers, CloudCog, Play, Trophy } from 'lucide-react';
 import NeuralBackground from '../components/NeuralBackground';
 import { cn } from '../utils/cn';
 
@@ -119,7 +119,9 @@ const ScrollIndicator = () => {
     const reduce = useReducedMotion();
     return (
         <motion.div
-            className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 opacity-60"
+            // Hidden on short screens, where the hero fills the viewport and the
+            // indicator would sit on top of its last line.
+            className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 opacity-60 [@media(max-height:980px)]:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.6 }}
             transition={{ delay: 1.6, duration: 1.2, ease: GLIDE }}
@@ -198,7 +200,7 @@ const Home: React.FC = () => {
             <main className="relative z-10">
 
                 {/* ─── Hero ─── */}
-                <section ref={heroRef} className="relative min-h-[calc(100vh-64px)] flex flex-col items-center justify-center px-6 pt-10 pb-24">
+                <section ref={heroRef} className="relative min-h-[calc(100vh-64px)] flex flex-col items-center justify-center px-6 pt-28 pb-28">
                     <motion.div
                         style={{ y: reduce ? 0 : yHeroText, opacity: opacityHero }}
                         className="max-w-5xl mx-auto text-center flex flex-col items-center will-change-[transform,opacity]"
@@ -207,7 +209,7 @@ const Home: React.FC = () => {
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.9, ease: GLIDE }}
-                            className="mb-9 inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/[0.04] px-5 py-2 backdrop-blur-md shadow-[0_0_20px_rgba(255,255,255,0.04)]"
+                            className="mb-4 inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/[0.04] px-5 py-2 backdrop-blur-md shadow-[0_0_20px_rgba(255,255,255,0.04)]"
                         >
                             <span className="relative flex h-1.5 w-1.5">
                                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-4 opacity-70" />
@@ -215,6 +217,26 @@ const Home: React.FC = () => {
                             </span>
                             <span className="font-mono text-[10.5px] font-medium tracking-[0.28em] text-white/85 uppercase">
                                 Vortex Engine
+                            </span>
+                        </motion.div>
+
+                        {/* Award */}
+                        <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.9, delay: 0.05, ease: GLIDE }}
+                            className="mb-9 inline-flex items-center gap-3 rounded-2xl border border-amber-300/30 bg-gradient-to-r from-amber-400/[0.12] via-amber-300/[0.05] to-transparent px-4 py-2.5 text-left backdrop-blur-md shadow-[0_0_34px_-10px_rgba(251,191,36,0.55)]"
+                        >
+                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-amber-300/30 bg-amber-400/15 text-amber-300">
+                                <Trophy className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                            </span>
+                            <span className="flex flex-col leading-tight">
+                                <span className="text-[13.5px] font-semibold tracking-[-0.01em] text-amber-100">
+                                    1st place — Scientific Communication Session 2026
+                                </span>
+                                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-200/60">
+                                    Politehnica University of Bucharest
+                                </span>
                             </span>
                         </motion.div>
 
@@ -250,10 +272,26 @@ const Home: React.FC = () => {
                                 <ArrowRight className="h-[15px] w-[15px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
                             </Link>
                             <Link
-                                to="/learn"
-                                className="group inline-flex h-12 md:h-[52px] items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-7 text-[14px] font-medium text-white/85 backdrop-blur-md transition-all duration-500 ease-glide hover:bg-white/[0.07] hover:border-white/25 hover:text-white"
+                                to="/demo"
+                                className="group inline-flex h-12 md:h-[52px] items-center justify-center gap-2.5 rounded-full border border-white/15 bg-white/[0.03] px-7 text-[14px] font-medium text-white/85 backdrop-blur-md transition-all duration-500 ease-glide hover:bg-white/[0.07] hover:border-white/25 hover:text-white"
                             >
-                                <span className="font-mono uppercase tracking-[0.18em] text-[11px]">Read the docs</span>
+                                <Play className="h-[13px] w-[13px]" fill="currentColor" strokeWidth={0} />
+                                <span className="font-mono uppercase tracking-[0.18em] text-[11px]">Watch a live demo</span>
+                            </Link>
+                        </motion.div>
+
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 1.0, delay: 0.42, ease: GLIDE }}
+                            className="mt-7"
+                        >
+                            <Link
+                                to="/tutorial"
+                                className="group inline-flex items-center gap-2 text-[13.5px] text-white/55 hover:text-white transition-colors duration-300 no-underline"
+                            >
+                                New here? Train your first model in five minutes
+                                <ArrowRight className="h-[13px] w-[13px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
                             </Link>
                         </motion.div>
                     </motion.div>
@@ -307,10 +345,10 @@ const Home: React.FC = () => {
                         />
                         <GlassCard
                             index="◌ 004"
-                            title="High Performance Workers"
-                            description="Under the hood, dedicated Celery ML workers process epochs asynchronously. Your UI stays silky smooth at 60fps, no matter how deep the learning gets."
-                            icon={Cpu}
-                            to="/"
+                            title="Background Sessions"
+                            description="Training runs on the server, not in your tab. Close the browser, come back from any device, and pick the run up exactly where it is — queued on the shared Mac mini, or instantly on a server you enroll yourself."
+                            icon={CloudCog}
+                            to="/training"
                             delay={0.24}
                             className="md:col-span-4"
                         />

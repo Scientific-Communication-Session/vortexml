@@ -519,6 +519,65 @@ body::before {
     cursor: pointer;
 }
 
+
+/* Sample-dataset shortcuts under the upload zone */
+.sample-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.1rem;
+}
+
+.sample-row__label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-right: 0.2rem;
+}
+
+.sample-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-glass);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-primary);
+    font-family: var(--font-main);
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.2s, background-color 0.2s, transform 0.2s;
+}
+
+.sample-chip:hover:not(:disabled) {
+    border-color: var(--border-active);
+    background: rgba(139, 92, 246, 0.1);
+    transform: translateY(-1px);
+}
+
+.sample-chip:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+.sample-chip span {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+.sample-row__link {
+    margin-left: auto;
+    font-size: 0.82rem;
+    color: #c4b5fd;
+}
+
+.sample-row__link:hover {
+    color: #fff;
+}
+
 .upload-progress {
     margin-top: 1rem;
     display: none;

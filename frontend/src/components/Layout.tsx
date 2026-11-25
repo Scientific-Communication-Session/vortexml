@@ -5,8 +5,12 @@ import Footer from './Footer';
 import { ChatProvider } from './chatbot/ChatContext';
 import ChatDrawer from './chatbot/ChatDrawer';
 import ChatButton from './chatbot/ChatButton';
+import { TrainingSessionProvider } from '../context/TrainingSessionContext';
+import SessionPill from './session/SessionPill';
+import SessionOverlays from './session/SessionOverlays';
 
 const navLinks = [
+    { to: '/demo', label: 'Demo' },
     { to: '/dataset', label: 'Dataset' },
     { to: '/architect', label: 'Architect' },
     { to: '/training', label: 'Training' },
@@ -42,6 +46,9 @@ const Layout: React.FC = () => {
     };
 
     return (
+        // Training runs outlive the page that started them, so their session
+        // sits above the routed pages (and feeds the navbar pill).
+        <TrainingSessionProvider>
         <div className="flex flex-col min-h-screen">
             {/* ── Liquid Glass Navbar ── */}
             <nav
@@ -86,7 +93,7 @@ const Layout: React.FC = () => {
                             to={to}
                             className={({ isActive }) =>
                                 [
-                                    'px-4 py-1.5 rounded-xl text-[12.5px] font-medium tracking-[-0.005em] no-underline',
+                                    'px-3 xl:px-4 py-1.5 rounded-xl text-[12.5px] font-medium tracking-[-0.005em] no-underline whitespace-nowrap',
                                     'transition-[color,background-color,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
                                     isActive
                                         ? 'bg-white/[0.11] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
@@ -101,6 +108,7 @@ const Layout: React.FC = () => {
 
                 {/* ── Auth Section ── */}
                 <div className="flex items-center shrink-0">
+                    <SessionPill />
                     {user ? (
                         <div className="flex items-center gap-2">
                             <span className="hidden md:inline-flex items-center gap-2 text-[12.5px] text-white/65 font-medium tracking-[-0.005em]">
@@ -166,7 +174,9 @@ const Layout: React.FC = () => {
                 <ChatButton />
             </ChatProvider>
             <Footer />
+            <SessionOverlays />
         </div>
+        </TrainingSessionProvider>
     );
 };
 

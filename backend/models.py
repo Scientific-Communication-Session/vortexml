@@ -279,3 +279,33 @@ class ChatMessage(db.Model):
             "reasoning": self.reasoning,
             "created_at": self.created_at.isoformat() + "Z",
         }
+
+
+class SalesInquiry(db.Model):
+    """An enterprise / sales enquiry submitted from the "Talk to sales" form.
+
+    `user_id` is set when the sender was signed in, but the form is open to
+    anyone, so the contact details are stored on the row itself.
+    """
+    __tablename__ = 'sales_inquiries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'),
+                        nullable=True, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    email = db.Column(db.String(200), nullable=False)
+    company = db.Column(db.String(160), nullable=True)
+    interest = db.Column(db.String(60), nullable=True)
+    message = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "email": self.email,
+            "company": self.company,
+            "interest": self.interest,
+            "message": self.message,
+            "created_at": self.created_at.isoformat() + "Z",
+        }

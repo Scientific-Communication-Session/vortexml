@@ -36,7 +36,9 @@ const ELLIPSIS: React.CSSProperties = {
 const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) => {
     const specs = device.specs || {};
     const status = STATUS_META[device.status];
-    const selectable = device.status === 'available';
+    // A busy device can still be picked — the run simply joins its queue.
+    const selectable = device.status !== 'offline';
+    const waiting = device.queue_length || 0;
 
     return (
         <div
@@ -96,6 +98,9 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
                         {device.is_shared && (
                             <span className="text-muted" style={{ fontSize: '0.66rem' }}>· shared</span>
                         )}
+                        {waiting > 0 && (
+                            <span className="text-muted" style={{ fontSize: '0.66rem' }}>· {waiting} queued</span>
+                        )}
                     </div>
                     <div className="text-muted" style={{ fontSize: '0.73rem', ...ELLIPSIS }}>
                         {specs.chip || 'Unknown chip'}{specs.platform ? ` · ${specs.platform}` : ''}
@@ -131,7 +136,12 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
                 </span>
 
                 {device.status === 'busy' && device.job ? (
-                    <span style={{ fontSize: '0.72rem', color: status.color, fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                    <span
+                        style={{ fontSize: '0.72rem', color: selected ? '#8b5cf6' : status.color, fontFamily: 'var(--font-mono)', flexShrink: 0 }}
+                        title={`Training now: epoch ${device.job.epoch}/${device.job.total_epochs}`
+                            + (waiting ? ` — ${waiting} more waiting` : '')}
+                    >
+                        {selected && <Check size={12} style={{ verticalAlign: '-2px', marginRight: 3 }} />}
                         {device.job.epoch}/{device.job.total_epochs}
                         {device.job.eta_seconds != null && ` · ${formatTime(device.job.eta_seconds)}`}
                     </span>

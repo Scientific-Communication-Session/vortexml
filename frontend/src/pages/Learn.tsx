@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Map, GraduationCap } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, Map, GraduationCap } from 'lucide-react';
 import Courses from './Courses';
 import Roadmap from './Roadmap';
 
@@ -47,6 +48,13 @@ const Learn: React.FC = () => {
                 <p className="text-text-secondary text-[clamp(0.98rem,0.5vw+0.9rem,1.1rem)] font-light leading-[1.65] max-w-[58ch] mx-auto">
                     A complete machine learning journey — from the math beneath neurons to deploying models in production.
                 </p>
+                <Link
+                    to="/tutorial"
+                    className="group mt-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[13px] text-white/75 hover:text-white hover:border-white/25 transition-colors duration-300 no-underline"
+                >
+                    Rather learn by doing? Train your first model in five minutes
+                    <ArrowRight className="h-[13px] w-[13px] transition-transform duration-500 group-hover:translate-x-1" strokeWidth={2} />
+                </Link>
             </motion.header>
 
             {/* ─── Refined segmented control ─── */}
