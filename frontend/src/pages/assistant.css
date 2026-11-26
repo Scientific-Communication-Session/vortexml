@@ -1,0 +1,44 @@
+/* Assistant (knowledge bases) and Chat: two-pane layouts that stack on phones. */
+
+.as-layout,
+.ch-layout {
+    display: grid;
+    align-items: start;
+    gap: var(--space-5);
+}
+.as-layout { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); }
+.ch-layout { grid-template-columns: minmax(210px, 260px) minmax(0, 1fr); }
+
+@media (max-width: 900px) {
+    .as-layout,
+    .ch-layout { grid-template-columns: 1fr; }
+}
+
+.as-empty,
+.ch-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    text-align: center;
+    color: var(--color-fg-2);
+}
+.as-empty { padding: var(--space-12) var(--space-6); }
+.as-empty h3 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-fg); }
+.ch-empty { margin: auto; }
+
+.as-empty__icon {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: var(--radius-lg);
+    background: var(--color-accent-soft);
+    border: 1px solid var(--color-accent-line);
+    color: var(--color-accent-text);
+}
+
+.ch-main { display: flex; flex-direction: column; height: 72vh; min-height: 480px; }
+.ch-ico { display: inline-block; vertical-align: -2px; }
+
+.bento-tag { display: inline-flex; align-items: center; gap: var(--space-1); }

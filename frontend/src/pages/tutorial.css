@@ -21,7 +21,8 @@
 }
 
 .tt-rail__label {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10px;
     letter-spacing: 0.24em;
     text-transform: uppercase;
@@ -43,18 +44,19 @@
 }
 
 .tt-rail a span {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.68rem;
     color: var(--text-muted);
     transition: color 0.25s;
 }
 
 .tt-rail a:hover {
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-rail a.is-active {
-    color: #fff;
+    color: var(--color-fg);
     border-left-color: var(--accent-2);
 }
 
@@ -222,14 +224,16 @@
     border-radius: 14px;
     border: 1px solid oklch(0.68 0.17 283 / 0.45);
     background: linear-gradient(150deg, oklch(0.68 0.17 283 / 0.28), oklch(0.68 0.17 283 / 0.08));
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 1rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-step__where {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10.5px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
@@ -243,7 +247,7 @@
 }
 
 .tt-step__where a:hover {
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-step h2 {
@@ -274,15 +278,16 @@
 }
 
 .tt-card--changes {
-    border-color: oklch(0.74 0.12 272 / 0.28);
-    background: linear-gradient(160deg, oklch(0.74 0.12 272 / 0.09), oklch(0.135 0.008 285 / 0.6) 60%);
+    border-color: oklch(0.68 0.17 283 / 0.28);
+    background: linear-gradient(160deg, oklch(0.68 0.17 283 / 0.09), oklch(0.135 0.008 285 / 0.6) 60%);
 }
 
 .tt-card__label {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10.5px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
@@ -291,7 +296,7 @@
 }
 
 .tt-card--changes .tt-card__label {
-    color: #67e8f9;
+    color: var(--color-accent-text);
 }
 
 .tt-card ol,
@@ -327,7 +332,8 @@
     height: 1.2rem;
     border-radius: 50%;
     background: oklch(0.68 0.17 283 / 0.22);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.66rem;
     font-weight: 600;
     color: var(--color-accent-text);
@@ -342,13 +348,13 @@
     height: 6px;
     border-radius: 50%;
     background: var(--accent-5);
-    box-shadow: 0 0 0 3px oklch(0.74 0.12 272 / 0.18);
+    box-shadow: 0 0 0 3px oklch(0.68 0.17 283 / 0.18);
 }
 
 .tt-card li b,
 .tt-card li strong {
     font-weight: 600;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-card code,
@@ -405,10 +411,11 @@
 }
 
 .tt-value b {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.92rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 /* Tabs (by hand / AI co-pilot) */
@@ -439,12 +446,12 @@
 }
 
 .tt-tabs button:hover {
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-tabs button.is-active {
     background: rgba(255, 255, 255, 0.11);
-    color: #fff;
+    color: var(--color-fg);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
@@ -466,20 +473,21 @@
 }
 
 .tt-exp__row--base {
-    border-color: rgba(34, 197, 94, 0.3);
-    background: rgba(34, 197, 94, 0.05);
+    border-color: oklch(0.78 0.15 155 / 0.3);
+    background: oklch(0.78 0.15 155 / 0.05);
 }
 
 .tt-exp__change {
     font-size: 0.92rem;
     font-weight: 500;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-exp__change small {
     display: block;
     margin-top: 0.1rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.7rem;
     font-weight: 400;
     color: var(--text-muted);
@@ -517,7 +525,8 @@
 }
 
 .tt-exp__meter b {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.9rem;
     font-weight: 600;
     text-align: right;
@@ -539,3 +548,6 @@
     .tt-kit, .tt-step__body { grid-template-columns: 1fr; }
     .tt-exp__row { grid-template-columns: 1fr; gap: 0.5rem; }
 }
+
+/* Inline copies of the app's own icons inside step text */
+.tt-ico { display: inline-block; vertical-align: -2px; color: var(--color-accent-text); }

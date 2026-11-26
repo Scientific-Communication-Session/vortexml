@@ -14,8 +14,8 @@
     margin-right: 0.5rem;
     border-radius: 999px;
     border: 1px solid oklch(0.68 0.17 283 / 0.38);
-    background: linear-gradient(135deg, oklch(0.68 0.17 283 / 0.2), oklch(0.74 0.12 272 / 0.1));
-    color: #fff;
+    background: linear-gradient(135deg, oklch(0.68 0.17 283 / 0.2), oklch(0.68 0.17 283 / 0.1));
+    color: var(--color-fg);
     font-size: 12px;
     font-weight: 600;
     letter-spacing: -0.005em;
@@ -32,13 +32,14 @@
 }
 
 .vx-pill--queued {
-    border-color: rgba(245, 158, 11, 0.4);
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0.05));
-    box-shadow: 0 0 18px -8px rgba(245, 158, 11, 0.8);
+    border-color: oklch(0.82 0.14 75 / 0.4);
+    background: linear-gradient(135deg, oklch(0.82 0.14 75 / 0.16), oklch(0.82 0.14 75 / 0.05));
+    box-shadow: 0 0 18px -8px oklch(0.82 0.14 75 / 0.8);
 }
 
 .vx-pill__meta {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10.5px;
     font-weight: 500;
     color: rgba(255, 255, 255, 0.62);
@@ -73,9 +74,10 @@
     inset: 0;
     display: grid;
     place-items: center;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-weight: 600;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .vx-ring--pulse::after {
@@ -120,7 +122,7 @@
     margin: auto;
     border-radius: 28px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    background: linear-gradient(180deg, rgba(22, 22, 44, 0.97), rgba(10, 10, 22, 0.98));
+    background: var(--glass-fill-strong);
     box-shadow:
         0 40px 120px -20px rgba(0, 0, 0, 0.8),
         0 0 0 1px oklch(0.68 0.17 283 / 0.08),
@@ -147,7 +149,7 @@
     left: 12%;
     right: 12%;
     height: 1px;
-    background: linear-gradient(90deg, transparent, oklch(0.68 0.17 283 / 0.85), oklch(0.74 0.12 272 / 0.7), transparent);
+    background: linear-gradient(90deg, transparent, oklch(0.68 0.17 283 / 0.85), oklch(0.68 0.17 283 / 0.7), transparent);
 }
 
 .vx-modal::after {
@@ -188,14 +190,15 @@
 
 .vx-close:hover {
     background: rgba(255, 255, 255, 0.1);
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .vx-eyebrow {
     display: inline-flex;
     align-items: center;
     gap: 0.55rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10.5px;
     font-weight: 500;
     letter-spacing: 0.26em;
@@ -209,7 +212,7 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #22c55e;
+    background: var(--color-success);
     flex-shrink: 0;
 }
 
@@ -222,9 +225,9 @@
     animation: vx-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
-.vx-dot--amber { background: #f59e0b; }
+.vx-dot--amber { background: var(--color-warning); }
 .vx-dot--violet { background: var(--color-accent); }
-.vx-dot--red { background: #ef4444; }
+.vx-dot--red { background: var(--color-danger); }
 .vx-dot--still::after { display: none; }
 
 @keyframes vx-ping {
@@ -236,7 +239,7 @@
     font-weight: 600;
     letter-spacing: -0.03em;
     line-height: 1.1;
-    color: #fff;
+    color: var(--color-fg);
     margin-bottom: 0.6rem;
     padding-right: 2.5rem;
 }
@@ -246,10 +249,7 @@
     font-style: normal;
     font-weight: 400;
     letter-spacing: -0.015em;
-    background: linear-gradient(90deg, var(--accent-1), var(--accent-3), var(--accent-4));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: var(--color-fg-2);
     padding-right: 0.08em;
 }
 
@@ -302,7 +302,8 @@
 }
 
 .vx-runcard__stat {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.78rem;
     color: rgba(255, 255, 255, 0.75);
     white-space: nowrap;
@@ -323,22 +324,23 @@
     gap: 0.3rem;
     padding: 0.12rem 0.5rem;
     border-radius: 999px;
-    font-family: var(--font-mono);
-    font-size: 0.64rem;
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-2xs);
     font-weight: 500;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.75);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--color-fg-2);
+    border: 1px solid var(--color-line);
     background: rgba(255, 255, 255, 0.04);
     white-space: nowrap;
 }
 
 .vx-chip--violet { color: var(--color-accent-text); border-color: oklch(0.68 0.17 283 / 0.4); background: oklch(0.68 0.17 283 / 0.12); }
-.vx-chip--green { color: #86efac; border-color: rgba(34, 197, 94, 0.35); background: rgba(34, 197, 94, 0.1); }
-.vx-chip--amber { color: #fcd34d; border-color: rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.1); }
-.vx-chip--red { color: #fca5a5; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1); }
-.vx-chip--cyan { color: #67e8f9; border-color: oklch(0.74 0.12 272 / 0.35); background: oklch(0.74 0.12 272 / 0.1); }
+.vx-chip--green { color: var(--color-success); border-color: oklch(0.78 0.15 155 / 0.35); background: oklch(0.78 0.15 155 / 0.1); }
+.vx-chip--amber { color: var(--color-warning); border-color: oklch(0.82 0.14 75 / 0.35); background: oklch(0.82 0.14 75 / 0.1); }
+.vx-chip--red { color: var(--color-danger); border-color: oklch(0.68 0.18 25 / 0.35); background: oklch(0.68 0.18 25 / 0.1); }
+.vx-chip--cyan { color: var(--color-accent-text); border-color: oklch(0.68 0.17 283 / 0.35); background: oklch(0.68 0.17 283 / 0.1); }
 
 .vx-bar {
     height: 5px;
@@ -352,13 +354,13 @@
     display: block;
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, var(--accent-1), var(--accent-3), var(--accent-4));
+    background: var(--color-accent);
     transition: width 0.6s var(--ease-glide);
 }
 
 .vx-bar--waiting > span {
     width: 35% !important;
-    background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.9), transparent);
+    background: linear-gradient(90deg, transparent, oklch(0.82 0.14 75 / 0.9), transparent);
     animation: vx-slide 1.8s ease-in-out infinite;
 }
 
@@ -369,7 +371,8 @@
 
 /* ─── Choice cards ─── */
 .vx-choices-label {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10.5px;
     letter-spacing: 0.22em;
     text-transform: uppercase;
@@ -417,7 +420,7 @@
 
 .vx-choice--primary {
     border-color: oklch(0.68 0.17 283 / 0.55);
-    background: linear-gradient(160deg, oklch(0.68 0.17 283 / 0.26), oklch(0.68 0.17 283 / 0.1) 60%, oklch(0.74 0.12 272 / 0.08));
+    background: linear-gradient(160deg, oklch(0.68 0.17 283 / 0.26), oklch(0.68 0.17 283 / 0.1) 60%, oklch(0.68 0.17 283 / 0.08));
 }
 
 .vx-choice__icon {
@@ -428,7 +431,7 @@
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02));
-    color: #fff;
+    color: var(--color-fg);
     margin-bottom: 0.2rem;
     transition: transform 0.4s var(--ease-glide);
 }
@@ -444,7 +447,7 @@
     font-size: 1rem;
     font-weight: 600;
     letter-spacing: -0.015em;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .vx-choice__title svg {
@@ -506,8 +509,8 @@
 }
 
 .vx-link:hover {
-    color: #fff;
-    text-decoration-color: #fff;
+    color: var(--color-fg);
+    text-decoration-color: var(--color-fg);
 }
 
 /* ─── Enterprise modal ─── */
@@ -533,7 +536,7 @@
 
 .vx-plan--featured {
     border-color: oklch(0.68 0.17 283 / 0.5);
-    background: linear-gradient(160deg, oklch(0.68 0.17 283 / 0.2), oklch(0.68 0.17 283 / 0.07) 55%, oklch(0.74 0.12 272 / 0.06));
+    background: linear-gradient(160deg, oklch(0.68 0.17 283 / 0.2), oklch(0.68 0.17 283 / 0.07) 55%, oklch(0.68 0.17 283 / 0.06));
     box-shadow: 0 18px 50px -26px oklch(0.68 0.17 283 / 0.9);
 }
 
@@ -601,7 +604,8 @@
 .vx-field label {
     display: block;
     margin-bottom: 0.3rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
@@ -643,7 +647,7 @@
 
 .vx-form__error {
     font-size: 0.82rem;
-    color: #fca5a5;
+    color: var(--color-danger);
 }
 
 .vx-form__note {
@@ -659,8 +663,8 @@
     gap: 0.6rem;
     padding: 2.2rem 1.2rem;
     border-radius: 18px;
-    border: 1px solid rgba(34, 197, 94, 0.28);
-    background: rgba(34, 197, 94, 0.06);
+    border: 1px solid oklch(0.78 0.15 155 / 0.28);
+    background: oklch(0.78 0.15 155 / 0.06);
 }
 
 .vx-sent__icon {
@@ -669,8 +673,8 @@
     width: 54px;
     height: 54px;
     border-radius: 50%;
-    background: rgba(34, 197, 94, 0.14);
-    color: #4ade80;
+    background: oklch(0.78 0.15 155 / 0.14);
+    color: var(--color-success);
     animation: vx-pop 0.5s var(--ease-glide);
 }
 
@@ -722,12 +726,13 @@
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.85rem;
     font-weight: 600;
-    color: #fcd34d;
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.28);
+    color: var(--color-warning);
+    background: oklch(0.82 0.14 75 / 0.1);
+    border: 1px solid oklch(0.82 0.14 75 / 0.28);
 }
 
 .vx-run__main {
@@ -758,7 +763,8 @@
 }
 
 .vx-run__meta b {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-weight: 500;
     color: rgba(240, 240, 255, 0.85);
 }
@@ -795,12 +801,13 @@
     height: auto;
     padding: 0.08rem 0.45rem;
     border-radius: 999px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.62rem;
     font-weight: 600;
     letter-spacing: 0.08em;
     color: #1a1204;
-    background: #f59e0b;
+    background: var(--color-warning);
 }
 
 .vx-track__link {
@@ -878,8 +885,8 @@
     padding: 0.75rem 1rem;
     margin-bottom: 1.5rem;
     border-radius: 14px;
-    border: 1px solid oklch(0.74 0.12 272 / 0.28);
-    background: linear-gradient(90deg, oklch(0.74 0.12 272 / 0.1), oklch(0.68 0.17 283 / 0.06));
+    border: 1px solid oklch(0.68 0.17 283 / 0.28);
+    background: linear-gradient(90deg, oklch(0.68 0.17 283 / 0.1), oklch(0.68 0.17 283 / 0.06));
     font-size: 0.88rem;
     line-height: 1.5;
     color: rgba(240, 240, 255, 0.86);
@@ -921,6 +928,6 @@
 /* The Training page's main progress bar while its run waits in the queue */
 .progress-bar-container.vx-bar--waiting .progress-bar {
     width: 30% !important;
-    background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.9), transparent);
+    background: linear-gradient(90deg, transparent, oklch(0.82 0.14 75 / 0.9), transparent);
     animation: vx-slide 1.8s ease-in-out infinite;
 }

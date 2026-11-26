@@ -15,7 +15,8 @@
 }
 
 .lg-eyebrow {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.7rem;
     letter-spacing: 0.24em;
     text-transform: uppercase;
@@ -28,7 +29,7 @@
     font-weight: 600;
     letter-spacing: -0.035em;
     line-height: 1.04;
-    color: #fff;
+    color: var(--color-fg);
     margin-bottom: 1rem;
 }
 
@@ -37,10 +38,7 @@
     font-style: normal;
     font-weight: 400;
     letter-spacing: -0.015em;
-    background: linear-gradient(90deg, var(--accent-1), var(--accent-3), var(--accent-4));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: var(--color-fg-2);
 }
 
 .lg-lead {
@@ -51,7 +49,8 @@
 
 .lg-updated {
     margin-top: 1rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.74rem;
     letter-spacing: 0.04em;
     color: var(--text-muted);
@@ -74,7 +73,8 @@
 }
 
 .lg-toc__label {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.66rem;
     letter-spacing: 0.22em;
     text-transform: uppercase;
@@ -93,7 +93,7 @@
 }
 
 .lg-toc a:hover {
-    color: #fff;
+    color: var(--color-fg);
     border-left-color: var(--accent-2);
 }
 
@@ -114,7 +114,8 @@
 }
 
 .lg-summary h2 {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.7rem;
     font-weight: 500;
     letter-spacing: 0.2em;
@@ -141,14 +142,14 @@
     font-size: 1.32rem;
     font-weight: 600;
     letter-spacing: -0.02em;
-    color: #fff;
+    color: var(--color-fg);
     margin-bottom: 0.8rem;
 }
 
 .lg-section h3 {
     font-size: 1rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--color-fg);
     margin: 1.3rem 0 0.4rem;
 }
 
@@ -167,7 +168,7 @@
 }
 
 .lg-body strong {
-    color: #fff;
+    color: var(--color-fg);
     font-weight: 600;
 }
 
@@ -182,8 +183,8 @@
 
 .lg-body a:hover,
 .lg-link:hover {
-    color: #fff;
-    text-decoration-color: #fff;
+    color: var(--color-fg);
+    text-decoration-color: var(--color-fg);
 }
 
 button.lg-link {
@@ -198,9 +199,10 @@ button.lg-link {
     padding: 0.1em 0.4em;
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.08);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.84em;
-    color: #e9d5ff;
+    color: var(--color-accent-text);
 }
 
 .lg-table-wrap {
@@ -230,7 +232,8 @@ button.lg-link {
 }
 
 .lg-table th {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.68rem;
     font-weight: 500;
     letter-spacing: 0.14em;
@@ -270,7 +273,7 @@ button.lg-link {
     font-size: 1.5rem;
     font-weight: 600;
     letter-spacing: -0.03em;
-    color: #fff;
+    color: var(--color-fg);
     line-height: 1.1;
 }
 
@@ -290,13 +293,13 @@ button.lg-link {
     padding: 1rem 1.2rem;
     border-radius: 16px;
     border: 1px solid rgba(252, 211, 77, 0.3);
-    background: linear-gradient(90deg, rgba(251, 191, 36, 0.12), rgba(251, 191, 36, 0.02));
+    background: linear-gradient(90deg, oklch(0.82 0.14 75 / 0.12), oklch(0.82 0.14 75 / 0.02));
     color: #fef3c7;
 }
 
 .lg-award svg {
     flex-shrink: 0;
-    color: #fcd34d;
+    color: var(--color-warning);
 }
 
 .lg-award strong {
@@ -306,7 +309,8 @@ button.lg-link {
 
 .lg-award small {
     display: block;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.68rem;
     letter-spacing: 0.16em;
     text-transform: uppercase;

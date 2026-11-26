@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-    ArrowRight, Check, CircleCheck, Copy, Download, Eye, FileSpreadsheet, FlaskConical, Hand, Info,
-    Lightbulb, MessageSquareQuote, Play, Sparkles, Upload, UserRound,
+    ArrowRight, Brain, Check, CheckCircle2, CircleCheck, Copy, Download, Eye, FileSpreadsheet, FileText, FlaskConical, Hand, Info, Lightbulb, MessageSquareQuote, Play, Sparkles, Upload, UserRound, Wand2, Zap,
 } from 'lucide-react';
+
+// The icons the app itself shows, so the steps match the screen.
+const Ico: React.FC<{ i: React.ElementType }> = ({ i: I }) => <I size={13} className="tt-ico" aria-hidden="true" />;
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import Clip from '../components/TutorialClip';
@@ -266,9 +268,9 @@ export const TutorialGuide: React.FC = () => {
                         </Do>
                         <Changes>
                             <ul>
-                                <li>You land back on the home page, signed in: your username and a <b>🌿 Novice</b> badge appear in the top bar.</li>
+                                <li>You land back on the home page, signed in: your username and a <b>Novice</b> badge appear in the top bar.</li>
                                 <li>A round purple <b>chat button</b> appears in the bottom-right corner of every page — that is the tutor.</li>
-                                <li>Small <b>✨ icons</b> appear next to settings all over the app. Each one asks the tutor about that setting.</li>
+                                <li>Small <b><Ico i={Sparkles} /> icons</b> appear next to settings all over the app. Each one asks the tutor about that setting.</li>
                             </ul>
                         </Changes>
                     </div>
@@ -321,7 +323,7 @@ export const TutorialGuide: React.FC = () => {
                     <div className="tt-step__body">
                         <Do>
                             <ol>
-                                <li>Scroll to <b>Select Columns</b> and click the <b>✨ icon</b> next to the title. The tutor opens and explains what a feature and a target are.</li>
+                                <li>Scroll to <b>Select Columns</b> and click the <b><Ico i={Sparkles} /> icon</b> next to the title. The tutor opens and explains what a feature and a target are.</li>
                                 <li>Close the tutor, then click <b>Feature</b> on the five study-habit columns — the clues the model may use.</li>
                                 <li>Click <b>Target</b> on <code>passed</code> — the answer it must learn to give.</li>
                                 <li>Click <b>Continue to Architecture Builder</b>.</li>
@@ -348,7 +350,7 @@ export const TutorialGuide: React.FC = () => {
                     <div className="tt-step__body">
                         <Do>
                             <ol>
-                                <li>Click <b>🪄 AI Auto-Configure</b> at the top of the Architect page.</li>
+                                <li>Click <b><Ico i={Wand2} /> AI Auto-Configure</b> at the top of the Architect page.</li>
                                 <li>Paste the <a href="#kit" className="vx-link">test prompt</a> and press Enter. The co-pilot may ask one or two short questions — answer in your own words, or skip them.</li>
                                 <li>Click <b>Generate Configuration</b> and read the proposal and its reasoning.</li>
                                 <li>Click <b>Apply to Architect</b>.</li>
@@ -383,7 +385,7 @@ export const TutorialGuide: React.FC = () => {
                     <div className="tt-step__body">
                         <Do>
                             <ol>
-                                <li>Under <b>Hyperparameters</b>, click the <b>✨ icon</b> next to <b>Learning Rate</b>. The tutor explains what it does and what value suits a first run.</li>
+                                <li>Under <b>Hyperparameters</b>, click the <b><Ico i={Sparkles} /> icon</b> next to <b>Learning Rate</b>. The tutor explains what it does and what value suits a first run.</li>
                                 <li>Ask a follow-up about <i>your</i> model. Tell it your numbers — it cannot see the page.</li>
                                 <li>Change a value if the tutor convinces you; otherwise keep the co-pilot's.</li>
                                 <li>Type <b>Exam-Predictor</b> as the <b>Project Name</b>.</li>
@@ -394,10 +396,10 @@ export const TutorialGuide: React.FC = () => {
                         </Do>
                         <Changes>
                             <ul>
-                                <li>Every setting has two icons: <b>?</b> opens a short written explanation, <b>✨</b> asks the tutor.</li>
+                                <li>Every setting has two icons: <b>?</b> opens a short written explanation, <b><Ico i={Sparkles} /></b> asks the tutor.</li>
                                 <li>The tutor answers in plain language, with a concrete value to start from.</li>
                                 <li>Its answer to the follow-up refers to your rows, features and epochs, because you told it.</li>
-                                <li>The same ✨ icons sit next to <b>Epochs</b>, <b>Batch Size</b>, <b>Optimizer</b>, <b>Activation</b>, the layer sizes and each architecture card.</li>
+                                <li>The same <Ico i={Sparkles} /> icons sit next to <b>Epochs</b>, <b>Batch Size</b>, <b>Optimizer</b>, <b>Activation</b>, the layer sizes and each architecture card.</li>
                             </ul>
                         </Changes>
                     </div>
@@ -409,9 +411,9 @@ export const TutorialGuide: React.FC = () => {
                     <div className="tt-step__body">
                         <Do>
                             <ol>
-                                <li>Click <b>Start Training ⚡</b> at the bottom of the Architect page.</li>
+                                <li>Click <b>Start Training <Ico i={Zap} /></b> at the bottom of the Architect page.</li>
                                 <li>Under <b>Compute Device</b>, keep the <b>VortexML M4 Mac Mini</b> selected.</li>
-                                <li>Click <b>▶ Start Training</b> in the Training Log panel and watch. On this dataset it takes a second or two.</li>
+                                <li>Click <b><Ico i={Play} /> Start Training</b> in the Training Log panel and watch. On this dataset it takes a second or two.</li>
                             </ol>
                             <div className="tt-note">
                                 <Info size={15} />
@@ -424,7 +426,7 @@ export const TutorialGuide: React.FC = () => {
                                 <li><b>Train loss</b> — how wrong the model is — falls from around 0.6 to below 0.1.</li>
                                 <li><b>Val accuracy</b> — the share of held-back students it gets right — climbs to roughly 95%.</li>
                                 <li>With early stopping on, the run may end before the last epoch: training stops once the validation loss stops improving.</li>
-                                <li>The log ends with a green <b>✅</b> line giving the final loss, and new buttons appear: <b>Save Weights</b> and <b>✨ Explain Results</b>.</li>
+                                <li>The log ends with a green <b><Ico i={CheckCircle2} /></b> line giving the final loss, and new buttons appear: <b>Save Weights</b> and <b><Ico i={Sparkles} /> Explain Results</b>.</li>
                             </ul>
                         </Changes>
                     </div>
@@ -436,7 +438,7 @@ export const TutorialGuide: React.FC = () => {
                     <div className="tt-step__body">
                         <Do>
                             <ol>
-                                <li>When the run has finished, click <b>✨ Explain Results</b> in the Training Log panel.</li>
+                                <li>When the run has finished, click <b><Ico i={Sparkles} /> Explain Results</b> in the Training Log panel.</li>
                                 <li>Read the verdict. It is written for someone who has never read a loss curve.</li>
                                 <li>Close it and compare what it says with the charts above.</li>
                             </ol>
@@ -539,7 +541,7 @@ export const TutorialGuide: React.FC = () => {
                         </Do>
                         <Changes>
                             <ul>
-                                <li>Each file shows up as a <b>📄</b> tag once it has been read and indexed.</li>
+                                <li>Each file shows up as a <b><Ico i={FileText} /></b> tag once it has been read and indexed.</li>
                                 <li>The answer is written from your documents only, with numbered references like <b>[1]</b>.</li>
                                 <li>A <b>Sources</b> list under it shows the exact passages each reference points to.</li>
                             </ul>
@@ -554,7 +556,7 @@ export const TutorialGuide: React.FC = () => {
                         <Do>
                             <ol>
                                 <li>Open <b>Chat</b>, type a question and press Enter.</li>
-                                <li>Tick <b>💭 Reasoning</b> to see how it thinks before it answers.</li>
+                                <li>Tick <b><Ico i={Brain} /> Reasoning</b> to see how it thinks before it answers.</li>
                                 <li>Pick one of your knowledge bases in the documents menu to ground the conversation in your files.</li>
                             </ol>
                         </Do>
@@ -714,9 +716,9 @@ const Tutorial: React.FC = () => (
                 click and what you should see change.
             </p>
             <div className="dm-hero__facts">
-                <span className="vx-chip vx-chip--violet">≈ 10 minutes</span>
-                <span className="vx-chip vx-chip--cyan">AI-guided, no ML experience needed</span>
-                <span className="vx-chip vx-chip--green">Recorded from the real app</span>
+                <span className="vx-chip">≈ 10 minutes</span>
+                <span className="vx-chip">AI-guided, no ML experience needed</span>
+                <span className="vx-chip">Recorded from the real app</span>
             </div>
             <div className="dm-hero__actions">
                 <a href="#account" className="dm-cta">Start the tutorial <ArrowRight size={16} /></a>

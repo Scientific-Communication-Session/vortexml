@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Database, Plus, Upload, Send, Trash2, Loader2, FileText, Cpu, Cloud, ChevronDown, Server, Download, Check, Gauge, X } from 'lucide-react';
+import { Database, Plus, Upload, Send, Trash2, Loader2, FileText, Cpu, Cloud, ChevronDown, Server, Download, Check, Gauge, X, Library, Laptop, TriangleAlert, Bot, MessageSquare, Star } from 'lucide-react';
+import './assistant.css';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
@@ -42,9 +43,9 @@ interface DownloadProgress {
 }
 
 const inputStyle: React.CSSProperties = {
-    width: '100%', padding: '0.5rem 0.65rem', borderRadius: 8,
-    background: 'rgba(255,255,255,0.05)', color: 'inherit',
-    border: '1px solid rgba(255,255,255,0.12)', fontSize: '0.9rem',
+    width: '100%', minHeight: 40, padding: '0 var(--space-3)', borderRadius: 'var(--radius-md)',
+    background: 'var(--color-raised)', color: 'var(--color-fg)', fontFamily: 'inherit',
+    border: '1px solid var(--color-line)', fontSize: 'var(--text-sm)',
 };
 
 const Rag: React.FC = () => {
@@ -285,7 +286,7 @@ const Rag: React.FC = () => {
                 <p>Upload documents and ask questions — answers are grounded in your files (RAG) with citations.</p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 320px) 1fr', gap: '1.25rem', alignItems: 'start' }}>
+            <div className="as-layout">
                 {/* ── Knowledge bases ── */}
                 <div className="glass-panel">
                     <div className="panel-title"><span className="pt-icon"><Database size={16} style={{ verticalAlign: 'middle' }} /></span> Knowledge bases</div>
@@ -296,7 +297,7 @@ const Rag: React.FC = () => {
                                 onClick={() => selectKb(kb.id)}
                                 style={{
                                     cursor: 'pointer', padding: '0.6rem 0.7rem', borderRadius: 10,
-                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    border: '1px solid var(--color-line)',
                                     background: selected?.id === kb.id ? 'oklch(0.68 0.17 283 / 0.14)' : 'rgba(255,255,255,0.03)',
                                     display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem',
                                 }}>
@@ -309,7 +310,7 @@ const Rag: React.FC = () => {
                             </div>
                         ))}
                     </div>
-                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.8rem' }}>
+                    <div style={{ borderTop: '1px solid var(--color-line)', paddingTop: '0.8rem' }}>
                         <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New knowledge base name"
                             onKeyDown={(e) => { if (e.key === 'Enter') createKb(); }} style={{ ...inputStyle, marginBottom: '0.5rem' }} />
                         {!isBeginner && (
@@ -321,7 +322,7 @@ const Rag: React.FC = () => {
                                 ))}
                             </select>
                         )}
-                        <button className="btn btn-primary btn-sm" onClick={createKb} style={{ width: '100%' }}>
+                        <button className="btn btn-secondary btn-sm" onClick={createKb} style={{ width: '100%' }}>
                             <Plus size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Create
                         </button>
                     </div>
@@ -330,8 +331,8 @@ const Rag: React.FC = () => {
                 {/* ── Workspace ── */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', minWidth: 0 }}>
                     {!selected ? (
-                        <div className="glass-panel" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
-                            <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📚</div>
+                        <div className="glass-panel as-empty">
+                            <span className="as-empty__icon"><Library size={24} strokeWidth={1.75} aria-hidden="true" /></span>
                             <h3>Pick or create a knowledge base</h3>
                             <p className="text-muted" style={{ fontSize: '0.88rem' }}>Then upload documents and start asking questions.</p>
                         </div>
@@ -352,7 +353,7 @@ const Rag: React.FC = () => {
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                                         {selected.documents.map((d) => (
                                             <span key={d.id} className="bento-tag bento-tag-sm" title={`${d.char_count} chars · ${d.chunk_count} chunks`}>
-                                                📄 {d.filename}
+                                                <FileText size={11} aria-hidden="true" /> {d.filename}
                                             </span>
                                         ))}
                                     </div>
@@ -372,13 +373,13 @@ const Rag: React.FC = () => {
                                             return (
                                                 <button key={d.id} onClick={() => setDeviceId(d.id)}
                                                     className={`btn btn-sm ${active ? 'btn-primary' : 'btn-secondary'}`}>
-                                                    {d.is_shared ? '🖥️' : '💻'} {d.nickname}
+                                                    {d.is_shared ? <Server size={13} aria-hidden="true" /> : <Laptop size={13} aria-hidden="true" />} {d.nickname}
                                                     <span style={{ marginLeft: 6, opacity: 0.8 }}>{d.online === false ? '○' : '●'}</span>
                                                 </button>
                                             );
                                         })}
                                     </div>
-                                    {!catalogOnline && <div className="info-banner" style={{ borderLeft: '3px solid #f5a623' }}><span className="info-banner-icon">⚠️</span><div>This device is offline or hasn't reported its models yet — start its node agent.</div></div>}
+                                    {!catalogOnline && <div className="info-banner info-banner--warning"><span className="info-banner-icon"><TriangleAlert size={16} aria-hidden="true" /></span><div>This device is offline or hasn't reported its models yet — start its node agent.</div></div>}
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
                                         {catalog.map((cat) => (
                                             <div key={cat.backend}>
@@ -389,7 +390,7 @@ const Rag: React.FC = () => {
                                                     {cat.models.map((m) => {
                                                         const inUse = isActiveModel(cat.backend, m.id);
                                                         return (
-                                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'oklch(0.68 0.17 283 / 0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', borderLeft: inUse ? '3px solid var(--color-accent)' : '1px solid rgba(255,255,255,0.07)' }}>
+                                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'oklch(0.68 0.17 283 / 0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--color-line)', borderLeft: inUse ? '3px solid var(--color-accent)' : '1px solid var(--color-line)' }}>
                                                             <div style={{ minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                                 {m.downloaded ? <Check size={12} style={{ color: 'var(--color-success)', verticalAlign: 'middle', marginRight: 4 }} /> : null}{m.id}
                                                                 {m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
@@ -428,7 +429,7 @@ const Rag: React.FC = () => {
                                     )}
 
                                     {/* download any custom model */}
-                                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
+                                    <div style={{ borderTop: '1px solid var(--color-line)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
                                         <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Download a custom model</div>
                                         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                                             <select value={customBackend} onChange={(e) => setCustomBackend(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
@@ -447,7 +448,7 @@ const Rag: React.FC = () => {
 
                                     {/* everything stored on this device */}
                                     {(installed.hf.length > 0 || installed.ollama.length > 0) && (
-                                        <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
+                                        <div style={{ borderTop: '1px solid var(--color-line)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
                                             <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>
                                                 Installed on this device <span className="text-muted" style={{ fontWeight: 400 }}>· {installed.hf.length + installed.ollama.length} models</span>
                                             </div>
@@ -455,7 +456,7 @@ const Rag: React.FC = () => {
                                                 {[...installed.hf.map((m) => ({ ...m, source: 'transformers' })), ...installed.ollama.map((m) => ({ ...m, source: 'ollama' }))].map((m) => {
                                                     const inUse = isActiveModel(m.source, m.id);
                                                     return (
-                                                    <div key={m.source + m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'oklch(0.68 0.17 283 / 0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', borderLeft: inUse ? '3px solid var(--color-accent)' : '1px solid rgba(255,255,255,0.07)' }}>
+                                                    <div key={m.source + m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'oklch(0.68 0.17 283 / 0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--color-line)', borderLeft: inUse ? '3px solid var(--color-accent)' : '1px solid var(--color-line)' }}>
                                                         <div style={{ minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.id}{m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
                                                             <span className="text-muted"> · {m.source === 'ollama' ? 'Ollama' : 'HF'}</span>
@@ -497,8 +498,8 @@ const Rag: React.FC = () => {
                                                     }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                                         <strong style={{ fontSize: '0.92rem' }}>{b.label}</strong>
-                                                        {b.recommended && <span className="bento-tag bento-tag-sm">★ recommended</span>}
-                                                        <span className="bento-tag bento-tag-sm" style={{ background: b.available ? 'oklch(0.78 0.15 155 / 0.15)' : 'rgba(245,166,35,0.15)' }}>
+                                                        {b.recommended && <span className="bento-tag bento-tag-sm"><Star size={10} aria-hidden="true" /> recommended</span>}
+                                                        <span className="bento-tag bento-tag-sm" style={{ background: b.available ? 'oklch(0.78 0.15 155 / 0.15)' : 'oklch(0.82 0.14 75 / 0.15)' }}>
                                                             {b.available ? '● available' : '○ not installed'}
                                                         </span>
                                                         <span className="text-muted" style={{ fontSize: '0.74rem' }}>{b.tagline}</span>
@@ -526,22 +527,22 @@ const Rag: React.FC = () => {
                                         </div>
                                     </div>
                                     {activeBackend && !activeBackend.available && (
-                                        <div className="info-banner" style={{ borderLeft: '3px solid #f5a623', marginTop: '0.7rem' }}>
-                                            <span className="info-banner-icon">⚠️</span>
+                                        <div className="info-banner info-banner--warning" style={{ marginTop: 'var(--space-3)' }}>
+                                            <span className="info-banner-icon"><TriangleAlert size={16} aria-hidden="true" /></span>
                                             <div>{activeBackend.label} isn't installed. {activeBackend.setup} — or switch to a ● available backend.</div>
                                         </div>
                                     )}
                                 </div>
                             ) : (
                                 <div className="info-banner">
-                                    <span className="info-banner-icon">🤖</span>
+                                    <span className="info-banner-icon"><Bot size={16} aria-hidden="true" /></span>
                                     <div>Answers are generated with <strong>{backends.find((b) => b.key === recommended)?.label || 'the recommended model'}</strong> and grounded in this knowledge base. Switch to Expert mode to choose a local model (MLX, Ollama, …).</div>
                                 </div>
                             )}
 
                             {/* ask */}
                             <div className="glass-panel">
-                                <div className="panel-title"><span className="pt-icon">💬</span> Ask</div>
+                                <div className="panel-title"><span className="pt-icon"><MessageSquare size={18} strokeWidth={1.75} /></span> Ask</div>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                                     <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ask a question about your documents…"
                                         onKeyDown={(e) => { if (e.key === 'Enter') ask(); }} style={inputStyle} disabled={selected.n_chunks === 0} />
@@ -573,7 +574,7 @@ const Rag: React.FC = () => {
                                                 <div className="text-muted" style={{ fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>Sources</div>
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                                                     {result.citations.map((c) => (
-                                                        <div key={c.n} style={{ fontSize: '0.8rem', padding: '0.45rem 0.6rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)' }}>
+                                                        <div key={c.n} style={{ fontSize: '0.8rem', padding: '0.45rem 0.6rem', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--color-line)' }}>
                                                             <strong>[{c.n}] {c.doc_name}</strong> <span className="text-muted">· score {c.score}</span>
                                                             <div className="text-muted" style={{ marginTop: '0.2rem' }}>{c.preview}…</div>
                                                         </div>
@@ -641,7 +642,7 @@ const DownloadBar: React.FC<{
                 <div className={determinate ? '' : 'dl-indeterminate'}
                     style={{
                         height: '100%', width: `${width}%`,
-                        background: 'linear-gradient(90deg, var(--color-accent), var(--color-accent-text))',
+                        background: 'var(--color-accent)',
                         borderRadius: 6, transition: determinate ? 'width 0.2s ease' : undefined,
                     }} />
             </div>
