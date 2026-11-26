@@ -1,0 +1,37 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,700,800&display=block" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400;1,500&family=JetBrains+Mono:wght@500&display=block" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1200px;height:630px;background:#06060f;color:#fff;font-family:'Cabinet Grotesk',system-ui,sans-serif;overflow:hidden;position:relative}
+.blob{position:absolute;border-radius:50%;filter:blur(110px)}
+.b1{width:620px;height:620px;left:-220px;top:-260px;background:rgba(99,102,241,.42)}
+.b2{width:520px;height:520px;right:-160px;bottom:-240px;background:rgba(6,182,212,.26)}
+.b3{width:380px;height:380px;left:420px;top:330px;background:rgba(168,85,247,.2)}
+.grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:44px 44px}
+.wrap{position:absolute;inset:0;padding:58px 64px;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:16px;font-size:34px;font-weight:700;letter-spacing:-.02em}
+.brand img{width:52px;height:52px}
+.brand em{font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:500;color:#a78bfa;margin-left:1px}
+h1{margin-top:62px;font-size:88px;line-height:.95;font-weight:700;letter-spacing:-.045em}
+h1 em{display:block;font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:400;letter-spacing:-.015em;font-size:104px;padding-bottom:10px;background:linear-gradient(90deg,#818cf8,#c084fc 55%,#22d3ee);-webkit-background-clip:text;color:transparent}
+p{margin-top:22px;font-size:29px;line-height:1.35;color:rgba(255,255,255,.72);max-width:560px;font-weight:400}
+.foot{margin-top:auto;display:flex;align-items:center;gap:22px}
+.award{display:flex;align-items:center;gap:12px;padding:11px 18px;border-radius:16px;border:1px solid rgba(252,211,77,.38);background:linear-gradient(90deg,rgba(251,191,36,.16),rgba(251,191,36,.04));color:#fef3c7;font-size:20px;font-weight:700;letter-spacing:-.01em}
+.award small{display:block;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:rgba(253,230,138,.7);font-weight:500;margin-top:2px}
+.url{position:absolute;right:64px;top:70px;font-family:'JetBrains Mono',monospace;font-size:24px;color:rgba(255,255,255,.7);letter-spacing:.02em}
+.shot{position:absolute;right:-150px;top:150px;width:640px;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.16);box-shadow:0 40px 110px -20px rgba(0,0,0,.9),0 0 0 1px rgba(139,92,246,.18);transform:perspective(1600px) rotateY(-14deg) rotateX(3deg)}
+.shot img{display:block;width:100%}
+.shot::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(6,6,15,0) 55%,rgba(6,6,15,.75))}
+</style></head><body>
+<div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="grid"></div>
+<div class="shot"><img src="shot.png"></div>
+<div class="wrap">
+  <div class="brand"><img src="../../frontend/public/logo.svg"><span>Vortex<em>ML</em></span></div>
+  <h1>Intelligence,<em>Simplified.</em></h1>
+  <p>Train neural networks in your browser, with an AI tutor at every step.</p>
+  <div class="foot">
+    <div class="award"><span style="font-size:26px">🏆</span><span>1st place · Scientific Communication Session 2026<small>Politehnica University of Bucharest</small></span></div>
+  </div>
+</div>
+<div class="url">vortexml.ro</div></body></html>

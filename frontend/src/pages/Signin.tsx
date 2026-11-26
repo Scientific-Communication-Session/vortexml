@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Mail, Lock, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import Logo from '../components/Logo';
 
 const GLIDE = [0.22, 1, 0.36, 1] as const;
 
@@ -58,7 +59,7 @@ const Signin: React.FC = () => {
                 >
                     {/* Brand row */}
                     <div className="mb-10 flex items-center justify-center gap-2">
-                        <span className="text-[22px] leading-none text-transparent bg-clip-text bg-gradient-to-br from-accent-1 to-accent-3">◎</span>
+                        <Logo size={24} className="shrink-0" />
                         <span className="text-[15px] font-semibold tracking-[-0.02em] text-white">
                             Vortex<span className="font-display italic font-normal text-accent-2 ml-0.5">ML</span>
                         </span>

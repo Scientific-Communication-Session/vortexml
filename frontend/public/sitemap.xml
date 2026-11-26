@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://vortexml.ro/</loc><lastmod>2026-11-26</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://vortexml.ro/demo</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://vortexml.ro/tutorial</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://vortexml.ro/learn</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://vortexml.ro/courses</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://vortexml.ro/courses/intro-nn</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/courses/course-mlp-dnn</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/courses/course-cnn1d</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/courses/course-rnn-lstm-gru</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/courses/course-autoencoders</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/courses/course-resnet</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/courses/course-transformers</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/courses/course-wide-deep</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/dataset</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://vortexml.ro/architect</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://vortexml.ro/training</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/predict</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://vortexml.ro/assistant</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://vortexml.ro/chat</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://vortexml.ro/leaderboard</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.4</priority></url>
+  <url><loc>https://vortexml.ro/about</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://vortexml.ro/signup</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://vortexml.ro/signin</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://vortexml.ro/terms</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://vortexml.ro/privacy</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://vortexml.ro/cookies</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.3</priority></url>
+</urlset>

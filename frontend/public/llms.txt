@@ -1,0 +1,52 @@
+# VortexML
+
+> VortexML is a free, browser-based platform for building, training and using neural networks on tabular data. You upload a table, choose what to predict, let an AI co-pilot design the network, watch it train live, and then ask the trained model questions. An AI tutor explains every setting along the way. No installation and no code.
+
+Things worth knowing before you browse:
+
+- The site is a single-page application: pages are drawn by JavaScript, so a plain HTTP fetch of a page returns only a shell. This file and [llms-full.txt](https://vortexml.ro/llms-full.txt) carry the content as plain text.
+- Training runs on the server (a shared Mac mini, the free tier, one run at a time with a queue), not in the browser. A run keeps going if the tab is closed.
+- Trying the demo needs no account. The AI features (tutor, co-pilot, Explain Results, Assistant, Chat), saved models and the Predict page need a free account.
+- VortexML won 1st place at the Scientific Communication Session 2026, Politehnica University of Bucharest.
+
+## Start here
+
+- [Home](https://vortexml.ro/): what the product is, a recorded walkthrough, and the full tutorial
+- [Tutorial](https://vortexml.ro/tutorial): train a first model in about ten minutes, step by step, with a practice dataset and a test prompt
+- [Live demo](https://vortexml.ro/demo): train a real model on a bundled dataset in one click, no account needed
+- [Full text for language models](https://vortexml.ro/llms-full.txt): everything on this list, expanded
+
+## The workflow
+
+- [Dataset](https://vortexml.ro/dataset): upload a CSV, TSV, Excel, JSON or Parquet file (up to 100 MB), preview it, mark feature columns and the target column
+- [Architect](https://vortexml.ro/architect): choose one of ten network types, set layers and hyperparameters, or let AI Auto-Configure do it from a plain-language description
+- [Training](https://vortexml.ro/training): start or queue a run, watch loss and accuracy live, get an AI explanation of the result
+- [Predict](https://vortexml.ro/predict): enter new values, or upload a file, and get predictions from a saved model
+
+## AI features
+
+- [Assistant](https://vortexml.ro/assistant): upload documents into a knowledge base and ask questions; answers cite the passages they came from
+- [Chat](https://vortexml.ro/chat): a saved, streaming conversation with a language model, optionally grounded in a knowledge base
+
+## Learn
+
+- [Learn](https://vortexml.ro/learn): a roadmap of eight milestones, from mathematics to deployment
+- [Courses](https://vortexml.ro/courses): eight written lessons on neural network architectures
+- [Leaderboard](https://vortexml.ro/leaderboard): compare your own training runs side by side
+
+## Public data (JSON, no sign-in)
+
+- [Demo datasets](https://vortexml.ro/api/demo/datasets): the four bundled datasets, with columns, sources and a preview
+- [Course list](https://vortexml.ro/api/courses): ids, titles and descriptions; one course in full at `/api/courses/{id}`
+
+## About and policies
+
+- [About](https://vortexml.ro/about): who makes VortexML and how to get in touch
+- [Terms of Service](https://vortexml.ro/terms)
+- [Privacy Policy](https://vortexml.ro/privacy)
+- [Cookie Policy](https://vortexml.ro/cookies)
+
+## Optional
+
+- [Sitemap](https://vortexml.ro/sitemap.xml): every public URL
+- [robots.txt](https://vortexml.ro/robots.txt): crawling rules; AI crawlers are allowed

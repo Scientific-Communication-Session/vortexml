@@ -1,0 +1,136 @@
+# VortexML — full text for language models
+
+Site: https://vortexml.ro
+Short guide with links: https://vortexml.ro/llms.txt
+Last updated: 2026-11-26
+
+## What VortexML is
+
+VortexML is a free, browser-based platform for building, training and using neural networks on tabular data. A person uploads a table, chooses the column to predict, lets an AI co-pilot design the network (or sets it by hand), watches the training live, and then asks the trained model for predictions. An AI tutor explains each setting in plain language. Nothing is installed and no code is written.
+
+It is aimed at students and beginners in machine learning, and at people who want to try a model on their own table quickly.
+
+VortexML won 1st place at the Scientific Communication Session 2026, Politehnica University of Bucharest.
+
+## How the site is built (useful for agents)
+
+- It is a single-page application. A plain HTTP fetch of any page returns the same HTML shell; the content is drawn by JavaScript. Use a browser to interact with it, or read this file.
+- The top bar links to every section: Demo, Tutorial, Dataset, Architect, Training, Predict, Assistant, Chat, Leaderboard, Learn. Sign In and Sign Up are on the right.
+- Deep links work: https://vortexml.ro/tutorial, https://vortexml.ro/demo and so on open that section directly.
+- Public JSON that needs no session: `GET /api/demo/datasets`, `GET /api/courses`, `GET /api/courses/{id}`. Every other `/api/` route needs a session cookie.
+- Signing up is a form with email, username and password, followed by three multiple-choice questions.
+
+## Accounts and modes
+
+- Without an account you can use the Demo, upload a dataset, design a network and train it. The work is tied to the browser and is discarded after about six hours of inactivity.
+- A free account adds: saved models and projects, the Predict page, the Leaderboard, following a training run from another browser, linking your own device, and every AI feature.
+- The three sign-up questions set the mode. Two or more beginner answers give a Novice account; otherwise the account is Expert. The mode can be switched on the Profile page.
+- Novice mode shows three beginner-friendly network types by default, uses gentler default settings, and adds the AI tutor. Expert mode shows all ten network types and extra controls on the Assistant and Chat pages.
+
+## The workflow, step by step
+
+### 1. Dataset (https://vortexml.ro/dataset)
+
+Upload a CSV, TSV, Excel, JSON or Parquet file, up to 100 MB. The page shows the number of rows and columns, a preview of the first rows, and a health check with warnings about problems in the data. Then mark the columns the model may use as Features and one column as the Target. Four sample datasets can be loaded with one click.
+
+### 2. Architect (https://vortexml.ro/architect)
+
+Choose the kind of network and its settings. Ten types are available: Multi-Layer Perceptron, Deep Neural Network, 1D Convolutional Network, RNN, LSTM, GRU, Autoencoder, Residual Network, Transformer, and Wide & Deep. Settings include the hidden layer sizes, epochs, learning rate, batch size, optimizer, activation and early stopping. A preview draws the network.
+
+AI Auto-Configure does this for you: describe the goal in plain words, answer a short question or two, and the co-pilot proposes an architecture and hyperparameters with its reasoning. One click applies the proposal to the page.
+
+### 3. Training (https://vortexml.ro/training)
+
+Pick the compute device and start the run. Loss and accuracy are drawn live, epoch by epoch, next to a log and a system monitor. When the run finishes you can save the weights and ask for Explain Results, an AI-written review of the run in plain language: how training went, whether the model is overfitting, whether it is ready, and what to try next.
+
+Training runs on the server, so it continues when the tab is closed. A pill in the top bar shows progress on every page. Opening the site again, even in another browser after signing in, shows a welcome-back prompt with the run's progress.
+
+The shared server is a Mac mini: the free tier. It trains one model at a time; other runs wait in a first-come, first-served queue and start by themselves. Two ways around the queue: link a machine you own (it only runs your jobs), or ask about Enterprise, which offers tailored configurations, high priority with no queue, and several models training at once.
+
+### 4. Predict (https://vortexml.ro/predict)
+
+Choose a saved model, type in values for each feature (or upload a file of rows), and get the prediction with the model's confidence.
+
+## AI features
+
+- AI tutor: a chat panel available on every page to Novice accounts. Small sparkle icons next to settings ask it about that setting. It explains and advises in text; it does not change settings or see your data.
+- AI Auto-Configure: the co-pilot on the Architect page, described above. It receives a summary of the dataset (file name, column names, types, value ranges and the most common values), not the rows themselves.
+- Explain Results: the review of a finished training run, described above. Also available for every saved project on the Profile page.
+- Assistant (https://vortexml.ro/assistant): create a knowledge base, upload documents (text, Markdown, PDF, Word, Excel, PowerPoint, HTML, CSV, JSON, RTF), and ask questions. Answers are written from the documents and list the passages they used.
+- Chat (https://vortexml.ro/chat): a saved conversation with a language model, with streaming answers, an optional visible reasoning mode, and optional grounding in one of your knowledge bases.
+
+The AI features are provided by Anthropic's Claude models. What you type into them, and the material needed to answer, is sent to Anthropic for that purpose. AI output can be wrong and should be checked.
+
+## The tutorial (https://vortexml.ro/tutorial)
+
+A ten-minute, step-by-step guide that trains a model predicting whether a student passes an exam. Each step lists what to do, what changes on screen, and has a short screen recording.
+
+The practice dataset is `student_performance.csv`: 800 students, one per row. Columns: `hours_studied` (0–10), `previous_score` (40–100), `attendance_rate` (0.4–1.0), `sleep_hours` (4–9), `assignments_done` (0–20), and `passed` (1 = yes, 0 = no), which is the target. It is synthetic data made for teaching.
+
+The test prompt for the co-pilot: "I want to predict whether a student will pass their final exam from their study habits. It is a yes/no answer and every row is a different student. I am a beginner, so keep it simple and quick to train."
+
+Steps:
+
+1. Create your account. Sign up and pick the beginner answer to each of the three questions; that gives a Novice account, which has the AI tutor.
+2. Upload the data. Open Dataset and drop in the file, or click the "Student performance" sample chip.
+3. Choose what to predict. Click the sparkle icon next to "Select Columns" to have the tutor explain features and targets. Mark the five study-habit columns as Features and `passed` as the Target, then continue.
+4. Let the AI design the network. On Architect, click AI Auto-Configure, paste the test prompt, click Generate Configuration, read the proposal, and click Apply to Architect.
+5. Tune the parameters with the tutor. Click the sparkle icon next to Learning Rate, then ask a follow-up that includes your own numbers. Name the project "Exam-Predictor".
+6. Train it. Click Start Training, keep the Mac mini selected, and start the run. It takes a second or two; validation accuracy reaches roughly 95%.
+7. Have the AI explain the results. Click Explain Results in the Training Log panel.
+8. Close the tab. A longer run keeps training on the server; coming back shows a welcome-back prompt.
+9. Ask it questions. On Predict, choose Exam-Predictor and enter a hard-working student (8 hours studied, previous score 82, attendance 0.95): the answer is 1, passed. Lower those to 1, 45 and 0.5: the answer flips to 0.
+10. Ask your documents (Assistant).
+11. Chat with a model (Chat).
+12. Compare your runs (Leaderboard).
+13. Learn the theory (Learn).
+14. Train on your own machine: on Profile, click "Link a device", download the agent bundle, and run `chmod +x run.sh && ./run.sh` on that machine.
+15. Change one thing and see what happens.
+
+Measured experiments on the practice dataset (five runs each, validation accuracy, mean and range):
+
+| Change | Mean | Range | Why |
+| --- | --- | --- | --- |
+| Reference: 5 features, layers 32 and 16, 30 epochs, learning rate 0.005 | 95.9% | 93.8–96.9% | The baseline |
+| Drop hours_studied and previous_score | 61.6% | 60.9–62.5% | The two strongest signals are gone |
+| Learning rate 1.0 | 58.1% | 45.3–87.5% | Each update overshoots; the result depends on luck |
+| Learning rate 0.00001 | 55.0% | 45.3–65.6% | Steps too small for 30 epochs |
+| Only 3 epochs | 96.9% | 96.9–96.9% | An easy pattern is found almost immediately |
+| One hidden layer of 2 neurons | 98.4% | 98.4–98.4% | A tiny network is enough here |
+
+Always answering "fail" scores 54% on this dataset, because 54% of the students fail.
+
+## The live demo (https://vortexml.ro/demo)
+
+Pick one of four bundled datasets and press one button: a real model trains on the server with live curves, and you can then try it on real rows, with the true answer shown next to the prediction. No account is needed.
+
+- Iris flowers: 150 rows, 4 measurements, 3 species. R. A. Fisher (1936), via the UCI Machine Learning Repository.
+- Breast cancer diagnosis: 569 rows, 30 features, benign or malignant. Wolberg, Street and Mangasarian (1995), via UCI. For education only; nothing on the site is medical advice.
+- Diabetes progression: 442 rows, 10 features, a number to predict. Efron, Hastie, Johnstone and Tibshirani (2004).
+- Student performance: 800 rows, 5 features, passed or not. Synthetic, made for the tutorial.
+
+## Learning material
+
+Learn (https://vortexml.ro/learn) has a roadmap of eight milestones: Mathematics and Fundamentals, Data Preprocessing, Supervised Learning, Unsupervised Learning, Model Evaluation and Validation, Ensemble Methods, Deep Learning, and MLOps and Deployment. Each topic opens a short explanation.
+
+Courses (https://vortexml.ro/courses), each a written lesson:
+
+- Introduction to Neural Networks — /courses/intro-nn
+- MLP and Deep Neural Networks — /courses/course-mlp-dnn
+- 1D Convolutional Networks — /courses/course-cnn1d
+- Sequences: RNN, LSTM, GRU — /courses/course-rnn-lstm-gru
+- Autoencoders and Bottlenecks — /courses/course-autoencoders
+- Residual Networks (ResNet) — /courses/course-resnet
+- Transformers and Attention — /courses/course-transformers
+- Wide and Deep Networks — /courses/course-wide-deep
+
+## Price
+
+VortexML is free to use. The shared server is the free tier, with a queue. Enterprise arrangements (dedicated capacity, no queue, parallel training) are discussed individually through the "Contact Sales" form in the footer.
+
+## Policies
+
+- Terms of Service: https://vortexml.ro/terms
+- Privacy Policy: https://vortexml.ro/privacy
+- Cookie Policy: https://vortexml.ro/cookies
+- About and contact: https://vortexml.ro/about

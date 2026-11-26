@@ -2,10 +2,99 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#06060f" />
+
+    <title>VortexML — Train neural networks in your browser, with an AI tutor</title>
+    <meta
+      name="description"
+      content="Upload a table, let an AI co-pilot design the network, watch it train live, and ask the model questions. Free, no code, no installation. 1st place, Scientific Communication Session 2026, Politehnica University of Bucharest."
+    />
+    <meta name="application-name" content="VortexML" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://vortexml.ro/" />
+
+    <!-- Icons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- Link previews (WhatsApp, Slack, LinkedIn, Facebook, iMessage…) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="VortexML" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content="https://vortexml.ro/" />
+    <meta property="og:title" content="VortexML — Intelligence, Simplified" />
+    <meta
+      property="og:description"
+      content="Train neural networks in your browser, with an AI tutor at every step. Free, no code, no installation."
+    />
+    <meta property="og:image" content="https://vortexml.ro/og.jpg" />
+    <meta property="og:image:secure_url" content="https://vortexml.ro/og.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="VortexML — Intelligence, Simplified. The training dashboard with loss and accuracy curves."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="VortexML — Intelligence, Simplified" />
+    <meta
+      name="twitter:description"
+      content="Train neural networks in your browser, with an AI tutor at every step. Free, no code, no installation."
+    />
+    <meta name="twitter:image" content="https://vortexml.ro/og.jpg" />
+
+    <!-- For language models and agents: the site's content as plain text -->
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="VortexML — guide for language models" />
+    <link rel="alternate" type="text/plain" href="/llms-full.txt" title="VortexML — full text for language models" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://vortexml.ro/#website",
+            "url": "https://vortexml.ro/",
+            "name": "VortexML",
+            "description": "Build, train and use neural networks in your browser, with an AI tutor at every step.",
+            "inLanguage": "en"
+          },
+          {
+            "@type": "WebApplication",
+            "@id": "https://vortexml.ro/#app",
+            "name": "VortexML",
+            "url": "https://vortexml.ro/",
+            "applicationCategory": "EducationalApplication",
+            "operatingSystem": "Any (web browser)",
+            "browserRequirements": "Requires JavaScript",
+            "description": "Upload a table, let an AI co-pilot design a neural network, watch it train live, and ask the trained model for predictions. An AI tutor explains every setting.",
+            "image": "https://vortexml.ro/og.jpg",
+            "screenshot": "https://vortexml.ro/og.jpg",
+            "isAccessibleForFree": true,
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+            "award": "1st place, Scientific Communication Session 2026, Politehnica University of Bucharest",
+            "featureList": [
+              "Dataset upload and column selection",
+              "Ten neural network architectures",
+              "AI Auto-Configure co-pilot",
+              "AI tutor for every setting",
+              "Live training charts",
+              "Background training sessions with a queue",
+              "AI explanation of training results",
+              "Predictions from saved models",
+              "Document question answering with citations",
+              "Step-by-step tutorial with recordings"
+            ]
+          }
+        ]
+      }
+    </script>
 
     <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
     <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin />
@@ -20,11 +109,35 @@
       href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-
-    <title>VortexML — Intelligence, Simplified</title>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Shown to visitors, crawlers and agents that do not run JavaScript. -->
+    <noscript>
+      <div style="max-width: 46rem; margin: 3rem auto; padding: 0 1.5rem; font-family: system-ui, sans-serif; line-height: 1.6; color: #e5e7eb">
+        <h1>VortexML — Intelligence, Simplified</h1>
+        <p>
+          VortexML is a free, browser-based platform for building, training and using neural networks on tabular data.
+          Upload a table, let an AI co-pilot design the network, watch it train live, and ask the model questions. An AI
+          tutor explains every setting. It won 1st place at the Scientific Communication Session 2026, Politehnica
+          University of Bucharest.
+        </p>
+        <p>The application needs JavaScript. Its content is also available as plain text:</p>
+        <ul>
+          <li><a href="/llms.txt">Overview and links</a></li>
+          <li><a href="/llms-full.txt">Full text, including the tutorial</a></li>
+          <li><a href="/sitemap.xml">Sitemap</a></li>
+        </ul>
+        <p>Sections:</p>
+        <ul>
+          <li><a href="/tutorial">Tutorial</a> — train your first model in ten minutes</li>
+          <li><a href="/demo">Live demo</a> — train a real model in one click</li>
+          <li><a href="/dataset">Dataset</a>, <a href="/architect">Architect</a>, <a href="/training">Training</a>, <a href="/predict">Predict</a></li>
+          <li><a href="/assistant">Assistant</a>, <a href="/chat">Chat</a>, <a href="/leaderboard">Leaderboard</a>, <a href="/learn">Learn</a></li>
+          <li><a href="/about">About</a>, <a href="/terms">Terms</a>, <a href="/privacy">Privacy</a>, <a href="/cookies">Cookies</a></li>
+        </ul>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

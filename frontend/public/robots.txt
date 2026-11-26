@@ -1,0 +1,19 @@
+# VortexML — https://vortexml.ro
+# Crawlers, AI crawlers and AI agents are all welcome on the public pages.
+
+User-agent: *
+Allow: /
+# Public, read-only JSON (no sign-in needed)
+Allow: /api/demo/datasets
+Allow: /api/courses
+# Everything else under /api needs a session, and the socket is for live training updates
+Disallow: /api/
+Disallow: /socket.io/
+# Signed-in pages: nothing to see without an account
+Disallow: /profile
+
+Sitemap: https://vortexml.ro/sitemap.xml
+
+# A plain-text guide to this site for language models and agents:
+#   https://vortexml.ro/llms.txt        (overview and links)
+#   https://vortexml.ro/llms-full.txt   (the full content, including the tutorial)

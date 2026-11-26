@@ -8,6 +8,8 @@ import ChatButton from './chatbot/ChatButton';
 import { TrainingSessionProvider } from '../context/TrainingSessionContext';
 import SessionPill from './session/SessionPill';
 import SessionOverlays from './session/SessionOverlays';
+import Logo from './Logo';
+import { usePageMeta } from '../pageMeta';
 
 const navLinks = [
     { to: '/demo', label: 'Demo' },
@@ -26,6 +28,8 @@ const Layout: React.FC = () => {
     const { user, setUser } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+
+    usePageMeta(location.pathname);
 
     const isHome = location.pathname === '/';
     const isAuth = location.pathname === '/signin' || location.pathname === '/signup';
@@ -51,8 +55,12 @@ const Layout: React.FC = () => {
         // sits above the routed pages (and feeds the navbar pill).
         <TrainingSessionProvider>
         <div className="flex flex-col min-h-screen">
+            {/* First stop for keyboards, screen readers and agents */}
+            <a href="#main" className="skip-link">Skip to content</a>
+
             {/* ── Liquid Glass Navbar ── */}
             <nav
+                aria-label="Primary"
                 className={[
                     'fixed top-5 left-1/2 -translate-x-1/2 z-50',
                     'flex items-center justify-between',
@@ -79,8 +87,8 @@ const Layout: React.FC = () => {
                 }}
             >
                 {/* ── Logo ── */}
-                <NavLink to="/" className="flex items-center gap-2 shrink-0 group no-underline">
-                    <span className="text-[18px] select-none transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:rotate-90 text-transparent bg-clip-text bg-gradient-to-br from-accent-1 to-accent-3">◎</span>
+                <NavLink to="/" aria-label="VortexML — home" className="flex items-center gap-2 shrink-0 group no-underline">
+                    <Logo size={21} className="shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:rotate-180" />
                     <span className="text-[15px] font-semibold text-white tracking-[-0.02em]">
                         Vortex<span className="font-display italic font-normal tracking-[-0.01em] text-accent-2 ml-px">ML</span>
                     </span>
@@ -160,7 +168,7 @@ const Layout: React.FC = () => {
             </nav>
 
             <ChatProvider>
-                <main className={isFullBleed ? 'flex-grow relative' : 'main-content flex-grow'}>
+                <main id="main" className={isFullBleed ? 'flex-grow relative' : 'main-content flex-grow'}>
                     {/* Pages are code-split (React.lazy); keep the chrome visible
                         while a route's chunk loads. */}
                     <Suspense fallback={
