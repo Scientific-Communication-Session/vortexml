@@ -1,0 +1,323 @@
+/* ════════════════════════════════════════════════════════
+   Legal and company pages (Terms, Privacy, Cookies, About)
+   Long-form reading: one calm column and a contents rail.
+   ════════════════════════════════════════════════════════ */
+
+.lg-page {
+    max-width: 1100px;
+    margin: 0 auto;
+    animation: fadeInUp 0.6s var(--ease-out);
+}
+
+.lg-head {
+    max-width: 760px;
+    margin-bottom: 2.6rem;
+}
+
+.lg-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.9rem;
+}
+
+.lg-head h1 {
+    font-size: clamp(2.1rem, 3.2vw + 0.8rem, 3.2rem);
+    font-weight: 600;
+    letter-spacing: -0.035em;
+    line-height: 1.04;
+    color: #fff;
+    margin-bottom: 1rem;
+}
+
+.lg-head h1 em {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    background: linear-gradient(90deg, var(--accent-1), var(--accent-3), var(--accent-4));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.lg-lead {
+    font-size: 1.08rem;
+    line-height: 1.65;
+    color: var(--text-secondary);
+}
+
+.lg-updated {
+    margin-top: 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.lg-layout {
+    display: grid;
+    grid-template-columns: 230px minmax(0, 1fr);
+    gap: 3.2rem;
+    align-items: start;
+}
+
+/* ─── Contents rail ─── */
+.lg-toc {
+    position: sticky;
+    top: 6.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+}
+
+.lg-toc__label {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.7rem;
+}
+
+.lg-toc a {
+    padding: 0.36rem 0 0.36rem 0.85rem;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.83rem;
+    line-height: 1.35;
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.lg-toc a:hover {
+    color: #fff;
+    border-left-color: var(--accent-2);
+}
+
+/* ─── Body ─── */
+.lg-body {
+    max-width: 720px;
+    font-size: 0.98rem;
+    line-height: 1.72;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.lg-summary {
+    margin-bottom: 2.4rem;
+    padding: 1.2rem 1.35rem;
+    border-radius: 16px;
+    border: 1px solid rgba(139, 92, 246, 0.28);
+    background: rgba(139, 92, 246, 0.07);
+}
+
+.lg-summary h2 {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #c4b5fd;
+    margin: 0 0 0.6rem;
+}
+
+.lg-summary ul {
+    margin: 0;
+    padding-left: 1.15rem;
+}
+
+.lg-summary li + li {
+    margin-top: 0.35rem;
+}
+
+.lg-section {
+    scroll-margin-top: 6.5rem;
+    margin-bottom: 2.4rem;
+}
+
+.lg-section h2 {
+    font-size: 1.32rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: #fff;
+    margin-bottom: 0.8rem;
+}
+
+.lg-section h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 1.3rem 0 0.4rem;
+}
+
+.lg-body p {
+    margin: 0 0 0.9rem;
+}
+
+.lg-body ul,
+.lg-body ol {
+    margin: 0 0 0.9rem;
+    padding-left: 1.25rem;
+}
+
+.lg-body li + li {
+    margin-top: 0.4rem;
+}
+
+.lg-body strong {
+    color: #fff;
+    font-weight: 600;
+}
+
+.lg-body a,
+.lg-link {
+    color: #c4b5fd;
+    text-decoration: underline;
+    text-decoration-color: rgba(196, 181, 253, 0.4);
+    text-underline-offset: 3px;
+    transition: color 0.2s, text-decoration-color 0.2s;
+}
+
+.lg-body a:hover,
+.lg-link:hover {
+    color: #fff;
+    text-decoration-color: #fff;
+}
+
+button.lg-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+}
+
+.lg-body code {
+    padding: 0.1em 0.4em;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    font-family: var(--font-mono);
+    font-size: 0.84em;
+    color: #e9d5ff;
+}
+
+.lg-table-wrap {
+    margin: 0 0 1.1rem;
+    overflow-x: auto;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.lg-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+
+.lg-table th,
+.lg-table td {
+    padding: 0.7rem 0.9rem;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.lg-table tr:last-child td {
+    border-bottom: 0;
+}
+
+.lg-table th {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+    white-space: nowrap;
+}
+
+.lg-others {
+    margin-top: 3rem;
+    padding-top: 1.6rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1.4rem;
+    font-size: 0.9rem;
+}
+
+/* ─── About ─── */
+.lg-facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.9rem;
+    margin: 0 0 2.2rem;
+}
+
+.lg-fact {
+    padding: 1.1rem 1.2rem;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.lg-fact b {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    color: #fff;
+    line-height: 1.1;
+}
+
+.lg-fact span {
+    display: block;
+    margin-top: 0.35rem;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.lg-award {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    margin: 0 0 2.2rem;
+    padding: 1rem 1.2rem;
+    border-radius: 16px;
+    border: 1px solid rgba(252, 211, 77, 0.3);
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.12), rgba(251, 191, 36, 0.02));
+    color: #fef3c7;
+}
+
+.lg-award svg {
+    flex-shrink: 0;
+    color: #fcd34d;
+}
+
+.lg-award strong {
+    display: block;
+    color: #fef3c7;
+}
+
+.lg-award small {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(253, 230, 138, 0.65);
+}
+
+@media (max-width: 980px) {
+    .lg-layout { grid-template-columns: 1fr; gap: 0; }
+    .lg-toc { display: none; }
+}
+
+@media (max-width: 640px) {
+    .lg-facts { grid-template-columns: 1fr; }
+}

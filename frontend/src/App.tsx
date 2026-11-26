@@ -23,6 +23,10 @@ const Signin = lazy(() => import('./pages/Signin'));
 const Signup = lazy(() => import('./pages/Signup'));
 const Survey = lazy(() => import('./pages/Survey'));
 const Profile = lazy(() => import('./pages/Profile'));
+const About = lazy(() => import('./pages/legal/About'));
+const Terms = lazy(() => import('./pages/legal/Terms'));
+const Privacy = lazy(() => import('./pages/legal/Privacy'));
+const Cookies = lazy(() => import('./pages/legal/Cookies'));
 
 const App: React.FC = () => {
   return (
@@ -34,6 +38,10 @@ const App: React.FC = () => {
           <Route path="signup" element={<Signup />} />
           <Route path="survey" element={<Survey />} />
           <Route path="profile" element={<Profile />} />
+          <Route path="about" element={<About />} />
+          <Route path="terms" element={<Terms />} />
+          <Route path="privacy" element={<Privacy />} />
+          <Route path="cookies" element={<Cookies />} />
           <Route path="demo" element={<Demo />} />
           <Route path="tutorial" element={<Tutorial />} />
           <Route path="learn" element={<Learn />} />

@@ -228,18 +228,43 @@ caller). Nothing is emailed — read them from the database, e.g.
 sqlite3 backend/vortex.db "SELECT created_at, name, email, company, interest, message FROM sales_inquiries ORDER BY id DESC;"
 ```
 
-**Tutorial recordings.** The GIFs under `frontend/public/tutorial/` are
-captured from the running app by `tools/tutorial-recorder` (headless Chromium
-+ ffmpeg). Re-record after a UI change:
+**Tutorial recordings.** The clips under `frontend/public/tutorial/` (silent
+looping `.mp4` videos, each with a `.png` of its first frame) are captured from
+the running app by `tools/tutorial-recorder` (headless Chromium + ffmpeg).
+Re-record after a UI change:
 
 ```sh
 cd tools/tutorial-recorder && npm install
-VORTEX_URL=http://127.0.0.1:5173 node record.mjs
+VORTEX_URL=http://127.0.0.1:5174 node record.mjs              # all 14 scenes
+VORTEX_URL=http://127.0.0.1:5174 node record.mjs --only chat  # just one
 ```
 
-The AI Auto-Configure clip is only recorded when the server has
-`ANTHROPIC_API_KEY` set (`node record.mjs --only autoconfig`); the Tutorial page
-shows it automatically once `03-autoconfig.gif` exists.
+Record against the second instance described below, not the live one: the run
+signs up an account and creates projects, a knowledge base and a linked device.
+That instance needs `ANTHROPIC_API_KEY` in its environment, because most scenes
+show the AI tutor, the co-pilot, Explain Results, the Assistant and Chat, and
+make real LLM calls (a full run is roughly ten of them). Without a key those
+scenes are skipped and the co-pilot's step falls back to settings typed by hand.
+
+**Public-site files.** Everything a crawler, a link preview or an AI agent
+reads lives in `frontend/public/` and `frontend/index.html`:
+
+| File | For |
+|---|---|
+| `index.html` | Title, description, Open Graph / Twitter tags (the WhatsApp, Slack and LinkedIn preview), JSON-LD, and a `<noscript>` summary. Preview crawlers do not run JavaScript, so these static tags are all they see. |
+| `og.jpg` | The 1200 × 630 preview picture. Regenerate with `node tools/brand/og.mjs` (edit `tools/brand/og.html`). Messengers cache previews for days; add `?v=2` to the `og:image` URL to force a refresh. |
+| `logo.svg`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `icon-*.png`, `site.webmanifest` | The mark and its icon sizes. The inline version is `src/components/Logo.tsx`; keep the three drawings in sync. |
+| `robots.txt`, `sitemap.xml` | Crawl rules (AI crawlers allowed) and the list of public URLs. Add new public routes to the sitemap. |
+| `llms.txt`, `llms-full.txt` | The site's content as plain text for language models, since the pages themselves need JavaScript. Update them when features or the tutorial change. |
+
+Per-page titles and descriptions are in `frontend/src/pageMeta.ts`. The legal
+pages (`/terms`, `/privacy`, `/cookies`, `/about`) take the operator's name, the
+contact address and the "last updated" date from `frontend/src/site.ts`; while
+`contactEmail` is empty they point readers to the contact form instead.
+
+Cloudflare can override `robots.txt` and block AI crawlers on its own (Security
+→ Bots → "Block AI bots" / "Manage robots.txt"). If agents report being blocked
+while `robots.txt` here allows them, check that setting.
 
 **A second instance for development.** To work on the app without touching the
 live one, run a copy on other ports:

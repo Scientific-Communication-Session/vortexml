@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Mail, Lock, User, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import Logo from '../components/Logo';
 
 const GLIDE = [0.22, 1, 0.36, 1] as const;
 
@@ -64,7 +65,7 @@ const Signup: React.FC = () => {
                 >
                     {/* Brand row */}
                     <div className="mb-10 flex items-center justify-center gap-2">
-                        <span className="text-[22px] leading-none text-transparent bg-clip-text bg-gradient-to-br from-accent-1 to-accent-3">◎</span>
+                        <Logo size={24} className="shrink-0" />
                         <span className="text-[15px] font-semibold tracking-[-0.02em] text-white">
                             Vortex<span className="font-display italic font-normal text-accent-2 ml-0.5">ML</span>
                         </span>
@@ -145,6 +146,13 @@ const Signup: React.FC = () => {
                         <PrimaryButton loading={loading}>
                             {loading ? 'Creating account…' : 'Create account'}
                         </PrimaryButton>
+
+                        <p className="text-center text-[12px] leading-relaxed text-white/40 mt-3 font-light">
+                            By creating an account you agree to the{' '}
+                            <Link to="/terms" className="text-white/70 hover:text-white transition-colors underline underline-offset-2">Terms of Service</Link>
+                            {' '}and the{' '}
+                            <Link to="/privacy" className="text-white/70 hover:text-white transition-colors underline underline-offset-2">Privacy Policy</Link>.
+                        </p>
 
                         <p className="text-center text-[13px] text-white/45 mt-3 font-light">
                             Already have an account?{' '}

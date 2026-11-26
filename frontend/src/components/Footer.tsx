@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Trophy } from 'lucide-react';
 import { useTrainingSession } from '../context/TrainingSessionContext';
+import Logo from './Logo';
 
 const Footer: React.FC = () => {
     const { openEnterprise } = useTrainingSession();
@@ -14,7 +15,7 @@ const Footer: React.FC = () => {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-12 md:gap-8">
                     <div className="col-span-2 md:col-span-1">
                         <Link to="/" className="flex items-center gap-2 mb-5 no-underline group">
-                            <span className="text-xl text-transparent bg-clip-text bg-gradient-to-br from-accent-1 to-accent-3 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:rotate-90">◎</span>
+                            <Logo size={24} className="shrink-0 transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:rotate-180" />
                             <span className="text-[17px] font-semibold text-text-primary tracking-[-0.02em]">
                                 Vortex<span className="font-display italic font-normal tracking-[-0.01em] text-accent-2">ML</span>
                             </span>
@@ -47,16 +48,17 @@ const Footer: React.FC = () => {
                             title: 'Resources',
                             links: [
                                 { to: '/tutorial', label: 'Tutorial' },
+                                { to: '/learn', label: 'Learning Roadmap' },
                                 { to: '/courses', label: 'ML Courses' },
-                                { to: '#', label: 'Community' },
                             ],
                         },
                         {
                             title: 'Company',
                             links: [
-                                { to: '#', label: 'About Us' },
-                                { to: '#', label: 'Blog' },
-                                { to: 'sales', label: 'Contact Sales' },
+                                { to: '/about', label: 'About' },
+                                { to: 'sales', label: 'Contact' },
+                                { to: '/terms', label: 'Terms of Service' },
+                                { to: '/privacy', label: 'Privacy Policy' },
                             ],
                         },
                     ].map((col) => (
@@ -103,11 +105,12 @@ const Footer: React.FC = () => {
 
                 <div className="mt-16 pt-8 border-t border-white/[0.06] flex flex-col md:flex-row justify-between items-center gap-4">
                     <p className="font-mono text-[11px] tracking-[0.06em] text-text-muted">
-                        &copy; {new Date().getFullYear()} VORTEXML PLATFORM — ALL RIGHTS RESERVED
+                        &copy; {new Date().getFullYear()} VORTEXML — ALL RIGHTS RESERVED
                     </p>
                     <div className="flex gap-6">
-                        <a href="#" className="font-mono text-[11px] tracking-[0.08em] uppercase text-text-secondary hover:text-white transition-colors">Privacy</a>
-                        <a href="#" className="font-mono text-[11px] tracking-[0.08em] uppercase text-text-secondary hover:text-white transition-colors">Terms</a>
+                        <Link to="/privacy" className="font-mono text-[11px] tracking-[0.08em] uppercase text-text-secondary hover:text-white transition-colors no-underline">Privacy</Link>
+                        <Link to="/terms" className="font-mono text-[11px] tracking-[0.08em] uppercase text-text-secondary hover:text-white transition-colors no-underline">Terms</Link>
+                        <Link to="/cookies" className="font-mono text-[11px] tracking-[0.08em] uppercase text-text-secondary hover:text-white transition-colors no-underline">Cookies</Link>
                     </div>
                 </div>
             </div>
