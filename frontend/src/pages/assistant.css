@@ -11,7 +11,7 @@
 
 @media (max-width: 900px) {
     .as-layout,
-    .ch-layout { grid-template-columns: 1fr; }
+    .ch-layout { grid-template-columns: minmax(0, 1fr); }
 }
 
 .as-empty,

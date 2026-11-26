@@ -246,10 +246,9 @@ const Profile: React.FC = () => {
 
             {/* Experience level card */}
             <div
-                className="glass-panel"
+                className="glass-panel pf-row"
                 style={{
                     display: 'grid',
-                    gridTemplateColumns: 'auto 1fr auto',
                     gap: '1.25rem',
                     alignItems: 'center',
                     padding: '1.25rem 1.5rem',
@@ -344,11 +343,10 @@ const Profile: React.FC = () => {
                             return (
                                 <div
                                     key={d.id}
-                                    className="glass-panel"
+                                    className="glass-panel pf-row"
                                     style={{
                                         padding: '1rem 1.2rem',
                                         display: 'grid',
-                                        gridTemplateColumns: 'auto 1fr auto',
                                         gap: '1rem',
                                         alignItems: 'center',
                                     }}
@@ -418,7 +416,7 @@ const Profile: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                    <div className="pf-actions">
                                         <button className="btn btn-secondary btn-sm" disabled={busy}
                                             onClick={() => handleDownloadAgent(d)} title="Re-download the node agent bundle">
                                             <Download size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
@@ -466,11 +464,10 @@ const Profile: React.FC = () => {
                             return (
                                 <div
                                     key={p.id}
-                                    className="glass-panel"
+                                    className="glass-panel pf-row"
                                     style={{
                                         padding: '1.25rem 1.5rem',
                                         display: 'grid',
-                                        gridTemplateColumns: 'auto 1fr auto',
                                         gap: '1.25rem',
                                         alignItems: 'center',
                                     }}
@@ -502,7 +499,7 @@ const Profile: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                    <div className="pf-actions">
                                         <button
                                             className="btn btn-secondary btn-sm"
                                             onClick={() => handleLoad(p)}

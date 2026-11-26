@@ -148,7 +148,7 @@
 
 @media (max-width: 1023px) {
     .vx-hero { padding-top: calc(var(--nav-height) + var(--space-12)); }
-    .vx-hero__grid { grid-template-columns: 1fr; gap: 0; }
+    .vx-hero__grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .vx-hero__visual {
         order: -1;
         justify-self: center;
@@ -305,7 +305,7 @@
 }
 
 @media (max-width: 1023px) {
-    .vx-walk { grid-template-columns: 1fr; gap: var(--space-6); }
+    .vx-walk { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
     .vx-walk__steps { order: 2; }
 }
 
@@ -464,9 +464,9 @@
 .vx-run__main { flex: 1; min-width: 0; }
 
 @media (max-width: 900px) {
-    .vx-bento { grid-template-columns: 1fr; }
+    .vx-bento { grid-template-columns: minmax(0, 1fr); }
     .vx-card--wide,
-    .vx-card--narrow { grid-column: auto; grid-template-columns: 1fr; }
+    .vx-card--narrow { grid-column: auto; grid-template-columns: minmax(0, 1fr); }
     .vx-card { --card-pad: var(--space-6); }
 }
 

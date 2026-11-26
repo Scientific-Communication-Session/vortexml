@@ -86,3 +86,13 @@
     color: var(--color-fg-2);
 }
 .tr-monitor__chart { position: relative; height: 220px; }
+
+/* Phones: the system strip becomes a title row over a tidy grid */
+@media (max-width: 640px) {
+    .tr-sys { flex-direction: column; align-items: stretch; gap: var(--space-3); }
+    .tr-sys__metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+    .tr-sys__metric { min-width: 0; }
+    .tr-monitor { grid-template-columns: minmax(0, 1fr); }
+    .tr-monitor__chart { height: 180px; }
+    .tr-actions { justify-content: flex-start; }
+}

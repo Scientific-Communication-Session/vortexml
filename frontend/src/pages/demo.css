@@ -753,12 +753,12 @@
 }
 
 @media (max-width: 900px) {
-    .dm-detail, .dm-live, .dm-try { grid-template-columns: 1fr; }
-    .dm-next { grid-template-columns: 1fr; }
+    .dm-detail, .dm-live, .dm-try { grid-template-columns: minmax(0, 1fr); }
+    .dm-next { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 560px) {
-    .dm-datasets { grid-template-columns: 1fr; }
+    .dm-datasets { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Live chart: loss above, accuracy below (one scale each) */

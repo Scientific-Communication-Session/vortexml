@@ -540,13 +540,13 @@
 }
 
 @media (max-width: 1080px) {
-    .tt-layout { grid-template-columns: 1fr; gap: 0; }
+    .tt-layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .tt-rail { display: none; }
 }
 
 @media (max-width: 860px) {
-    .tt-kit, .tt-step__body { grid-template-columns: 1fr; }
-    .tt-exp__row { grid-template-columns: 1fr; gap: 0.5rem; }
+    .tt-kit, .tt-step__body { grid-template-columns: minmax(0, 1fr); }
+    .tt-exp__row { grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
 }
 
 /* Inline copies of the app's own icons inside step text */

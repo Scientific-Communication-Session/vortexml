@@ -308,10 +308,10 @@ button.lg-link {
 }
 
 @media (max-width: 980px) {
-    .lg-layout { grid-template-columns: 1fr; gap: 0; }
+    .lg-layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .lg-toc { display: none; }
 }
 
 @media (max-width: 640px) {
-    .lg-facts { grid-template-columns: 1fr; }
+    .lg-facts { grid-template-columns: minmax(0, 1fr); }
 }

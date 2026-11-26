@@ -1414,6 +1414,43 @@ body::before {
     }
 }
 
+/* Phones: a left-aligned timeline. The spine runs down the left edge and every
+   topic gets the full width, instead of the right half of a centred zigzag. */
+@media (max-width: 768px) {
+    /* Topics slide in from the side; keep that from widening the page */
+    .roadmap-tree { overflow-x: clip; }
+
+    .roadmap-spine-track,
+    .roadmap-spine-scanner { left: 9px; }
+
+    .roadmap-milestone { justify-content: flex-start; gap: var(--space-3); }
+    .milestone-dot { position: relative; z-index: 1; }
+    .milestone-content {
+        flex: 1;
+        min-width: 0;
+        flex-wrap: wrap;
+        row-gap: var(--space-1);
+        padding: var(--space-2) var(--space-4);
+        border-radius: var(--radius-lg);
+    }
+    .milestone-content h2 { font-size: var(--text-sm); }
+
+    .roadmap-node.node-left,
+    .roadmap-node.node-right {
+        justify-content: flex-start;
+        padding-left: var(--space-8);
+        padding-right: 0;
+    }
+    .roadmap-node .node-connector,
+    .roadmap-node .node-curve-svg { display: none; }
+    .node-card { max-width: none; min-width: 0; }
+    .node-title { min-width: 0; }
+
+    .subbranch-panel.panel-left,
+    .subbranch-panel.panel-right { padding-left: calc(var(--space-8) + var(--space-4)); }
+    .subbranch-nodes { min-width: 0; }
+}
+
 /* ─────────────────────────────────────────────────────────
    Beginner-mode help UI: HelpButton + HelpModal
    ───────────────────────────────────────────────────────── */

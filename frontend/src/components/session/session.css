@@ -912,9 +912,9 @@
 
 @media (max-width: 820px) {
     .vx-modal { padding: 1.5rem 1.25rem 1.3rem; border-radius: 22px; }
-    .vx-choices, .vx-choices--four { grid-template-columns: 1fr; }
-    .vx-ent { grid-template-columns: 1fr; }
-    .vx-form__row { grid-template-columns: 1fr; }
+    .vx-choices, .vx-choices--four { grid-template-columns: minmax(0, 1fr); }
+    .vx-ent { grid-template-columns: minmax(0, 1fr); }
+    .vx-form__row { grid-template-columns: minmax(0, 1fr); }
     .vx-run { grid-template-columns: auto minmax(0, 1fr); }
     .vx-run__actions { grid-column: 1 / -1; justify-content: flex-end; }
     .vx-banner { flex-wrap: wrap; }

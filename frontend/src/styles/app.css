@@ -804,11 +804,21 @@ html { scrollbar-color: oklch(1 0 0 / 0.14) transparent; }
     .main-content { padding-top: calc(var(--nav-height) + var(--space-10)); }
     .glass-panel { --panel-pad: var(--space-5); }
     .training-top-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .training-grid { grid-template-columns: 1fr; }
-    .steps { flex-direction: column; }
+    .training-grid { grid-template-columns: minmax(0, 1fr); }
+    /* Steps stay in one row: number over a short label */
+    .step { flex-direction: column; gap: var(--space-1); padding: var(--space-2); text-align: center; }
+    .step-text { font-size: var(--text-xs); }
     .toast { left: var(--space-4); right: var(--space-4); max-width: none; }
 }
 
 /* Text-only button (used by course pages) */
 .btn-ghost { color: var(--color-fg-2); background: transparent; }
 .btn-ghost:hover:not(:disabled) { color: var(--color-fg); background: oklch(1 0 0 / 0.05); }
+
+/* Phones */
+@media (max-width: 640px) {
+    .arch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+    .arch-card { padding: var(--space-4); }
+    .chart-container { height: 260px; }
+    .page-header { margin-bottom: var(--space-8); }
+}
