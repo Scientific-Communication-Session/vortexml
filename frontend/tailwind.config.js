@@ -6,37 +6,42 @@ export default {
   ],
   theme: {
     extend: {
+      // Mirrors src/styles/tokens.css (Violet Night). Hex here so Tailwind's
+      // opacity modifiers (bg-accent/20) work; the CSS tokens are the source.
       fontFamily: {
         sans: ['"Cabinet Grotesk"', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
-        display: ['"Cormorant Garamond"', 'Times New Roman', 'Georgia', 'serif'],
-        serif: ['"Cormorant Garamond"', 'Times New Roman', 'Georgia', 'serif'],
+        display: ['"Cabinet Grotesk"', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        serif: ['"Cabinet Grotesk"', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       letterSpacing: {
-        tightest: '-0.04em',
+        tightest: '-0.045em',
         tighter: '-0.03em',
       },
       colors: {
         bg: {
-          primary: '#06060f',
-          secondary: '#0c0c1e',
-          card: '#0e0e24',
-          glass: '#141432',
-          input: '#19193c',
+          primary: '#08080b',
+          secondary: '#0e0e13',
+          card: '#13131a',
+          glass: '#1b1b23',
+          input: '#1b1b23',
         },
         accent: {
-          1: '#6366f1',
-          2: '#8b5cf6',
-          3: '#a855f7',
-          4: '#06b6d4',
-          5: '#3b82f6',
+          DEFAULT: '#8c86fc',
+          fill: '#6a5dde',
+          text: '#b7b9ff',
+          1: '#8c86fc',
+          2: '#8c86fc',
+          3: '#b7b9ff',
+          4: '#a5bdf2',
+          5: '#90a6f7',
         },
         text: {
-          primary: '#f0f0ff',
-          secondary: '#9d9dba',
-          muted: '#5a5a7a',
-          accent: '#8b5cf6',
-        }
+          primary: '#f5f5f8',
+          secondary: '#afb0be',
+          muted: '#848593',
+          accent: '#b7b9ff',
+        },
       },
       transitionTimingFunction: {
         'glide': 'cubic-bezier(0.22, 1, 0.36, 1)',

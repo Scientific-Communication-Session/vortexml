@@ -1,181 +1,180 @@
-import React, { Suspense, lazy, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useInView, useScroll, useTransform, useReducedMotion } from 'framer-motion';
-import { Database, Activity, ArrowDown, ArrowRight, GraduationCap, Layers, CloudCog, Play, Trophy } from 'lucide-react';
-import NeuralBackground from '../components/NeuralBackground';
+import { motion, useInView, useReducedMotion, useScroll, useTransform } from 'framer-motion';
+import { Activity, ArrowDown, ArrowRight, CloudCog, Database, GraduationCap, Layers, Pause, Play, Trophy } from 'lucide-react';
+import VortexField from '../components/VortexField';
 import TutorialClip from '../components/TutorialClip';
-import { cn } from '../utils/cn';
+import ProgressRing from '../components/session/ProgressRing';
+import './home.css';
 
 // The full step-by-step guide closes the page; it is long, so it loads after
 // the hero instead of with it.
 const TutorialGuide = lazy(() => import('./Tutorial').then((m) => ({ default: m.TutorialGuide })));
 
-// Easing — one curve, used everywhere for a unified motion language
+// One curve for the whole page
 const GLIDE = [0.22, 1, 0.36, 1] as const;
 
-// --- Shared Reusable Animation Component ---
-const FadeIn = ({
-    children,
-    delay = 0,
-    className,
-    direction = "up",
-    duration = 0.9,
-}: {
-    children: React.ReactNode;
-    delay?: number;
-    className?: string;
-    direction?: "up" | "down" | "left" | "right";
-    duration?: number;
-}) => {
+// Reveal on first view. Short travel, short duration: it orients, it doesn't perform.
+const FadeIn: React.FC<{ children: React.ReactNode; delay?: number; className?: string }> = ({ children, delay = 0, className }) => {
     const reduce = useReducedMotion();
-    const directions = {
-        up: { y: 32, x: 0 },
-        down: { y: -32, x: 0 },
-        left: { x: 32, y: 0 },
-        right: { x: -32, y: 0 },
-    };
     return (
         <motion.div
-            initial={reduce ? { opacity: 0 } : { opacity: 0, ...directions[direction] }}
-            whileInView={{ opacity: 1, y: 0, x: 0 }}
-            viewport={{ once: true, margin: "-12%" }}
-            transition={{ duration, delay, ease: GLIDE }}
-            className={cn("will-change-[transform,opacity]", className)}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-10%' }}
+            transition={{ duration: 0.5, delay, ease: GLIDE }}
+            className={className}
         >
             {children}
         </motion.div>
     );
 };
 
-const GlassCard = ({
-    title,
-    description,
-    icon: Icon,
-    to,
-    className,
-    delay = 0,
-    index,
-}: {
-    title: string;
-    description: string;
-    icon: React.ElementType;
-    to: string;
-    className?: string;
-    delay?: number;
-    index?: string;
-}) => {
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 28 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-10%" }}
-            transition={{ duration: 0.9, delay, ease: GLIDE }}
-            className={cn(
-                "group relative flex flex-col justify-between overflow-hidden rounded-[2rem] p-8 md:p-10",
-                "bg-[#0a0a16]/40 backdrop-blur-2xl border border-white/[0.07]",
-                "transition-[border-color,background,box-shadow] duration-700 ease-glide",
-                "hover:border-accent-2/40 hover:bg-[#0f0f24]/55",
-                "shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] hover:shadow-[0_12px_44px_rgba(139,92,246,0.18)]",
-                "will-change-transform",
-                className
-            )}
-        >
-            {/* Liquid glass sheen on hover */}
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.06] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+const SectionHead: React.FC<{ label: string; title: React.ReactNode; children: React.ReactNode }> = ({ label, title, children }) => (
+    <FadeIn className="vx-section__head">
+        <span className="vx-label">{label}</span>
+        <h2 className="vx-h2">{title}</h2>
+        <p className="vx-lead">{children}</p>
+    </FadeIn>
+);
 
-            {/* Top hairline that lights up on hover */}
-            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-accent-2/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-
-            <div className="relative z-10">
-                {index && (
-                    <div className="mb-5 font-mono text-[10px] tracking-[0.32em] uppercase text-white/35">
-                        {index}
-                    </div>
-                )}
-                <div className="mb-7 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 text-white shadow-inner transition-transform duration-500 ease-glide group-hover:scale-[1.08] group-hover:-rotate-3">
-                    <Icon className="h-[22px] w-[22px]" strokeWidth={1.6} />
-                </div>
-                <h3 className="mb-3 text-2xl md:text-[1.7rem] font-semibold tracking-[-0.025em] text-white leading-[1.1]">
-                    {title}
-                </h3>
-                <p className="text-text-secondary leading-relaxed font-light text-[15px] max-w-[42ch]">
-                    {description}
-                </p>
-            </div>
-
-            <div className="relative z-10 mt-10">
-                <Link
-                    to={to}
-                    className="group/cta inline-flex items-center gap-2 text-[13px] font-medium tracking-wide text-white/70 hover:text-white transition-colors duration-300 no-underline hover:no-underline"
-                >
-                    <span className="font-mono uppercase tracking-[0.16em] text-[11px]">Explore</span>
-                    <span className="h-px w-6 bg-white/30 group-hover/cta:w-10 group-hover/cta:bg-white/80 transition-all duration-500 ease-glide" />
-                    <ArrowRight className="h-[14px] w-[14px] transform transition-transform duration-500 ease-glide group-hover/cta:translate-x-1" strokeWidth={1.8} />
-                </Link>
-            </div>
-
-            {/* Corner glow */}
-            <div className="pointer-events-none absolute -bottom-10 -right-10 w-40 h-40 bg-accent-1/20 blur-3xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-        </motion.div>
-    );
-};
-
-const ScrollIndicator = () => {
+// ─── Hero ────────────────────────────────────────────────────────────────────
+const Hero: React.FC = () => {
     const reduce = useReducedMotion();
+    // Each headline line rises out of its own mask, one after the other.
+    const line = (i: number) => ({
+        initial: reduce ? { opacity: 0 } : { y: '105%' },
+        animate: reduce ? { opacity: 1 } : { y: '0%' },
+        transition: { duration: 0.7, delay: 0.1 + i * 0.08, ease: GLIDE },
+    });
+    const rise = (delay: number) => ({
+        initial: reduce ? { opacity: 0 } : { opacity: 0, y: 12 },
+        animate: { opacity: 1, y: 0 },
+        transition: { duration: 0.5, delay, ease: GLIDE },
+    });
+
     return (
-        <motion.div
-            // Hidden on short screens, where the hero fills the viewport and the
-            // indicator would sit on top of its last line.
-            className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 opacity-60 [@media(max-height:980px)]:hidden"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 0.6 }}
-            transition={{ delay: 1.6, duration: 1.2, ease: GLIDE }}
-        >
-            <span className="font-mono text-[10px] tracking-[0.32em] uppercase text-white/70">
-                Scroll
-            </span>
-            <div className="w-px h-12 bg-gradient-to-b from-white/40 to-transparent relative overflow-hidden">
-                {!reduce && (
-                    <motion.div
-                        className="absolute inset-x-0 top-0 h-1/2 bg-white/90"
-                        animate={{ y: ["-100%", "200%"] }}
-                        transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
-                    />
-                )}
+        <section className="vx-hero">
+            <div className="vx-container vx-hero__grid">
+                <div className="vx-hero__copy">
+                    <motion.div {...rise(0)} className="vx-award vx-glass">
+                        <span className="vx-award__icon"><Trophy size={18} strokeWidth={1.75} aria-hidden="true" /></span>
+                        <span className="vx-award__text">
+                            <span className="vx-award__title">1st place — Scientific Communication Session 2026</span>
+                            <span className="vx-award__sub">Politehnica University of Bucharest</span>
+                        </span>
+                    </motion.div>
+
+                    <h1 className="vx-hero__title">
+                        <span className="vx-hero__line vx-hero__line--strong"><motion.span {...line(0)}>Intelligence,</motion.span></span>
+                        <span className="vx-hero__line vx-hero__line--light"><motion.span {...line(1)}>Simplified.</motion.span></span>
+                    </h1>
+
+                    <motion.p {...rise(0.3)} className="vx-hero__lead">
+                        The most advanced visual node platform for neural networks.
+                        Build, configure, and train models in a gorgeous, highly-optimized environment.
+                    </motion.p>
+
+                    <motion.div {...rise(0.38)} className="vx-hero__ctas">
+                        <Link to="/dataset" className="vx-btn vx-btn--primary vx-btn--lg">
+                            Start Building
+                            <ArrowRight size={16} strokeWidth={2} className="vx-btn__arrow" aria-hidden="true" />
+                        </Link>
+                        <Link to="/demo" className="vx-btn vx-btn--ghost vx-btn--lg">
+                            <Play size={13} fill="currentColor" strokeWidth={0} aria-hidden="true" style={{ marginLeft: 2 }} />
+                            Watch a live demo
+                        </Link>
+                    </motion.div>
+
+                    <motion.div {...rise(0.46)}>
+                        <Link to="/tutorial" className="vx-tutorial-link">
+                            <span className="vx-tutorial-link__tag">
+                                <GraduationCap size={13} strokeWidth={2} aria-hidden="true" />
+                                Tutorial
+                            </span>
+                            New here? Train your first model in ten minutes
+                            <ArrowRight size={14} strokeWidth={2} className="vx-btn__arrow" aria-hidden="true" />
+                        </Link>
+                    </motion.div>
+                </div>
+
+                <motion.div
+                    className="vx-hero__visual"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.6, ease: GLIDE }}
+                >
+                    <VortexField className="vx-hero__vortex" label="The VortexML mark, two rings turning around a core, drawn in particles" />
+                </motion.div>
             </div>
-        </motion.div>
+        </section>
     );
 };
 
-// Compose the wordmark — "Intelligence," (sans, tight) + italic serif "Simplified."
-const HeroHeadline: React.FC = () => (
-    <h1 className="text-white mb-8 leading-[0.96]">
-        <span className="block font-sans font-semibold tracking-[-0.045em]"
-              style={{ fontSize: 'clamp(2.6rem, 7.4vw + 0.4rem, 6.5rem)' }}>
-            Intelligence,
-        </span>
-        <span
-            className="block font-display italic font-normal tracking-[-0.015em] text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4 pb-2"
-            style={{ fontSize: 'clamp(3.2rem, 8.8vw + 0.4rem, 7.8rem)' }}
-        >
-            Simplified.
-        </span>
-    </h1>
-);
+// ─── The product, tilting up into view as you scroll ────────────────────────
+const ProductReveal: React.FC = () => {
+    const ref = useRef<HTMLDivElement>(null);
+    const video = useRef<HTMLVideoElement>(null);
+    const reduce = useReducedMotion();
+    const inView = useInView(ref, { margin: '-10% 0px' });
+    const [playing, setPlaying] = useState(!reduce);
+    const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'center center'] });
+    const rotateX = useTransform(scrollYProgress, [0, 1], [26, 0]);
+    const scale = useTransform(scrollYProgress, [0, 1], [0.88, 1]);
+    const y = useTransform(scrollYProgress, [0, 1], [48, 0]);
+    const glow = useTransform(scrollYProgress, [0, 1], [0.2, 1]);
 
-const Eyebrow: React.FC<{ number: string; label: string }> = ({ number, label }) => (
-    <div className="flex items-center gap-3 mb-7 justify-center">
-        <span className="font-mono text-[11px] tracking-[0.32em] uppercase text-white/50">
-            {number}
-        </span>
-        <span className="h-px w-10 bg-white/15" />
-        <span className="font-mono text-[11px] tracking-[0.32em] uppercase text-white/50">
-            {label}
-        </span>
-    </div>
-);
+    useEffect(() => {
+        const v = video.current;
+        if (!v) return;
+        if (playing && inView) v.play().catch(() => {});
+        else v.pause();
+    }, [playing, inView]);
 
-// The core of the tutorial, in order. Each entry is one recorded clip.
+    return (
+        <section className="vx-reveal" aria-label="The training dashboard">
+            <div className="vx-container" style={{ maxWidth: 'var(--container-wide)' }}>
+                <div ref={ref} className="vx-reveal__stage">
+                    <motion.div className="vx-reveal__glow" style={{ opacity: reduce ? 1 : glow }} />
+                    <motion.figure
+                        className="vx-frame vx-glass"
+                        style={reduce ? undefined : { rotateX, scale, y }}
+                    >
+                        <div className="vx-frame__bar">
+                            <span className="vx-frame__dots" aria-hidden="true"><i /><i /><i /></span>
+                            <span className="vx-frame__url">vortexml / training</span>
+                            <button
+                                type="button"
+                                className="vx-frame__toggle"
+                                onClick={() => setPlaying((p) => !p)}
+                                aria-label={playing ? 'Pause the recording' : 'Play the recording'}
+                            >
+                                {playing ? <Pause size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
+                            </button>
+                        </div>
+                        <div className="vx-frame__screen">
+                            <video
+                                ref={video}
+                                src="/tutorial/06-train.mp4"
+                                poster="/tutorial/06-train.png"
+                                aria-label="Starting a run on the Training page; the loss curve falls and accuracy rises."
+                                width={1280}
+                                height={800}
+                                muted
+                                loop
+                                playsInline
+                                preload="metadata"
+                            />
+                        </div>
+                    </motion.figure>
+                </div>
+                <p className="vx-reveal__caption">Recorded from the running app — no mock-ups.</p>
+            </div>
+        </section>
+    );
+};
+
+// ─── Walkthrough: the product in recorded clips ─────────────────────────────
 const WALKTHROUGH = [
     {
         clip: '02-upload', url: 'vortexml / dataset',
@@ -227,7 +226,6 @@ const WALKTHROUGH = [
     },
 ];
 
-// The whole product in a handful of recorded clips, playing one after another.
 const Walkthrough: React.FC = () => {
     const ref = useRef<HTMLDivElement>(null);
     const inView = useInView(ref, { margin: '-20% 0px' });
@@ -244,8 +242,8 @@ const Walkthrough: React.FC = () => {
     };
 
     return (
-        <div ref={ref} className="grid gap-6 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)] lg:gap-10 items-start">
-            <ol className="order-2 lg:order-1 flex flex-col gap-1 list-none p-0 m-0">
+        <div ref={ref} className="vx-walk">
+            <ol className="vx-walk__steps">
                 {WALKTHROUGH.map((s, i) => {
                     const active = i === index;
                     return (
@@ -254,39 +252,18 @@ const Walkthrough: React.FC = () => {
                                 type="button"
                                 onClick={() => show(i)}
                                 aria-current={active ? 'step' : undefined}
-                                className={cn(
-                                    'relative block w-full cursor-pointer overflow-hidden rounded-2xl border border-solid px-5 py-3 text-left font-sans',
-                                    'transition-[background-color,border-color] duration-500 ease-glide',
-                                    active
-                                        ? 'border-accent-2/35 bg-white/[0.06]'
-                                        : 'border-transparent bg-transparent hover:bg-white/[0.035]',
-                                )}
+                                className="vx-walk__step"
                             >
-                                <span className="flex items-baseline gap-3.5">
-                                    <span className={cn(
-                                        'font-mono text-[11px] tracking-[0.18em] transition-colors duration-500',
-                                        active ? 'text-accent-3' : 'text-white/35',
-                                    )}>
-                                        {String(i + 1).padStart(2, '0')}
-                                    </span>
-                                    <span className={cn(
-                                        'text-[15.5px] font-medium tracking-[-0.01em] transition-colors duration-500',
-                                        active ? 'text-white' : 'text-white/60',
-                                    )}>
-                                        {s.title}
-                                    </span>
+                                <span className="vx-walk__row">
+                                    <span className="vx-walk__num">{String(i + 1).padStart(2, '0')}</span>
+                                    <span className="vx-walk__title">{s.title}</span>
                                 </span>
-                                {active && (
-                                    <span className="mt-1.5 block pl-[1.95rem] text-[13.5px] font-light leading-relaxed text-text-secondary">
-                                        {s.text}
-                                    </span>
-                                )}
+                                {active && <span className="vx-walk__text">{s.text}</span>}
                                 {/* Fills over the length of the clip; the clip ending moves on to the next step. */}
                                 {active && seconds !== null && (
-                                    <span className="absolute inset-x-0 bottom-0 h-[2px] bg-white/[0.06]">
+                                    <span className="vx-walk__progress">
                                         <span
                                             key={s.clip}
-                                            className="block h-full origin-left bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4"
                                             style={{
                                                 animation: `walkthrough-fill ${seconds}s linear forwards`,
                                                 animationPlayState: playing && inView ? 'running' : 'paused',
@@ -300,7 +277,7 @@ const Walkthrough: React.FC = () => {
                 })}
             </ol>
 
-            <div className="order-1 lg:order-2 min-w-0">
+            <div style={{ minWidth: 0 }}>
                 <TutorialClip
                     name={step.clip}
                     url={step.url}
@@ -316,272 +293,262 @@ const Walkthrough: React.FC = () => {
     );
 };
 
-const Home: React.FC = () => {
-    const heroRef = useRef<HTMLDivElement>(null);
+// ─── Card visuals: small pieces of the real product ─────────────────────────
+// Rows 1, 3 and 7 of sample-data/student_performance.csv (three of its five
+// feature columns, and the target)
+const STUDENTS = {
+    cols: ['hours_studied', 'previous_score', 'sleep_hours', 'passed'],
+    rows: [
+        ['6.39', '41', '5.2', '0'],
+        ['2.19', '72', '6.8', '0'],
+        ['5.36', '99', '6.8', '1'],
+    ],
+};
+
+const DatasetVisual: React.FC = () => (
+    <div className="vx-mini vx-mini-scroll">
+        <table className="vx-mini-table">
+            <thead>
+                <tr>
+                    {STUDENTS.cols.map((c, i) => {
+                        const target = i === STUDENTS.cols.length - 1;
+                        return (
+                            <th key={c} className={target ? 'is-target' : undefined}>
+                                {c}
+                                <span className="vx-mini-role">{target ? 'Target' : 'Feature'}</span>
+                            </th>
+                        );
+                    })}
+                </tr>
+            </thead>
+            <tbody>
+                {STUDENTS.rows.map((r, ri) => (
+                    <tr key={ri}>
+                        {r.map((v, i) => <td key={i} className={i === r.length - 1 ? 'is-target' : undefined}>{v}</td>)}
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    </div>
+);
+
+// 5 inputs → 8 → 8 → 2 outputs, the shape the tutorial's network takes
+const ArchitectureVisual: React.FC = () => {
     const reduce = useReducedMotion();
-    const { scrollYProgress } = useScroll({
-        target: heroRef,
-        offset: ["start start", "end start"]
-    });
-
-    // Parallax — keep distance modest so it never "tears"
-    const yHeroText = useTransform(scrollYProgress, [0, 1], ["0%", "32%"]);
-    const opacityHero = useTransform(scrollYProgress, [0, 0.75], [1, 0]);
-
+    const layers = [5, 8, 8, 2];
+    const W = 280, H = 150, padX = 24, padY = 14;
+    const nodes = layers.map((n, li) => Array.from({ length: n }, (_, ni) => ({
+        x: padX + (li * (W - 2 * padX)) / (layers.length - 1),
+        y: padY + ((ni + 0.5) * (H - 2 * padY)) / n,
+    })));
+    const edges: [number, number, number, number][] = [];
+    for (let l = 0; l < nodes.length - 1; l++) {
+        for (const a of nodes[l]) for (const b of nodes[l + 1]) edges.push([a.x, a.y, b.x, b.y]);
+    }
+    const path = [nodes[0][2], nodes[1][3], nodes[2][5], nodes[3][1]];
     return (
-        <div className="relative w-full bg-bg-primary overflow-clip selection:bg-accent-2/30">
-            {/* Interactive Canvas Background */}
-            <NeuralBackground />
-
-            {/* Static gradient blobs — soft, slow drift via CSS animation */}
-            <div className="pointer-events-none absolute inset-0 overflow-hidden mix-blend-screen opacity-40">
-                <div className="absolute top-[-20%] left-[-10%] w-[55%] h-[55%] rounded-full bg-accent-1/20 blur-[160px] animate-float-slow" />
-                <div className="absolute bottom-[-12%] right-[-12%] w-[44%] h-[44%] rounded-full bg-accent-4/10 blur-[160px] animate-float-slow" style={{ animationDelay: '-3.5s' }} />
-                <div className="absolute top-[40%] left-[55%] w-[28%] h-[28%] rounded-full bg-accent-3/10 blur-[140px] animate-shimmer-slow" />
-            </div>
-
-            {/* Subliminal grid */}
-            <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTAgMGg0MHY0MEgweiIgZmlsbD0ibm9uZSIvPjxwYXRoIGQ9Ik0wIDM5LjVMMDQwIDM5LjUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjAyKSIvPjxwYXRoIGQ9Ik0zOS41IDB2NDAiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjAyKSIvPjwvc3ZnPg==')] opacity-[0.12] z-0 pointer-events-none" />
-
-            <main className="relative z-10">
-
-                {/* ─── Hero ─── */}
-                <section ref={heroRef} className="relative min-h-[calc(100vh-64px)] flex flex-col items-center justify-center px-6 pt-28 pb-28">
-                    <motion.div
-                        style={{ y: reduce ? 0 : yHeroText, opacity: opacityHero }}
-                        className="max-w-5xl mx-auto text-center flex flex-col items-center will-change-[transform,opacity]"
-                    >
-                        {/* Award */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.9, delay: 0.05, ease: GLIDE }}
-                            className="mb-9 inline-flex items-center gap-3 rounded-2xl border border-amber-300/30 bg-gradient-to-r from-amber-400/[0.12] via-amber-300/[0.05] to-transparent px-4 py-2.5 text-left backdrop-blur-md shadow-[0_0_34px_-10px_rgba(251,191,36,0.55)]"
-                        >
-                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-amber-300/30 bg-amber-400/15 text-amber-300">
-                                <Trophy className="h-[18px] w-[18px]" strokeWidth={1.8} />
-                            </span>
-                            <span className="flex flex-col leading-tight">
-                                <span className="text-[13.5px] font-semibold tracking-[-0.01em] text-amber-100">
-                                    1st place — Scientific Communication Session 2026
-                                </span>
-                                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-200/60">
-                                    Politehnica University of Bucharest
-                                </span>
-                            </span>
-                        </motion.div>
-
-                        <motion.div
-                            initial={{ opacity: 0, y: 24 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 1.0, delay: 0.08, ease: GLIDE }}
-                        >
-                            <HeroHeadline />
-                        </motion.div>
-
-                        <motion.p
-                            initial={{ opacity: 0, y: 16 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 1.0, delay: 0.18, ease: GLIDE }}
-                            className="mx-auto max-w-[640px] text-[clamp(1rem,0.6vw+0.92rem,1.2rem)] text-text-secondary leading-[1.65] mb-12 font-light tracking-[0.005em]"
-                        >
-                            The most advanced visual node platform for neural networks.
-                            Build, configure, and train models in a gorgeous, highly-optimized environment.
-                        </motion.p>
-
-                        <motion.div
-                            initial={{ opacity: 0, y: 12 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 1.0, delay: 0.28, ease: GLIDE }}
-                            className="flex flex-col sm:flex-row gap-4 justify-center items-center"
-                        >
-                            <Link
-                                to="/dataset"
-                                className="group relative inline-flex h-12 md:h-[52px] items-center justify-center gap-2.5 overflow-hidden rounded-full bg-white px-8 text-[14px] font-medium tracking-[-0.005em] text-black transition-all duration-500 ease-glide hover:scale-[1.025] active:scale-[0.98] shadow-[0_0_30px_rgba(255,255,255,0.18)] hover:shadow-[0_0_45px_rgba(255,255,255,0.28)]"
-                            >
-                                <span>Start Building</span>
-                                <ArrowRight className="h-[15px] w-[15px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
-                            </Link>
-                            <Link
-                                to="/demo"
-                                className="group inline-flex h-12 md:h-[52px] items-center justify-center gap-2.5 rounded-full border border-white/15 bg-white/[0.03] px-7 text-[14px] font-medium text-white/85 backdrop-blur-md transition-all duration-500 ease-glide hover:bg-white/[0.07] hover:border-white/25 hover:text-white"
-                            >
-                                <Play className="h-[13px] w-[13px]" fill="currentColor" strokeWidth={0} />
-                                <span className="font-mono uppercase tracking-[0.18em] text-[11px]">Watch a live demo</span>
-                            </Link>
-                        </motion.div>
-
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ duration: 1.0, delay: 0.42, ease: GLIDE }}
-                            className="mt-7"
-                        >
-                            <Link
-                                to="/tutorial"
-                                className="group inline-flex items-center gap-3 rounded-full border border-accent-3/30 bg-accent-2/[0.1] py-2 pl-2 pr-5 text-[13.5px] text-white/85 backdrop-blur-md transition-all duration-500 ease-glide hover:border-accent-3/60 hover:bg-accent-2/[0.18] hover:text-white no-underline shadow-[0_0_30px_-12px_rgba(139,92,246,0.8)]"
-                            >
-                                <span className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-accent-1 to-accent-2 px-3 py-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] text-white">
-                                    <GraduationCap className="h-[13px] w-[13px]" strokeWidth={2} />
-                                    Tutorial
-                                </span>
-                                New here? Train your first model in ten minutes
-                                <ArrowRight className="h-[13px] w-[13px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
-                            </Link>
-                        </motion.div>
-                    </motion.div>
-
-                    <ScrollIndicator />
-                </section>
-
-                {/* ─── How it works ─── */}
-                <section id="how-it-works" className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-10 md:pt-28 lg:px-8">
-                    <FadeIn className="mb-12 md:mb-16 text-center max-w-3xl mx-auto">
-                        <Eyebrow number="01" label="How it works" />
-                        <h2 className="text-[clamp(2rem,3.6vw+1rem,3.5rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
-                            From a spreadsheet to a{' '}
-                            <em className="not-italic font-display italic font-normal tracking-[-0.018em] whitespace-nowrap text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4">
-                                working model.
-                            </em>
-                        </h2>
-                        <p className="text-[1.05rem] md:text-[1.15rem] text-text-secondary font-light leading-[1.65] tracking-[0.003em]">
-                            Eight steps, with the AI tutor and co-pilot doing the hard parts. Pick one, or let them play through.
-                        </p>
-                    </FadeIn>
-
-                    <FadeIn delay={0.08}>
-                        <Walkthrough />
-                    </FadeIn>
-
-                    <FadeIn delay={0.12} className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-4">
-                        <a
-                            href="#tutorial"
-                            className="group inline-flex h-12 items-center justify-center gap-2.5 rounded-full bg-white px-7 text-[14px] font-medium tracking-[-0.005em] text-black transition-all duration-500 ease-glide hover:scale-[1.025] active:scale-[0.98] shadow-[0_0_30px_rgba(255,255,255,0.14)] no-underline hover:no-underline"
-                        >
-                            <GraduationCap className="h-[16px] w-[16px]" strokeWidth={1.9} />
-                            <span>Do it yourself, step by step</span>
-                            <ArrowDown className="h-[15px] w-[15px] transition-transform duration-500 ease-glide group-hover:translate-y-0.5" strokeWidth={2} />
-                        </a>
-                        <span className="text-[13.5px] font-light text-text-secondary">
-                            It comes with a practice dataset and the exact prompt to give the AI.
-                        </span>
-                    </FadeIn>
-                </section>
-
-                {/* ─── Bento ─── */}
-                <section className="relative z-10 max-w-7xl mx-auto px-6 py-28 md:py-36 lg:px-8">
-                    <FadeIn className="mb-16 md:mb-24 text-center max-w-3xl mx-auto">
-                        <Eyebrow number="02" label="The Platform" />
-                        <h2 className="text-[clamp(2rem,3.6vw+1rem,3.5rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
-                            Designed for{' '}
-                            <em className="not-italic font-display italic font-normal tracking-[-0.018em] text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4">
-                                velocity.
-                            </em>
-                        </h2>
-                        <p className="text-[1.05rem] md:text-[1.15rem] text-text-secondary font-light leading-[1.65] tracking-[0.003em]">
-                            Every aspect of the platform is engineered to strip away boilerplate and let you
-                            focus on what matters &mdash; the architecture itself.
-                        </p>
-                    </FadeIn>
-
-                    <div className="grid grid-cols-1 md:grid-cols-6 gap-6 md:auto-rows-[26rem]">
-                        <GlassCard
-                            index="◌ 001"
-                            title="Dataset Engine"
-                            description="Streamline data ingestion. Automatically detect features, target columns, and handle complex preprocessing directly within a highly responsive visual workspace."
-                            icon={Database}
-                            to="/dataset"
-                            delay={0.05}
-                            className="md:col-span-4"
-                        />
-                        <GlassCard
-                            index="◌ 002"
-                            title="Visual Architecture"
-                            description="Drag, drop, and connect neural layers. Visualize deep networks instantly."
-                            icon={Layers}
-                            to="/architect"
-                            delay={0.12}
-                            className="md:col-span-2 group"
-                        />
-                        <GlassCard
-                            index="◌ 003"
-                            title="Live Telemetry"
-                            description="Watch the training loss converge in real-time."
-                            icon={Activity}
-                            to="/training"
-                            delay={0.18}
-                            className="md:col-span-2"
-                        />
-                        <GlassCard
-                            index="◌ 004"
-                            title="Background Sessions"
-                            description="Training runs on the server, not in your tab. Close the browser, come back from any device, and pick the run up exactly where it is — queued on the shared Mac mini, or instantly on a server you enroll yourself."
-                            icon={CloudCog}
-                            to="/training"
-                            delay={0.24}
-                            className="md:col-span-4"
-                        />
-                    </div>
-                </section>
-
-                {/* ─── Tutorial ─── */}
-                <section id="tutorial" className="relative z-10 max-w-[1300px] mx-auto px-6 pt-10 pb-6 lg:px-8 scroll-mt-24">
-                    <FadeIn className="mb-14 md:mb-20 text-center max-w-3xl mx-auto">
-                        <Eyebrow number="03" label="Tutorial" />
-                        <h2 className="text-[clamp(2rem,3.6vw+1rem,3.5rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
-                            Your first model,{' '}
-                            <em className="not-italic font-display italic font-normal tracking-[-0.018em] whitespace-nowrap text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4">
-                                step by step.
-                            </em>
-                        </h2>
-                        <p className="text-[1.05rem] md:text-[1.15rem] text-text-secondary font-light leading-[1.65] tracking-[0.003em]">
-                            In about ten minutes you will teach a neural network to predict whether a student passes
-                            an exam, with the AI tutor and co-pilot doing the hard parts. Every step shows exactly
-                            what to click and what you should see change.
-                        </p>
-                    </FadeIn>
-
-                    <Suspense fallback={<div className="py-24 text-center text-sm text-white/40">Loading the tutorial…</div>}>
-                        <TutorialGuide />
-                    </Suspense>
-                </section>
-
-                {/* ─── Final CTA ─── */}
-                <section className="relative z-10 max-w-5xl mx-auto px-6 py-28 md:py-36 text-center">
-                    <FadeIn direction="up">
-                        <div className="relative rounded-[3rem] border border-white/10 bg-gradient-to-b from-white/[0.04] to-transparent p-12 md:p-24 backdrop-blur-xl overflow-hidden">
-                            {/* Top hairline */}
-                            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-px bg-gradient-to-r from-transparent via-accent-3/70 to-transparent" />
-                            {/* Soft inner glow */}
-                            <div className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[110%] h-64 bg-accent-2/15 blur-[100px] rounded-full" />
-
-                            <Eyebrow number="04" label="Get Started" />
-
-                            <h2 className="text-[clamp(2.2rem,3.8vw+1rem,3.75rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
-                                Ready to{' '}
-                                <em className="not-italic font-display italic font-normal tracking-[-0.018em] text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4">
-                                    train?
-                                </em>
-                            </h2>
-                            <p className="text-[1.05rem] md:text-[1.15rem] text-text-secondary font-light leading-[1.65] mb-12 max-w-[44ch] mx-auto">
-                                Create, manage, and scale your machine learning experiments seamlessly &mdash; right from the browser.
-                            </p>
-
-                            <Link
-                                to="/signup"
-                                className="group inline-flex h-14 items-center justify-center gap-3 rounded-full bg-gradient-to-r from-accent-1 via-accent-2 to-accent-3 px-9 text-[14.5px] font-medium tracking-[-0.005em] text-white transition-all duration-500 ease-glide hover:scale-[1.025] shadow-[0_0_45px_rgba(139,92,246,0.4)] hover:shadow-[0_0_65px_rgba(139,92,246,0.6)]"
-                            >
-                                <span>Create Free Account</span>
-                                <span className="text-white/65 italic font-display">— the future awaits</span>
-                                <ArrowRight className="h-[15px] w-[15px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
-                            </Link>
-                        </div>
-                    </FadeIn>
-                </section>
-
-            </main>
+        <div className="vx-mini">
+            <svg className="vx-net" viewBox={`0 0 ${W} ${H + 14}`} role="img" aria-label="A network with 5 inputs, two hidden layers of 8, and 2 outputs">
+                {edges.map(([x1, y1, x2, y2], i) => <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} />)}
+                {!reduce && path.slice(0, -1).map((a, i) => (
+                    <motion.line
+                        key={`p${i}`}
+                        className="vx-net__pulse"
+                        x1={a.x} y1={a.y} x2={path[i + 1].x} y2={path[i + 1].y}
+                        initial={{ strokeDashoffset: 6 }}
+                        animate={{ strokeDashoffset: -200 }}
+                        transition={{ duration: 2.4, delay: i * 0.5, repeat: Infinity, repeatDelay: 1.2, ease: 'linear' }}
+                    />
+                ))}
+                {nodes.map((layer, li) => layer.map((n, ni) => (
+                    <circle key={`${li}-${ni}`} cx={n.x} cy={n.y} r={li === 3 ? 5 : 4} className={li === 3 ? 'is-out' : undefined} />
+                )))}
+                <text x={padX} y={H + 10} textAnchor="middle">Input</text>
+                <text x={W - padX} y={H + 10} textAnchor="middle">Output</text>
+            </svg>
         </div>
     );
 };
+
+const TelemetryVisual: React.FC = () => {
+    const reduce = useReducedMotion();
+    const loss = 'M8,8 C40,44 70,66 110,76 S200,86 272,88';
+    return (
+        <div className="vx-mini vx-chart">
+            <div className="vx-chart__stats">
+                <div><div className="vx-chart__v">24/40</div><div className="vx-chart__l">Epoch</div></div>
+                <div><div className="vx-chart__v">0.0761</div><div className="vx-chart__l">Train loss</div></div>
+                <div><div className="vx-chart__v is-accent">96.9%</div><div className="vx-chart__l">Val accuracy</div></div>
+            </div>
+            <svg viewBox="0 0 280 96" role="img" aria-label="Loss falling and accuracy rising over the epochs">
+                <line className="grid" x1="0" x2="280" y1="8" y2="8" />
+                <line className="grid" x1="0" x2="280" y1="48" y2="48" />
+                <line className="grid" x1="0" x2="280" y1="88" y2="88" />
+                <path className="acc" d="M8,80 C40,40 80,22 130,16 S220,12 272,11" />
+                <path className="area" d={`${loss} L272,96 L8,96 Z`} />
+                <motion.path
+                    className="loss"
+                    d={loss}
+                    initial={reduce ? false : { pathLength: 0 }}
+                    whileInView={{ pathLength: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 1.2, ease: GLIDE }}
+                />
+                <circle className="dot" cx="272" cy="88" r="3.5" />
+            </svg>
+        </div>
+    );
+};
+
+const SessionsVisual: React.FC = () => (
+    <div className="vx-mini vx-runs">
+        <div className="vx-run is-live">
+            <ProgressRing value={62} size={28} stroke={3} pulse />
+            <div className="vx-run__main">
+                <div className="vx-run__name">Exam-Predictor</div>
+                <div className="vx-run__where">Your own server · Training</div>
+                <div className="vx-run__bar"><span style={{ width: '62%' }} /></div>
+            </div>
+            <span className="vx-run__meta">62%</span>
+        </div>
+        <div className="vx-run">
+            <ProgressRing value={0} size={28} stroke={3} />
+            <div className="vx-run__main">
+                <div className="vx-run__name">Iris-Species</div>
+                <div className="vx-run__where">Shared Mac mini · Queued</div>
+            </div>
+            <span className="vx-run__meta">#2</span>
+        </div>
+    </div>
+);
+
+const FeatureCard: React.FC<{
+    title: string;
+    description: string;
+    icon: React.ElementType;
+    to: string;
+    wide?: boolean;
+    delay?: number;
+    visual: React.ReactNode;
+}> = ({ title, description, icon: Icon, to, wide, delay = 0, visual }) => (
+    <FadeIn delay={delay} className={`vx-card ${wide ? 'vx-card--wide' : 'vx-card--narrow'}`}>
+        <div className="vx-card__body">
+            <span className="vx-card__icon"><Icon size={20} strokeWidth={1.75} aria-hidden="true" /></span>
+            <h3 className="vx-card__title">{title}</h3>
+            <p className="vx-card__text">{description}</p>
+            <Link to={to} className="vx-card__link">
+                Explore <ArrowRight size={14} strokeWidth={2} aria-hidden="true" />
+            </Link>
+        </div>
+        <div className="vx-card__visual">{visual}</div>
+    </FadeIn>
+);
+
+// ─── Page ───────────────────────────────────────────────────────────────────
+const Home: React.FC = () => (
+    <div className="vx-home">
+        <div className="vx-home__light" aria-hidden="true" />
+
+        <Hero />
+        <ProductReveal />
+
+        {/* ─── How it works ─── */}
+        <section id="how-it-works" className="vx-section">
+            <div className="vx-container">
+                <SectionHead label="How it works" title="From a spreadsheet to a working model.">
+                    Eight steps, with the AI tutor and co-pilot doing the hard parts. Pick one, or let them play through.
+                </SectionHead>
+                <FadeIn delay={0.05}>
+                    <Walkthrough />
+                </FadeIn>
+                <FadeIn className="vx-walk__after">
+                    <a href="#tutorial" className="vx-btn vx-btn--ghost">
+                        <GraduationCap size={16} strokeWidth={1.9} aria-hidden="true" />
+                        Do it yourself, step by step
+                        <ArrowDown size={15} strokeWidth={2} className="vx-btn__down" aria-hidden="true" />
+                    </a>
+                    <span>It comes with a practice dataset and the exact prompt to give the AI.</span>
+                </FadeIn>
+            </div>
+        </section>
+
+        {/* ─── The platform ─── */}
+        <section className="vx-section">
+            <div className="vx-container">
+                <SectionHead label="The Platform" title="Designed for velocity.">
+                    Every aspect of the platform is engineered to strip away boilerplate and let you
+                    focus on what matters &mdash; the architecture itself.
+                </SectionHead>
+                <div className="vx-bento">
+                    <FeatureCard
+                        wide
+                        title="Dataset Engine"
+                        description="Streamline data ingestion. Automatically detect features, target columns, and handle complex preprocessing directly within a highly responsive visual workspace."
+                        icon={Database}
+                        to="/dataset"
+                        visual={<DatasetVisual />}
+                    />
+                    <FeatureCard
+                        title="Visual Architecture"
+                        description="Drag, drop, and connect neural layers. Visualize deep networks instantly."
+                        icon={Layers}
+                        to="/architect"
+                        delay={0.06}
+                        visual={<ArchitectureVisual />}
+                    />
+                    <FeatureCard
+                        title="Live Telemetry"
+                        description="Watch the training loss converge in real-time."
+                        icon={Activity}
+                        to="/training"
+                        delay={0.03}
+                        visual={<TelemetryVisual />}
+                    />
+                    <FeatureCard
+                        wide
+                        title="Background Sessions"
+                        description="Training runs on the server, not in your tab. Close the browser, come back from any device, and pick the run up exactly where it is — queued on the shared Mac mini, or instantly on a server you enroll yourself."
+                        icon={CloudCog}
+                        to="/training"
+                        delay={0.09}
+                        visual={<SessionsVisual />}
+                    />
+                </div>
+            </div>
+        </section>
+
+        {/* ─── Tutorial ─── */}
+        <section id="tutorial" className="vx-section" style={{ scrollMarginTop: 'var(--space-16)' }}>
+            <div className="vx-container" style={{ maxWidth: 'var(--container-wide)' }}>
+                <SectionHead label="Tutorial" title="Your first model, step by step.">
+                    In about ten minutes you will teach a neural network to predict whether a student passes
+                    an exam, with the AI tutor and co-pilot doing the hard parts. Every step shows exactly
+                    what to click and what you should see change.
+                </SectionHead>
+                <Suspense fallback={<div className="vx-lead" style={{ margin: '0 auto', padding: 'var(--space-24) 0', textAlign: 'center' }}>Loading the tutorial…</div>}>
+                    <TutorialGuide />
+                </Suspense>
+            </div>
+        </section>
+
+        {/* ─── Get started ─── */}
+        <section className="vx-final">
+            <div className="vx-container" style={{ maxWidth: '64rem' }}>
+                <FadeIn className="vx-final__panel vx-glass">
+                    <span className="vx-label">Get Started</span>
+                    <h2 className="vx-h2">Ready to train?</h2>
+                    <p className="vx-lead">
+                        Create, manage, and scale your machine learning experiments seamlessly &mdash; right from the browser.
+                    </p>
+                    <Link to="/signup" className="vx-btn vx-btn--primary vx-btn--lg">
+                        Create Free Account
+                        <span className="vx-final__after">— the future awaits</span>
+                        <ArrowRight size={16} strokeWidth={2} className="vx-btn__arrow" aria-hidden="true" />
+                    </Link>
+                </FadeIn>
+            </div>
+        </section>
+    </div>
+);
 
 export default Home;
