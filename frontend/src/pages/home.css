@@ -160,7 +160,14 @@
 
 /* ─── Product reveal ─────────────────────────────────── */
 .vx-reveal { padding-block: 0; }
-.vx-reveal__stage { position: relative; perspective: 1800px; }
+/* Width follows the viewport height too, so the whole 16:10 recording plus its
+   toolbar fits on screen (a 1080p display leaves ~950px for the page). */
+.vx-reveal__stage {
+    position: relative;
+    max-width: min(100%, calc((100svh - 18rem) * 1.6));
+    margin-inline: auto;
+    perspective: 1800px;
+}
 .vx-reveal__glow {
     position: absolute;
     inset: -10% 6% 20%;
