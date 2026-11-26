@@ -11,6 +11,7 @@ import SessionOverlays from './session/SessionOverlays';
 
 const navLinks = [
     { to: '/demo', label: 'Demo' },
+    { to: '/tutorial', label: 'Tutorial' },
     { to: '/dataset', label: 'Dataset' },
     { to: '/architect', label: 'Architect' },
     { to: '/training', label: 'Training' },

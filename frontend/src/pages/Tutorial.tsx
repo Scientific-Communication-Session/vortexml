@@ -1,11 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
     ArrowRight, Check, CircleCheck, Copy, Download, Eye, FileSpreadsheet, FlaskConical, Hand, Info,
-    Lightbulb, MessageSquareQuote, Pause, Play, Sparkles, Upload, UserRound, Wand2,
+    Lightbulb, MessageSquareQuote, Play, Sparkles, Upload, UserRound, Wand2,
 } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
+import Clip from '../components/TutorialClip';
 import '../components/session/session.css';
 import './demo.css';
 import './tutorial.css';
@@ -73,54 +74,6 @@ const EXPERIMENTS: {
         why: 'A tiny network is enough here — and a bigger one is not smarter. Match the model to the problem, not the other way round.',
     },
 ];
-
-// ── A recorded clip, shown in a browser frame ───────────────────────────────
-// The (heavy) GIF is only fetched once the clip scrolls into view; until then,
-// and for visitors who prefer reduced motion, a still frame stands in.
-const Clip: React.FC<{ name: string; url: string; alt: string; caption?: React.ReactNode }> = ({
-    name, url, alt, caption,
-}) => {
-    const ref = useRef<HTMLDivElement>(null);
-    // Without IntersectionObserver there is nothing to wait for — load right away.
-    const [inView, setInView] = useState(() => !('IntersectionObserver' in window));
-    const [playing, setPlaying] = useState(
-        () => !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
-    );
-
-    useEffect(() => {
-        const el = ref.current;
-        if (!el || !('IntersectionObserver' in window)) return;
-        const io = new IntersectionObserver((entries) => {
-            if (entries.some((e) => e.isIntersecting)) { setInView(true); io.disconnect(); }
-        }, { rootMargin: '200px' });
-        io.observe(el);
-        return () => io.disconnect();
-    }, []);
-
-    return (
-        <figure className="tt-clip" ref={ref}>
-            <div className="tt-clip__bar">
-                <span className="tt-clip__dots"><i /><i /><i /></span>
-                <span className="tt-clip__url">{url}</span>
-                <button type="button" className="tt-clip__toggle" onClick={() => setPlaying((p) => !p)}>
-                    {playing ? <><Pause size={11} /> Pause</> : <><Play size={11} /> Play</>}
-                </button>
-            </div>
-            <div className="tt-clip__stage">
-                <img
-                    src={inView && playing ? `/tutorial/${name}.gif` : `/tutorial/${name}.png`}
-                    alt={alt}
-                    width={880}
-                    height={550}
-                    loading="lazy"
-                />
-            </div>
-            <figcaption className="tt-clip__caption">
-                {caption ?? 'Recorded from the running app — no mock-ups.'}
-            </figcaption>
-        </figure>
-    );
-};
 
 const Step: React.FC<{
     id: string; num: string; where: React.ReactNode; title: React.ReactNode; children: React.ReactNode;

@@ -520,6 +520,12 @@ body::before {
 }
 
 
+/* Home walkthrough: the bar under the active step, one clip long */
+@keyframes walkthrough-fill {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+}
+
 /* Sample-dataset shortcuts under the upload zone */
 .sample-row {
     display: flex;

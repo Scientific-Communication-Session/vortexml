@@ -1,8 +1,9 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion';
-import { Database, Activity, ArrowRight, Layers, CloudCog, Play, Trophy } from 'lucide-react';
+import { motion, useInView, useScroll, useTransform, useReducedMotion } from 'framer-motion';
+import { Database, Activity, ArrowRight, GraduationCap, Layers, CloudCog, Play, Trophy } from 'lucide-react';
 import NeuralBackground from '../components/NeuralBackground';
+import TutorialClip from '../components/TutorialClip';
 import { cn } from '../utils/cn';
 
 // Easing — one curve, used everywhere for a unified motion language
@@ -170,6 +171,133 @@ const Eyebrow: React.FC<{ number: string; label: string }> = ({ number, label })
     </div>
 );
 
+// The tutorial's clips, in order. `seconds` is each GIF's length, so the
+// walkthrough moves on exactly when the clip has played through once.
+const WALKTHROUGH = [
+    {
+        clip: '01-upload', seconds: 11, url: 'vortexml / dataset',
+        title: 'Upload your data',
+        text: 'Drop in a CSV. You get a preview table and a summary of what is in it.',
+        alt: 'Uploading a CSV on the Dataset page; the preview table appears.',
+    },
+    {
+        clip: '02-columns', seconds: 18.6, url: 'vortexml / dataset',
+        title: 'Choose what to predict',
+        text: 'Tick the columns the model may look at, and the one it should learn to predict.',
+        alt: 'Marking five columns as features and one as the target.',
+    },
+    {
+        clip: '03-architect', seconds: 19.4, url: 'vortexml / architect',
+        title: 'Design the network',
+        text: 'Pick a model type, set its layers, and decide how long it trains.',
+        alt: 'Selecting a Multi-Layer Perceptron and entering its layer sizes and hyperparameters.',
+    },
+    {
+        clip: '04-train', seconds: 19.8, url: 'vortexml / training',
+        title: 'Train it live',
+        text: 'The loss falls and the accuracy climbs on screen, epoch by epoch.',
+        alt: 'Starting a run on the Training page; the loss curve falls and accuracy rises.',
+    },
+    {
+        clip: '05-background', seconds: 25.8, url: 'vortexml — opened in a second browser',
+        title: 'Close the tab',
+        text: 'The run carries on without you. Open the site in another browser and pick it up where it is.',
+        alt: 'A second browser signs in while a run is training: the welcome-back prompt appears, then the dashboard with the full history.',
+    },
+    {
+        clip: '06-predict', seconds: 28.1, url: 'vortexml / predict',
+        title: 'Ask it questions',
+        text: 'Type in values the model has never seen and it answers.',
+        alt: 'Entering two different students on the Predict page; the prediction changes from pass to fail.',
+    },
+];
+
+// The whole product in six recorded clips, playing one after another.
+const Walkthrough: React.FC = () => {
+    const ref = useRef<HTMLDivElement>(null);
+    const inView = useInView(ref, { margin: '-20% 0px' });
+    const reduce = useReducedMotion();
+    const [index, setIndex] = useState(0);
+    const [playing, setPlaying] = useState(!reduce);
+    const step = WALKTHROUGH[index];
+    const running = playing && inView;
+
+    // Fetch the next clip while this one plays, so the hand-over is seamless.
+    useEffect(() => {
+        if (!running) return;
+        const next = WALKTHROUGH[(index + 1) % WALKTHROUGH.length];
+        new Image().src = `/tutorial/${next.clip}.gif`;
+    }, [index, running]);
+
+    return (
+        <div ref={ref} className="grid gap-6 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)] lg:gap-10 items-start">
+            <ol className="order-2 lg:order-1 flex flex-col gap-1.5 list-none p-0 m-0">
+                {WALKTHROUGH.map((s, i) => {
+                    const active = i === index;
+                    return (
+                        <li key={s.clip}>
+                            <button
+                                type="button"
+                                onClick={() => setIndex(i)}
+                                aria-current={active ? 'step' : undefined}
+                                className={cn(
+                                    'relative block w-full cursor-pointer overflow-hidden rounded-2xl border border-solid px-5 py-3.5 text-left font-sans',
+                                    'transition-[background-color,border-color] duration-500 ease-glide',
+                                    active
+                                        ? 'border-accent-2/35 bg-white/[0.06]'
+                                        : 'border-transparent bg-transparent hover:bg-white/[0.035]',
+                                )}
+                            >
+                                <span className="flex items-baseline gap-3.5">
+                                    <span className={cn(
+                                        'font-mono text-[11px] tracking-[0.18em] transition-colors duration-500',
+                                        active ? 'text-accent-3' : 'text-white/35',
+                                    )}>
+                                        {String(i + 1).padStart(2, '0')}
+                                    </span>
+                                    <span className={cn(
+                                        'text-[15.5px] font-medium tracking-[-0.01em] transition-colors duration-500',
+                                        active ? 'text-white' : 'text-white/60',
+                                    )}>
+                                        {s.title}
+                                    </span>
+                                </span>
+                                {active && (
+                                    <span className="mt-1.5 block pl-[1.95rem] text-[13.5px] font-light leading-relaxed text-text-secondary">
+                                        {s.text}
+                                    </span>
+                                )}
+                                {/* Fills over the length of the clip, then hands over to the next step. */}
+                                {active && running && (
+                                    <span className="absolute inset-x-0 bottom-0 h-[2px] bg-white/[0.06]">
+                                        <span
+                                            key={s.clip}
+                                            className="block h-full origin-left bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4"
+                                            style={{ animation: `walkthrough-fill ${s.seconds}s linear forwards` }}
+                                            onAnimationEnd={() => setIndex((n) => (n + 1) % WALKTHROUGH.length)}
+                                        />
+                                    </span>
+                                )}
+                            </button>
+                        </li>
+                    );
+                })}
+            </ol>
+
+            <div className="order-1 lg:order-2 min-w-0">
+                <TutorialClip
+                    name={step.clip}
+                    url={step.url}
+                    alt={step.alt}
+                    playing={playing}
+                    onToggle={() => setPlaying((p) => !p)}
+                    caption={<>Step {index + 1} of {WALKTHROUGH.length} · recorded from the running app, no mock-ups.</>}
+                />
+            </div>
+        </div>
+    );
+};
+
 const Home: React.FC = () => {
     const heroRef = useRef<HTMLDivElement>(null);
     const reduce = useReducedMotion();
@@ -288,8 +416,12 @@ const Home: React.FC = () => {
                         >
                             <Link
                                 to="/tutorial"
-                                className="group inline-flex items-center gap-2 text-[13.5px] text-white/55 hover:text-white transition-colors duration-300 no-underline"
+                                className="group inline-flex items-center gap-3 rounded-full border border-accent-3/30 bg-accent-2/[0.1] py-2 pl-2 pr-5 text-[13.5px] text-white/85 backdrop-blur-md transition-all duration-500 ease-glide hover:border-accent-3/60 hover:bg-accent-2/[0.18] hover:text-white no-underline shadow-[0_0_30px_-12px_rgba(139,92,246,0.8)]"
                             >
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-accent-1 to-accent-2 px-3 py-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] text-white">
+                                    <GraduationCap className="h-[13px] w-[13px]" strokeWidth={2} />
+                                    Tutorial
+                                </span>
                                 New here? Train your first model in five minutes
                                 <ArrowRight className="h-[13px] w-[13px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
                             </Link>
@@ -299,10 +431,44 @@ const Home: React.FC = () => {
                     <ScrollIndicator />
                 </section>
 
+                {/* ─── How it works ─── */}
+                <section id="how-it-works" className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-10 md:pt-28 lg:px-8">
+                    <FadeIn className="mb-12 md:mb-16 text-center max-w-3xl mx-auto">
+                        <Eyebrow number="01" label="How it works" />
+                        <h2 className="text-[clamp(2rem,3.6vw+1rem,3.5rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
+                            From a spreadsheet to a{' '}
+                            <em className="not-italic font-display italic font-normal tracking-[-0.018em] whitespace-nowrap text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4">
+                                working model.
+                            </em>
+                        </h2>
+                        <p className="text-[1.05rem] md:text-[1.15rem] text-text-secondary font-light leading-[1.65] tracking-[0.003em]">
+                            Six steps, shown exactly as they happen in the app. Pick one, or let them play through.
+                        </p>
+                    </FadeIn>
+
+                    <FadeIn delay={0.08}>
+                        <Walkthrough />
+                    </FadeIn>
+
+                    <FadeIn delay={0.12} className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-4">
+                        <Link
+                            to="/tutorial"
+                            className="group inline-flex h-12 items-center justify-center gap-2.5 rounded-full bg-white px-7 text-[14px] font-medium tracking-[-0.005em] text-black transition-all duration-500 ease-glide hover:scale-[1.025] active:scale-[0.98] shadow-[0_0_30px_rgba(255,255,255,0.14)] no-underline hover:no-underline"
+                        >
+                            <GraduationCap className="h-[16px] w-[16px]" strokeWidth={1.9} />
+                            <span>Follow the full tutorial</span>
+                            <ArrowRight className="h-[15px] w-[15px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
+                        </Link>
+                        <span className="text-[13.5px] font-light text-text-secondary">
+                            It comes with a practice dataset and the exact settings to type in.
+                        </span>
+                    </FadeIn>
+                </section>
+
                 {/* ─── Bento ─── */}
                 <section className="relative z-10 max-w-7xl mx-auto px-6 py-28 md:py-36 lg:px-8">
                     <FadeIn className="mb-16 md:mb-24 text-center max-w-3xl mx-auto">
-                        <Eyebrow number="01" label="The Platform" />
+                        <Eyebrow number="02" label="The Platform" />
                         <h2 className="text-[clamp(2rem,3.6vw+1rem,3.5rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
                             Designed for{' '}
                             <em className="not-italic font-display italic font-normal tracking-[-0.018em] text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4">
@@ -364,7 +530,7 @@ const Home: React.FC = () => {
                             {/* Soft inner glow */}
                             <div className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[110%] h-64 bg-accent-2/15 blur-[100px] rounded-full" />
 
-                            <Eyebrow number="02" label="Get Started" />
+                            <Eyebrow number="03" label="Get Started" />
 
                             <h2 className="text-[clamp(2.2rem,3.8vw+1rem,3.75rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
                                 Ready to{' '}
