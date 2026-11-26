@@ -8,7 +8,7 @@ and trains on it through the web UI.
 
 ```
         Browser (anyone, even a thin laptop)
-                     │  https://vortexml.andreinita.com
+                     │  https://vortexml.ro
                      ▼
         Cloudflare tunnel ──► 192.168.100.95:5173  (Vite)
                                      │  proxies /api and /socket.io
@@ -36,19 +36,23 @@ The central M4 is an **orchestrator**:
 | Variable | Purpose |
 |---|---|
 | `ANTHROPIC_API_KEY` | Enables the Novice-mode chatbot. |
-| `VORTEX_PUBLIC_URL` | Public URL baked into downloaded node-agent bundles. Defaults to `https://vortexml.andreinita.com`. |
+| `VORTEX_PUBLIC_URL` | Public URL baked into downloaded node-agent bundles. Defaults to `https://vortexml.ro`. It is also the one public browser origin the API and sockets accept. |
 | `VORTEX_USE_SQLITE` | Set `1` to skip the Postgres probe. |
 
 ### Tunnel
 
-`vortexml.andreinita.com` is fronted by a Cloudflare tunnel pointing at the Vite
-dev server (`192.168.100.95:5173`). Vite proxies `/api` and `/socket.io` on to
-the backend, so the whole app is reachable through that one hostname.
+`vortexml.ro` is fronted by a Cloudflare tunnel pointing at the Vite dev server
+(`192.168.100.95:5173`, plain HTTP). Vite proxies `/api` and `/socket.io` on to
+the backend, so the whole app is reachable through that one hostname and port
+5050 never needs exposing.
 
 Two things make this work and are already wired up:
 
-- `frontend/vite.config.ts` lists `vortexml.andreinita.com` in `allowedHosts`
-  (Vite rejects unknown `Host` headers otherwise) and binds all interfaces.
+- `frontend/vite.config.ts` lists `vortexml.ro` in `allowedHosts` (Vite answers
+  "Blocked request. This host is not allowed" otherwise) and binds all
+  interfaces.
+- `VORTEX_PUBLIC_URL` is `https://vortexml.ro`. Moving to another domain means
+  changing both, then `systemctl --user restart vortexml`.
 - If the tunnel ever serves plain HTTP instead of HTTPS, change
   `VORTEX_PUBLIC_URL` accordingly — that string is what node agents dial.
 
@@ -99,8 +103,21 @@ launchctl kickstart -k gui/$(id -u)/com.vortexml.server   # restart
 bash deploy/uninstall-service.sh                          # remove
 ```
 
-The Cloudflare tunnel is a separate process — to auto-start it too, install
-its own service with `cloudflared service install`.
+The Cloudflare tunnel is a separate process. On the Linux host it runs as its
+own user service, `cloudflared-vortexml.service`, which reads the tunnel token
+from `~/.config/cloudflared/vortexml.token` (mode 600, never in the repo):
+
+```bash
+systemctl --user status cloudflared-vortexml
+journalctl --user -u cloudflared-vortexml -f     # routes pushed from the dashboard, origin errors
+```
+
+The routes (`vortexml.ro` and `www.vortexml.ro`, both → `http://localhost:5173`)
+are set in the Cloudflare dashboard under the tunnel's public hostnames. `www`
+is only an alias: a small plugin in `frontend/vite.config.ts` answers it with a
+301 to the apex, so the login cookie and the sockets have a single origin. Keep this tunnel on
+one machine only: a second connector elsewhere receives a share of the traffic
+and answers 502 because it cannot reach the origin.
 
 ## Train on your own device
 

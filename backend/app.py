@@ -79,7 +79,7 @@ _DEFAULT_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 _extra_origins = [o.strip() for o in
                   os.environ.get("VORTEX_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 # The public tunnel URL is a legitimate browser origin too.
-_public_origin = os.environ.get("VORTEX_PUBLIC_URL", "https://vortexml.andreinita.com")
+_public_origin = os.environ.get("VORTEX_PUBLIC_URL", "https://vortexml.ro")
 ALLOWED_ORIGINS = list(dict.fromkeys(_DEFAULT_ORIGINS + _extra_origins + [_public_origin]))
 
 # Enable CORS with credentials support for session cookies pointing to the frontend
@@ -200,8 +200,8 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Public URL the node agents dial back into. The Cloudflare tunnel for this is
-# vortexml.andreinita.com → :5173 (Vite), which proxies /api and /socket.io.
-PUBLIC_URL = os.environ.get("VORTEX_PUBLIC_URL", "https://vortexml.andreinita.com")
+# vortexml.ro → :5173 (Vite), which proxies /api and /socket.io.
+PUBLIC_URL = os.environ.get("VORTEX_PUBLIC_URL", "https://vortexml.ro")
 NODE_BUNDLE_DIR = os.path.join(os.path.dirname(__file__), "node_bundle")
 
 # ── Per-user / per-session working state ──────────────────
