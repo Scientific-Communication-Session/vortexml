@@ -1,3 +1,4 @@
+import { ScrollText } from 'lucide-react';
 import React from 'react';
 
 interface VideoCourseProps {
@@ -21,7 +22,7 @@ const VideoCourse: React.FC<VideoCourseProps> = ({ videoUrl, transcript }) => {
 
             {transcript && (
                 <div className="glass-panel mt-2">
-                    <h3 className="panel-title"><span className="pt-icon">📝</span> Transcript</h3>
+                    <h3 className="panel-title"><span className="pt-icon"><ScrollText size={18} strokeWidth={1.75} /></span> Transcript</h3>
                     <div className="video-transcript text-muted">
                         {transcript}
                     </div>

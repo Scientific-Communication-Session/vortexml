@@ -190,15 +190,17 @@ body::before {
     justify-content: center;
     width: 42px;
     height: 42px;
-    border-radius: 12px;
-    font-size: 1.25rem;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-md);
+    background: var(--color-accent-soft);
+    border: 1px solid var(--color-accent-line);
+    color: var(--color-accent-text);
 }
 
 .bento-duration {
     font-size: 0.8rem;
     font-weight: 600;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     color: var(--text-muted);
 }
 
@@ -1683,7 +1685,7 @@ body::before {
 .chat-drawer__title-sub {
     font-size: 0.7rem;
     color: rgba(255, 255, 255, 0.45);
-    font-family: var(--font-mono, ui-monospace, monospace);
+    font-family: var(--font-sans);
 }
 
 .chat-drawer__actions {

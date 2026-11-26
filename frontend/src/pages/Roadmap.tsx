@@ -1,6 +1,99 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
+import {
+    Activity, ArrowDown, ArrowLeftRight, ArrowUp, Binary, Boxes, Brain, Bug, Building2, Calculator, CaseSensitive, Cat, ChartColumn, Circle, CircleCheck, CircleQuestionMark, ClipboardList, Code, Container, Database, Dice5, DoorOpen, Drama, Eraser, Eye, FileText, Flame, FlaskConical, FolderOpen, Globe, Handshake, Hash, Image, Inbox, Info, Landmark, Library, Lightbulb, Link, Map, MapPin, MessageSquare, Microscope, Monitor, Mountain, Network, NotebookPen, Package, Palette, Plug, Plus, Radio, Recycle, RefreshCw, Repeat, Rocket, Ruler, Scale, Scaling, ScanSearch, Scissors, Search, Settings, Ship, ShoppingBag, Shuffle, Sigma, Sparkles, SquareDashed, Table, Tag, Target, TreeDeciduous, TreePine, TrendingDown, TrendingUp, Trophy, Users, Variable, Waves, Wrench, X, Zap,
+} from 'lucide-react';
+import { SERIES } from '../theme/chart';
+
+// Topic icons: the data keeps its original emoji keys; the UI draws one outline icon set.
+const TOPIC_ICON: Record<string, React.ElementType> = {
+    '🧮': Calculator,
+    '📐': Ruler,
+    '🔢': Binary,
+    '🎯': Target,
+    '🔀': Shuffle,
+    '✖️': X,
+    '📈': TrendingUp,
+    '📉': TrendingDown,
+    '🔗': Link,
+    '∂': Variable,
+    '∫': Sigma,
+    '🎲': Dice5,
+    '🧪': FlaskConical,
+    '🐍': Code,
+    '🐼': Table,
+    '📊': ChartColumn,
+    '📓': NotebookPen,
+    '📚': Library,
+    '🔧': Wrench,
+    '🧠': Brain,
+    '🔥': Flame,
+    '⚡': Zap,
+    '📥': Inbox,
+    '🕷️': Bug,
+    '🔌': Plug,
+    '🗄️': Database,
+    '🏷️': Tag,
+    '🧹': Eraser,
+    '❓': CircleQuestionMark,
+    '📍': MapPin,
+    '♻️': Recycle,
+    '📏': Scaling,
+    '⚙️': Settings,
+    '🔤': CaseSensitive,
+    '📦': Package,
+    '🤝': Handshake,
+    '⚖️': Scale,
+    '🔁': Repeat,
+    '🏔️': Mountain,
+    '⬇️': ArrowDown,
+    '〰️': Activity,
+    '🌳': TreeDeciduous,
+    'ℹ️': Info,
+    '✂️': Scissors,
+    '🌲': TreePine,
+    '🔮': Sparkles,
+    '↔️': ArrowLeftRight,
+    '📝': FileText,
+    '🔍': Search,
+    '➕': Plus,
+    '⬆️': ArrowUp,
+    '🔬': Microscope,
+    '🗺️': Map,
+    '🌐': Globe,
+    '✅': CircleCheck,
+    '🔄': RefreshCw,
+    '1️⃣': Hash,
+    '📋': ClipboardList,
+    '🔎': ScanSearch,
+    '🏗️': Building2,
+    '👜': ShoppingBag,
+    '🚀': Rocket,
+    '💡': Lightbulb,
+    '🐱': Cat,
+    '🕸️': Network,
+    '👁️': Eye,
+    '🔲': SquareDashed,
+    '🏛️': Landmark,
+    '🖼️': Image,
+    '🚪': DoorOpen,
+    '👥': Users,
+    '💬': MessageSquare,
+    '🎨': Palette,
+    '🎭': Drama,
+    '🌊': Waves,
+    '🚢': Ship,
+    '🖥️': Monitor,
+    '📡': Radio,
+    '📂': FolderOpen,
+    '🐳': Container,
+    '☸️': Boxes,
+};
+const TopicIcon: React.FC<{ e: string; size?: number }> = ({ e, size = 16 }) => {
+    const I = TOPIC_ICON[e] ?? Circle;
+    return <I size={size} strokeWidth={1.75} aria-hidden="true" />;
+};
 
 /* ═══════════════════════════════════════════════════════
    ML ROADMAP DATA — based on roadmap.sh/machine-learning
@@ -33,7 +126,7 @@ const roadmapData: RoadmapCategory[] = [
         id: 'fundamentals',
         title: 'Mathematics & Fundamentals',
         icon: '🧮',
-        color: '#6366f1',
+        color: SERIES[0],
         nodes: [
             {
                 id: 'linear-algebra',
@@ -106,7 +199,7 @@ const roadmapData: RoadmapCategory[] = [
         id: 'data-preprocessing',
         title: 'Data Preprocessing',
         icon: '🔧',
-        color: '#8b5cf6',
+        color: SERIES[1],
         nodes: [
             {
                 id: 'data-collection',
@@ -166,7 +259,7 @@ const roadmapData: RoadmapCategory[] = [
         id: 'supervised-learning',
         title: 'Supervised Learning',
         icon: '🎯',
-        color: '#a855f7',
+        color: SERIES[2],
         nodes: [
             {
                 id: 'linear-regression',
@@ -251,7 +344,7 @@ const roadmapData: RoadmapCategory[] = [
         id: 'unsupervised-learning',
         title: 'Unsupervised Learning',
         icon: '🔍',
-        color: '#06b6d4',
+        color: SERIES[3],
         nodes: [
             {
                 id: 'k-means',
@@ -303,7 +396,7 @@ const roadmapData: RoadmapCategory[] = [
         id: 'model-evaluation',
         title: 'Model Evaluation & Validation',
         icon: '✅',
-        color: '#22c55e',
+        color: SERIES[4],
         nodes: [
             {
                 id: 'cross-validation',
@@ -355,7 +448,7 @@ const roadmapData: RoadmapCategory[] = [
         id: 'ensemble-methods',
         title: 'Ensemble Methods',
         icon: '🏗️',
-        color: '#f97316',
+        color: SERIES[5],
         nodes: [
             {
                 id: 'bagging',
@@ -399,7 +492,7 @@ const roadmapData: RoadmapCategory[] = [
         id: 'deep-learning',
         title: 'Deep Learning',
         icon: '🧠',
-        color: '#ec4899',
+        color: SERIES[6],
         nodes: [
             {
                 id: 'neural-networks',
@@ -475,7 +568,7 @@ const roadmapData: RoadmapCategory[] = [
         id: 'mlops',
         title: 'MLOps & Deployment',
         icon: '🚢',
-        color: '#3b82f6',
+        color: SERIES[7],
         nodes: [
             {
                 id: 'model-serving',
@@ -918,8 +1011,8 @@ const Roadmap: React.FC = () => {
                                 }}
                             />
                             <div className="milestone-content">
-                                <span className="milestone-icon">{category.icon}</span>
-                                <h2 style={{ color: category.color }}>{category.title}</h2>
+                                <span className="milestone-icon"><TopicIcon e={category.icon} size={20} /></span>
+                                <h2>{category.title}</h2>
                                 <span className="milestone-count">{category.nodes.length} topics</span>
                             </div>
                         </motion.div>
@@ -959,7 +1052,7 @@ const Roadmap: React.FC = () => {
 
                                             {/* Node card */}
                                             <div className={`node-card ${isExpanded ? 'node-card-expanded' : ''}`}>
-                                                <span className="node-icon">{node.icon}</span>
+                                                <span className="node-icon"><TopicIcon e={node.icon} /></span>
                                                 <span className="node-title">{node.title}</span>
                                                 {hasChildren && (
                                                     <button
@@ -1019,7 +1112,7 @@ const Roadmap: React.FC = () => {
                                                                 style={{ '--node-color': category.color } as React.CSSProperties}
                                                             >
                                                                 <div className="subbranch-card">
-                                                                    <span className="subbranch-icon">{child.icon}</span>
+                                                                    <span className="subbranch-icon"><TopicIcon e={child.icon} size={14} /></span>
                                                                     <span className="subbranch-title">{child.title}</span>
                                                                 </div>
                                                             </motion.div>
@@ -1043,7 +1136,7 @@ const Roadmap: React.FC = () => {
                     viewport={{ once: true, amount: 0.5 }}
                     transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
                 >
-                    <div className="finish-icon">🏆</div>
+                    <div className="finish-icon"><Trophy size={28} strokeWidth={1.75} aria-hidden="true" /></div>
                     <h3>ML Engineer</h3>
                     <p>You've mapped the entire journey!</p>
                 </motion.div>
@@ -1075,12 +1168,12 @@ const Roadmap: React.FC = () => {
                                         <span
                                             className="popover-category-badge"
                                             style={{
-                                                color: selectedNode.category.color,
-                                                background: `${selectedNode.category.color}15`,
+                                                color: 'var(--color-fg)',
+                                                background: `${selectedNode.category.color}1f`,
                                                 borderColor: `${selectedNode.category.color}30`,
                                             }}
                                         >
-                                            {selectedNode.category.icon} {selectedNode.category.title}
+                                            <TopicIcon e={selectedNode.category.icon} size={13} /> {selectedNode.category.title}
                                         </span>
                                     </div>
                                     <button
@@ -1088,11 +1181,11 @@ const Roadmap: React.FC = () => {
                                         onClick={() => setSelectedNode(null)}
                                         aria-label="Close"
                                     >
-                                        ✕
+                                        <X size={16} aria-hidden="true" />
                                     </button>
                                 </div>
                                 <div className="popover-body">
-                                    <div className="popover-icon-large">{selectedNode.node.icon}</div>
+                                    <div className="popover-icon-large" style={{ color: selectedNode.category.color }}><TopicIcon e={selectedNode.node.icon} size={32} /></div>
                                     <h3>{selectedNode.node.title}</h3>
                                     <p>{selectedNode.node.description}</p>
                                 </div>
