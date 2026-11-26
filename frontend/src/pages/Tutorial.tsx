@@ -392,7 +392,7 @@ const Tutorial: React.FC = () => {
                                     </Do>
                                     <Changes>
                                         <ul>
-                                            <li>A chat panel slides in from the right; your message and the co-pilot's reply appear in it.</li>
+                                            <li>A chat panel opens in the corner of the page; your message and the co-pilot's reply appear in it.</li>
                                             <li>A <b>Proposed configuration</b> card lists the architecture, layers, epochs, learning rate — and why.</li>
                                             <li>After <b>Apply</b>, the page fills itself in: the architecture is selected and every field is set for you.</li>
                                         </ul>
