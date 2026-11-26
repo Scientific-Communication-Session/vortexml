@@ -24,6 +24,7 @@ VortexML won 1st place at the Scientific Communication Session 2026, Politehnica
 
 - Without an account you can use the Demo, upload a dataset, design a network and train it. The work is tied to the browser and is discarded after about six hours of inactivity.
 - A free account adds: saved models and projects, the Predict page, the Leaderboard, following a training run from another browser, linking your own device, and every AI feature.
+- On the Profile page, under "Your Data", an account holder can download everything stored about them as one JSON file, or delete the account and all its data immediately.
 - The three sign-up questions set the mode. Two or more beginner answers give a Novice account; otherwise the account is Expert. The mode can be switched on the Profile page.
 - Novice mode shows three beginner-friendly network types by default, uses gentler default settings, and adds the AI tutor. Expert mode shows all ten network types and extra controls on the Assistant and Chat pages.
 

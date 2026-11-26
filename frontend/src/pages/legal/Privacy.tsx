@@ -12,7 +12,7 @@ const SECTIONS: LegalSection[] = [
                 VortexML is run by {SITE.operator}, based in {SITE.country}, who decides how and why the personal
                 data described here is processed (the “controller” in the words of the EU General Data
                 Protection Regulation, GDPR). To ask anything about your data, or to use any of the rights
-                listed below, write to us through <Contact />.
+                listed below, write to us <Contact via />.
             </p>
         ),
     },
@@ -175,9 +175,10 @@ const SECTIONS: LegalSection[] = [
                     run is kept for up to 24 hours so we can show it to you when you return.
                 </li>
                 <li>
-                    <strong>With an account:</strong> your account and saved work are kept until you delete the
-                    items yourself (projects, knowledge bases, conversations and devices each have a delete
-                    button) or ask us to delete the account.
+                    <strong>With an account:</strong> your account and saved work are kept until you delete
+                    them. Projects, knowledge bases, conversations and devices each have a delete button, and{' '}
+                    <strong>Delete my account</strong> on your <Link to="/profile">Profile</Link> removes the
+                    account and everything in it at once — immediately, including the files on our server.
                 </li>
                 <li><strong>Enquiries:</strong> kept for as long as needed to handle them, then deleted.</li>
                 <li><strong>Technical data:</strong> rate-limit counters live in memory and are lost when the server restarts.</li>
@@ -198,7 +199,12 @@ const SECTIONS: LegalSection[] = [
                     <li>receive the data you gave us in a portable format.</li>
                 </ul>
                 <p>
-                    To use any of these, write to us through <Contact />. We answer within one month. You also
+                    Two of these you can do yourself, at any time, under <strong>Your Data</strong> on your{' '}
+                    <Link to="/profile">Profile</Link>: <strong>Download my data</strong> gives you a copy of
+                    everything in your account as one file, and <strong>Delete my account</strong> erases it.
+                </p>
+                <p>
+                    For anything else, write to us <Contact via />. We answer within one month. You also
                     have the right to complain to a data protection authority; in Romania that is the National
                     Supervisory Authority for Personal Data Processing (ANSPDCP),{' '}
                     <a href="https://www.dataprotection.ro" target="_blank" rel="noopener noreferrer">dataprotection.ro</a>.
@@ -251,7 +257,7 @@ const Privacy: React.FC = () => (
             'No analytics, no advertising, no selling of data.',
             'The AI features send your question and the context it needs to Anthropic. Dataset rows are not sent to the co-pilot.',
             'Without an account, your working data is deleted after about six hours of inactivity.',
-            'You can ask for a copy of your data, or for its deletion, at any time.',
+            'You can download a copy of your data, or delete your account and everything in it, from your Profile at any time.',
         ]}
         sections={SECTIONS}
     />

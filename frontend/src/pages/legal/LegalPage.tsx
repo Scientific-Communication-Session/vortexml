@@ -10,16 +10,22 @@ export interface LegalSection {
     body: React.ReactNode;
 }
 
-/** How to reach us: the address when there is one, the contact form otherwise. */
-export const Contact: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
+/**
+ * How to reach us: the address when there is one, the contact form otherwise.
+ * `via` adds the preposition that fits ("at name@…" / "through the contact form").
+ */
+export const Contact: React.FC<{ via?: boolean; children?: React.ReactNode }> = ({ via, children }) => {
     const { openEnterprise } = useTrainingSession();
     if (SITE.contactEmail) {
-        return <a href={`mailto:${SITE.contactEmail}`}>{children ?? SITE.contactEmail}</a>;
+        return <>{via && 'at '}<a href={`mailto:${SITE.contactEmail}`}>{children ?? SITE.contactEmail}</a></>;
     }
     return (
-        <button type="button" className="lg-link" onClick={openEnterprise}>
-            {children ?? 'the contact form'}
-        </button>
+        <>
+            {via && 'through '}
+            <button type="button" className="lg-link" onClick={openEnterprise}>
+                {children ?? 'the contact form'}
+            </button>
+        </>
     );
 };
 

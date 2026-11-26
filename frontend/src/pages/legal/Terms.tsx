@@ -173,8 +173,9 @@ const SECTIONS: LegalSection[] = [
         title: 'Ending your use',
         body: (
             <p>
-                You can stop using the service at any time and ask us to delete your account through{' '}
-                <Contact />. We may suspend or close an account that breaks these terms, puts the service or
+                You can stop using the service at any time. <strong>Delete my account</strong> on your{' '}
+                <Link to="/profile">Profile</Link> removes the account and everything in it straight away; you
+                can also ask us to do it <Contact via />. We may suspend or close an account that breaks these terms, puts the service or
                 other people at risk, or has been inactive for a long time. Where we reasonably can, we will warn
                 you first.
             </p>

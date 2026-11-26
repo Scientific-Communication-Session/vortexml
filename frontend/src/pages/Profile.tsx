@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles, Laptop, Cpu, Pencil, Check, X, Plus, Wand2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles, Laptop, Cpu, Pencil, Check, X, Plus, Wand2, ShieldCheck } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import AddDeviceModal from '../components/devices/AddDeviceModal';
+import DeleteAccountModal from '../components/account/DeleteAccountModal';
 import ExplainModal from '../components/explain/ExplainModal';
 import PredictModal from '../components/inference/PredictModal';
 import type { Device } from '../components/devices/types';
@@ -52,7 +53,7 @@ const formatDate = (iso: string) => {
 
 const Profile: React.FC = () => {
     const navigate = useNavigate();
-    const { user, isLoading: authLoading, checkAuth } = useAuth();
+    const { user, isLoading: authLoading, checkAuth, setUser } = useAuth();
     const [projects, setProjects] = useState<Project[]>([]);
     const [loading, setLoading] = useState(true);
     const [busyId, setBusyId] = useState<number | null>(null);
@@ -66,6 +67,10 @@ const Profile: React.FC = () => {
     const [showAddDevice, setShowAddDevice] = useState(false);
     const [explainProject, setExplainProject] = useState<Project | null>(null);
     const [predictProject, setPredictProject] = useState<Project | null>(null);
+    const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+    // Set once the account has been deleted: we are on our way to the home page,
+    // so the signed-out redirect below must not send us to Sign In instead.
+    const accountDeleted = useRef(false);
 
     const isBeginner = user?.is_beginner === true;
 
@@ -81,7 +86,7 @@ const Profile: React.FC = () => {
     useEffect(() => {
         if (authLoading) return;
         if (!user) {
-            navigate('/signin');
+            if (!accountDeleted.current) navigate('/signin');
             return;
         }
         loadDevices();
@@ -551,6 +556,56 @@ const Profile: React.FC = () => {
                         })}
                     </div>
                 </div>
+            )}
+
+            {/* ── Your data ── */}
+            <div className="glass-panel" style={{ marginTop: '1.5rem' }}>
+                <div className="panel-title">
+                    <span className="pt-icon"><ShieldCheck size={16} style={{ verticalAlign: 'middle' }} /></span> Your Data
+                </div>
+                <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: '1.1rem', maxWidth: '70ch' }}>
+                    Everything in this account is yours. Take a copy whenever you like, or delete the account and
+                    all of it for good. The <Link to="/privacy" style={{ color: '#c4b5fd', textDecoration: 'underline', textUnderlineOffset: 3 }}>Privacy Policy</Link> explains
+                    what is stored and why.
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.9rem' }}>
+                    <div style={{ flex: '1 1 300px', padding: '1rem 1.1rem', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
+                        <div style={{ fontWeight: 600, marginBottom: '0.3rem' }}>Download my data</div>
+                        <p className="text-muted" style={{ fontSize: '0.84rem', marginBottom: '0.9rem' }}>
+                            One file with your account details, projects and their training history, devices,
+                            knowledge bases, conversations and enquiries.
+                        </p>
+                        <a className="btn btn-secondary btn-sm" href="/api/auth/export" download>
+                            <Download size={14} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+                            Download as JSON
+                        </a>
+                    </div>
+                    <div style={{ flex: '1 1 300px', padding: '1rem 1.1rem', borderRadius: 14, border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.05)' }}>
+                        <div style={{ fontWeight: 600, marginBottom: '0.3rem' }}>Delete my account</div>
+                        <p className="text-muted" style={{ fontSize: '0.84rem', marginBottom: '0.9rem' }}>
+                            Removes the account and everything in it from our servers, immediately and
+                            permanently. You will be asked for your password.
+                        </p>
+                        <button className="btn btn-danger btn-sm" onClick={() => setShowDeleteAccount(true)}>
+                            <Trash2 size={14} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+                            Delete account…
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {showDeleteAccount && user && (
+                <DeleteAccountModal
+                    username={user.username}
+                    onClose={() => setShowDeleteAccount(false)}
+                    onDeleted={() => {
+                        accountDeleted.current = true;
+                        setShowDeleteAccount(false);
+                        setUser(null);
+                        showToast('Your account and all its data have been deleted.', 'success');
+                        navigate('/');
+                    }}
+                />
             )}
 
             {showAddDevice && (

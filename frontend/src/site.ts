@@ -6,8 +6,8 @@
 export const SITE = {
     name: 'VortexML',
     url: 'https://vortexml.ro',
-    operator: 'the VortexML project team',
-    contactEmail: '',
+    operator: 'Andrei-Sebastian Niță',
+    contactEmail: 'andreisebastian.nita@gmail.com',
     country: 'Romania',
     // Shown as "Last updated" on the legal pages; change it with their text.
     legalUpdated: '26 November 2026',

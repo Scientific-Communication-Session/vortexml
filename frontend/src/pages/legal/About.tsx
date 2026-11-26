@@ -63,8 +63,8 @@ const SECTIONS: LegalSection[] = [
         body: (
             <>
                 <p>
-                    Questions, feedback, a bug to report, or interest in Enterprise: write to us through{' '}
-                    <Contact />. We read everything.
+                    Questions, feedback, a bug to report, or interest in Enterprise: write to us{' '}
+                    <Contact via />. We read everything.
                 </p>
                 <p>
                     For how we handle data, see the <Link to="/privacy">Privacy Policy</Link>; for the rules of

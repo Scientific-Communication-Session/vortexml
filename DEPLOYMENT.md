@@ -220,6 +220,16 @@ owner's jobs. Queued runs keep a private copy of their dataset.
 device through the normal queue, so demo visitors and real users wait in the
 same line.
 
+**Account data.** Under "Your Data" on the Profile page a signed-in user can
+download everything stored about them (`GET /api/auth/export`, one JSON file)
+or delete the account (`DELETE /api/auth/account`, which asks for the password
+again). Deletion is immediate and complete: it stops and dequeues the user's
+jobs, removes their projects, weight files, knowledge bases (rows and the index
+on disk), conversations, devices and enquiries, forgets their working state and
+signs them out. `backend/test_account.py` checks all of that, and that nothing
+belonging to another account is touched. The Privacy Policy promises both, so
+keep them working.
+
 **Sales enquiries.** The "Talk to sales" form stores rows in the
 `sales_inquiries` table (`POST /api/sales/contact`, rate-limited to 5/hour per
 caller). Nothing is emailed — read them from the database, e.g.

@@ -51,6 +51,8 @@ from system_stats import SystemMonitor, sample as sample_stats
 # streams training updates and chat tokens.
 from eventlet import tpool
 _run_blocking = tpool.execute
+from sqlalchemy import or_
+
 from models import (db, User, Project, Device, KnowledgeBase, Document,
                     Conversation, ChatMessage, SalesInquiry)
 
@@ -299,6 +301,38 @@ def _active_state_keys():
     return keys
 
 
+def _purge_state(key):
+    """Forget one caller's working state, and delete the files only it points at."""
+    st = _states.pop(key, None)
+    _state_last_seen.pop(key, None)
+    _recent_runs.pop(key, None)
+    if not st:
+        return
+    # Reclaim a non-shared upload file the state still referenced.
+    p = st.get("dataset_path")
+    if p and "queued_" not in os.path.basename(p) and os.path.exists(p):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    # Weights no saved project points at are only reachable through this
+    # state, so once it is gone they are orphaned — reclaim them too.
+    _remove_orphan_weights(st.get("last_weights_file"))
+
+
+def _purge_state_after_jobs(key, timeout=900):
+    """Purge `key` again once its last job has wound down.
+
+    A job that was still running when its owner's account was deleted writes
+    to the working state as it stops, which would bring the entry back.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline and any(j.get("state_key") == key for j in _jobs.values()):
+        socketio.sleep(0.5)
+    socketio.sleep(1.0)  # let the job's last bookkeeping land
+    _purge_state(key)
+
+
 def _evict_stale_state():
     """Drop abandoned anonymous state (and any orphaned upload it points at).
 
@@ -311,20 +345,7 @@ def _evict_stale_state():
             continue
         if now - _state_last_seen.get(key, 0) <= _ANON_STATE_TTL:
             continue
-        st = _states.pop(key, None)
-        _state_last_seen.pop(key, None)
-        _recent_runs.pop(key, None)
-        # Reclaim a non-shared upload file the abandoned state still referenced.
-        p = st.get("dataset_path") if st else None
-        if p and "queued_" not in os.path.basename(p) and os.path.exists(p):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-        # An anonymous run's weights are only reachable through this state, so
-        # once it is gone they are orphaned — reclaim them too.
-        if st:
-            _remove_orphan_weights(st.get("last_weights_file"))
+        _purge_state(key)
     # Finished runs are only kept for replay for a day.
     for key in [k for k, r in _recent_runs.items()
                 if now - r.get("finished_ts", 0) > _RECENT_RUN_TTL]:
@@ -380,6 +401,10 @@ def signup():
     
     db.session.add(new_user)
     db.session.commit()
+
+    # A database may hand a deleted account's id to the next one. Make sure
+    # nothing that account left in memory is waiting under it.
+    _purge_state(f"user:{new_user.id}")
 
     # Log them in automatically
     session["user_id"] = new_user.id
@@ -464,6 +489,112 @@ def update_beginner_status():
     user.is_beginner = is_beginner
     db.session.commit()
     return jsonify({"user": user.to_dict()})
+
+
+# ── Your data: a copy of it, and deleting it ──────────────
+@app.route("/api/auth/export", methods=["GET"])
+@limiter.limit("10 per hour")
+def export_account():
+    """Everything stored about the signed-in user, as one JSON download."""
+    user, err = _require_user()
+    if err:
+        return err
+    enquiries = SalesInquiry.query.filter(
+        or_(SalesInquiry.user_id == user.id, SalesInquiry.email == user.email)).all()
+    data = {
+        "service": "VortexML",
+        "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "account": {
+            "email": user.email,
+            "username": user.username,
+            "mode": None if user.is_beginner is None else ("novice" if user.is_beginner else "expert"),
+        },
+        "projects": [p.to_dict(include_history=True) for p in user.projects],
+        "devices": [d.to_dict() for d in user.devices],
+        "knowledge_bases": [kb.to_dict(include_docs=True) for kb in user.knowledge_bases],
+        "conversations": [c.to_dict(include_messages=True) for c in user.conversations],
+        "enquiries": [e.to_dict() for e in enquiries],
+        "not_included": (
+            "Trained model weights are binary files: download each one with the "
+            "Weights button of its project on the Profile page. The documents in a "
+            "knowledge base are listed by name; the files themselves are the ones "
+            "you uploaded."
+        ),
+    }
+    resp = jsonify(data)
+    safe = "".join(ch for ch in user.username if ch.isalnum() or ch in "-_") or "account"
+    resp.headers["Content-Disposition"] = f'attachment; filename="vortexml-data-{safe}.json"'
+    return resp
+
+
+@app.route("/api/auth/account", methods=["DELETE"])
+@limiter.limit("10 per hour")
+def delete_account():
+    """Delete the signed-in user's account and everything that belongs to it.
+
+    Asks for the password again: the session cookie alone should not be enough
+    to destroy an account.
+    """
+    user, err = _require_user()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    if not user.check_password(body.get("password") or ""):
+        return jsonify({"error": "That password is not correct."}), 403
+
+    key = f"user:{user.id}"
+
+    # 1. Work in flight: leave every queue, stop every running job.
+    for device_id, q in list(_queues.items()):
+        mine = [j for j in q if j.get("state_key") == key]
+        for j in mine:
+            q.remove(j)
+            _delete_job_snapshot(j)
+            _emit_job(j, "training_stopped", {"cancelled": True})
+        if mine:
+            _notify_queue(device_id)
+    running = [j for j in _jobs.values() if j.get("state_key") == key]
+    for job in running:
+        job["stop_requested"] = True
+        if job["is_local"]:
+            stop_training()
+        else:
+            node = _nodes.get(job["device_id"])
+            if node:
+                socketio.emit("node_stop", {"job_id": job["job_id"]}, room=node["sid"])
+
+    # 2. What lives outside the database: remember it now, remove it once the
+    #    rows are gone (a weights file is only deleted when no project uses it).
+    weight_files = [p.weight_filename for p in user.projects]
+    kb_ids = [kb.id for kb in user.knowledge_bases]
+    for dev in user.devices:
+        node = _nodes.pop(dev.id, None)
+        if node:
+            _node_sids.pop(node["sid"], None)
+
+    # 3. The rows. Projects, devices, knowledge bases and conversations go with
+    #    the user (ORM cascade); enquiries are only linked, so remove them here.
+    SalesInquiry.query.filter(
+        or_(SalesInquiry.user_id == user.id, SalesInquiry.email == user.email)
+    ).delete(synchronize_session=False)
+    db.session.delete(user)
+    db.session.commit()
+
+    # 4. The working state (uploaded dataset, last run) and the files on disk.
+    _purge_state(key)
+    if running:
+        socketio.start_background_task(_purge_state_after_jobs, key)
+    for filename in weight_files:
+        _remove_orphan_weights(filename)
+    for kb_id in kb_ids:
+        try:
+            rag.KBStore(kb_id).destroy()
+        except Exception as e:
+            print(f"[account] could not remove knowledge base {kb_id} from disk: {e}")
+
+    session.clear()
+    return jsonify({"status": "deleted"})
+
 
 # ─────────────────────────────────────────────────────────
 # Dataset API
