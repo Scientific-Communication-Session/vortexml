@@ -1,0 +1,25 @@
+/* Profile page specifics (empty state classes come from predict.css). */
+@import './predict.css';
+
+.pf-tile {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md);
+    background: var(--color-accent-soft);
+    border: 1px solid var(--color-accent-line);
+    color: var(--color-accent-text);
+}
+
+.pf-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: var(--space-1);
+    border-radius: 50%;
+    background: var(--color-fg-3);
+    vertical-align: 1px;
+}
+.pf-dot.is-on { background: var(--color-success); }

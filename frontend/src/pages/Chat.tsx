@@ -324,7 +324,7 @@ const Chat: React.FC = () => {
                                     style={{ ...inputStyle, maxWidth: 300 }} title="Model">
                                     <option value="">Default{activeBackend?.default_model ? ` (${activeBackend.default_model.split('/').pop()})` : ''}</option>
                                     {modelOptions.map((m) => (
-                                        <option key={m.id} value={m.id}>{activeBackend?.model_labels?.[m.id] || m.id}{m.downloaded ? ' ✓ downloaded' : (catEntry ? ' (downloads on first use)' : '')}</option>
+                                        <option key={m.id} value={m.id}>{activeBackend?.model_labels?.[m.id] || m.id}{m.downloaded ? ' · downloaded' : (catEntry ? ' (downloads on first use)' : '')}</option>
                                     ))}
                                     {settings.model && !modelOptions.some((m) => m.id === settings.model) && (
                                         <option value={settings.model}>{settings.model}</option>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Loader2, Sparkles } from 'lucide-react';
+import { X, Loader2, Sparkles, TriangleAlert } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -83,8 +83,8 @@ const ExplainModal: React.FC<ExplainModalProps> = ({ title, request, onClose }) 
                     </div>
                 )}
                 {error && (
-                    <div className="info-banner" style={{ borderLeft: '3px solid var(--color-danger)' }}>
-                        <span className="info-banner-icon">⚠️</span>
+                    <div className="info-banner info-banner--danger" role="alert">
+                        <span className="info-banner-icon"><TriangleAlert size={16} aria-hidden="true" /></span>
                         <div>{error}</div>
                     </div>
                 )}

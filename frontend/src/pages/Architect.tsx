@@ -13,17 +13,12 @@ import {
 } from '../components/auto-config/AutoConfigContext';
 import AutoConfigDrawer from '../components/auto-config/AutoConfigDrawer';
 import {
-    Boxes, CheckCircle2, Columns3, Eye, Focus, History, Layers, Microscope, Network, Package, Plus,
-    Repeat, RotateCcw, RotateCw, ScanLine, Shrink, SlidersHorizontal, Sprout, TriangleAlert, Upload,
-    Wand2, Waypoints, Zap, ChevronDown, ChevronUp, Ruler, X,
+    Boxes, CheckCircle2, Eye, Microscope, Package, Plus, RotateCcw, SlidersHorizontal, Sprout,
+    TriangleAlert, Upload, Wand2, Zap, ChevronDown, ChevronUp, Ruler, X,
 } from 'lucide-react';
+import { ARCH_ICON } from '../components/archIcons';
 import { SERIES, INK, tint } from '../theme/chart';
 
-// One outline icon per architecture (the API sends emoji; the UI uses one icon set).
-const ARCH_ICON: Record<string, React.ElementType> = {
-    mlp: Network, dnn: Layers, cnn1d: ScanLine, rnn: Repeat, lstm: History, gru: RotateCw,
-    autoencoder: Shrink, resnet: Waypoints, transformer: Focus, wide_deep: Columns3,
-};
 
 interface Architecture {
     key: string;

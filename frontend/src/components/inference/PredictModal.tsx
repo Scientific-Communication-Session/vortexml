@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Loader2, Wand2, Upload } from 'lucide-react';
+import { X, Loader2, Wand2, Upload, TriangleAlert } from 'lucide-react';
 import { showToast } from '../../utils/helpers';
 
 interface Field {
@@ -141,8 +141,8 @@ const PredictModal: React.FC<PredictModalProps> = ({ projectId, projectName, onC
                 )}
 
                 {!loadingSchema && schema && !schema.ready && (
-                    <div className="info-banner" style={{ borderLeft: '3px solid #f5a623' }}>
-                        <span className="info-banner-icon">⚠️</span>
+                    <div className="info-banner info-banner--warning">
+                        <span className="info-banner-icon"><TriangleAlert size={16} aria-hidden="true" /></span>
                         <div>{schema.reason || 'This model cannot be used for prediction.'}</div>
                     </div>
                 )}

@@ -288,33 +288,23 @@ button.lg-link {
 .lg-award {
     display: flex;
     align-items: center;
-    gap: 0.9rem;
-    margin: 0 0 2.2rem;
-    padding: 1rem 1.2rem;
-    border-radius: 16px;
-    border: 1px solid rgba(252, 211, 77, 0.3);
-    background: linear-gradient(90deg, oklch(0.82 0.14 75 / 0.12), oklch(0.82 0.14 75 / 0.02));
-    color: #fef3c7;
+    gap: var(--space-4);
+    margin: 0 0 var(--space-8);
+    padding: var(--space-4) var(--space-5);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    background: var(--glass-fill);
+    box-shadow: var(--glass-highlight);
+    color: var(--color-fg);
 }
-
-.lg-award svg {
-    flex-shrink: 0;
-    color: var(--color-warning);
-}
-
-.lg-award strong {
-    display: block;
-    color: #fef3c7;
-}
-
+.lg-award svg { flex-shrink: 0; color: var(--color-accent-text); }
+.lg-award strong { display: block; color: var(--color-fg); }
 .lg-award small {
     display: block;
-    font-family: var(--font-sans);
-    font-variant-numeric: tabular-nums;
-    font-size: 0.68rem;
-    letter-spacing: 0.16em;
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-label);
     text-transform: uppercase;
-    color: rgba(253, 230, 138, 0.65);
+    color: var(--color-fg-2);
 }
 
 @media (max-width: 980px) {

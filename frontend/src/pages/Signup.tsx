@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { ArrowRight, Mail, Lock, User, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Logo from '../components/Logo';
+import './auth.css';
 
 const GLIDE = [0.22, 1, 0.36, 1] as const;
 
@@ -48,13 +49,7 @@ const Signup: React.FC = () => {
 
     return (
         <div className="relative min-h-screen w-full overflow-hidden bg-bg-primary">
-            {/* Ambient blobs */}
-            <div className="pointer-events-none absolute inset-0 mix-blend-screen opacity-60">
-                <div className="absolute -top-32 right-[-10%] w-[640px] h-[640px] rounded-full bg-accent-3/14 blur-[140px]" />
-                <div className="absolute bottom-[-15%] left-[-5%] w-[520px] h-[520px] rounded-full bg-accent-1/15 blur-[140px]" />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[420px] h-[420px] rounded-full bg-accent-4/8 blur-[160px]" />
-            </div>
-            <div className="pointer-events-none absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTAgMzkuNUw0MCAzOS41IiBzdHJva2U9InJnYmEoMjU1LDI1NSwyNTUsMC4wMikiLz48cGF0aCBkPSJNMzkuNSAwdjQwIiBzdHJva2U9InJnYmEoMjU1LDI1NSwyNTUsMC4wMikiLz48L3N2Zz4=')] opacity-[0.18]" />
+            <div className="vx-auth__light" aria-hidden="true" />
 
             <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-24">
                 <motion.div
@@ -67,13 +62,13 @@ const Signup: React.FC = () => {
                     <div className="mb-10 flex items-center justify-center gap-2">
                         <Logo size={24} className="shrink-0" />
                         <span className="text-[15px] font-semibold tracking-[-0.02em] text-white">
-                            Vortex<span className="font-display italic font-normal text-accent-2 ml-0.5">ML</span>
+                            Vortex<span className="vx-nav__brand-ml">ML</span>
                         </span>
                     </div>
 
                     {/* Header */}
                     <div className="text-center mb-10">
-                        <p className="font-mono text-[10.5px] tracking-[0.32em] uppercase text-white/45 mb-4">
+                        <p className="vx-label mb-4">
                             Step 00 / Sign Up
                         </p>
                         <h2
@@ -81,7 +76,7 @@ const Signup: React.FC = () => {
                             style={{ fontSize: 'clamp(2rem, 3.4vw + 0.5rem, 2.85rem)' }}
                         >
                             Join the{' '}
-                            <em className="not-italic font-display italic font-normal tracking-[-0.01em] text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4">
+                            <em className="not-italic font-normal text-text-secondary">
                                 Vortex.
                             </em>
                         </h2>
@@ -95,7 +90,8 @@ const Signup: React.FC = () => {
                             <motion.div
                                 initial={{ opacity: 0, y: -8 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-[13px] text-red-300 font-medium"
+                                role="alert"
+                                className="info-banner info-banner--danger"
                             >
                                 {error}
                             </motion.div>
@@ -147,14 +143,14 @@ const Signup: React.FC = () => {
                             {loading ? 'Creating account…' : 'Create account'}
                         </PrimaryButton>
 
-                        <p className="text-center text-[12px] leading-relaxed text-white/40 mt-3 font-light">
+                        <p className="text-center text-[12px] leading-relaxed text-text-muted mt-3">
                             By creating an account you agree to the{' '}
-                            <Link to="/terms" className="text-white/70 hover:text-white transition-colors underline underline-offset-2">Terms of Service</Link>
+                            <Link to="/terms" className="text-text-secondary hover:text-white transition-colors underline underline-offset-2">Terms of Service</Link>
                             {' '}and the{' '}
-                            <Link to="/privacy" className="text-white/70 hover:text-white transition-colors underline underline-offset-2">Privacy Policy</Link>.
+                            <Link to="/privacy" className="text-text-secondary hover:text-white transition-colors underline underline-offset-2">Privacy Policy</Link>.
                         </p>
 
-                        <p className="text-center text-[13px] text-white/45 mt-3 font-light">
+                        <p className="text-center text-[13px] text-text-secondary mt-3">
                             Already have an account?{' '}
                             <Link
                                 to="/signin"
@@ -182,12 +178,12 @@ const Field: React.FC<{
     minLength?: number;
 }> = ({ label, icon: Icon, type, placeholder, value, onChange, autoComplete, required, minLength }) => {
     return (
-        <label className="group flex flex-col gap-2">
-            <span className="font-mono text-[10.5px] tracking-[0.22em] uppercase text-white/55">
+        <label className="au-field">
+            <span className="au-field__label">
                 {label}
             </span>
             <div className="relative">
-                <Icon className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-[15px] w-[15px] text-white/35 group-focus-within:text-white/85 transition-colors duration-300" strokeWidth={1.8} />
+                <Icon className="au-field__icon" strokeWidth={1.8} />
                 <input
                     type={type}
                     placeholder={placeholder}
@@ -196,7 +192,7 @@ const Field: React.FC<{
                     autoComplete={autoComplete}
                     required={required}
                     minLength={minLength}
-                    className="w-full h-[54px] pl-[44px] pr-4 rounded-2xl bg-white/[0.04] border border-white/10 text-white text-[15px] tracking-[-0.005em] placeholder:text-white/25 outline-none focus:border-white/35 focus:bg-white/[0.06] transition-[border-color,background-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                    className="au-field__input"
                 />
             </div>
         </label>
@@ -208,14 +204,13 @@ const PrimaryButton: React.FC<{ children: React.ReactNode; loading?: boolean }> 
         <button
             type="submit"
             disabled={loading}
-            className="group relative mt-3 inline-flex h-[54px] items-center justify-center gap-2.5 overflow-hidden rounded-2xl bg-gradient-to-r from-accent-1 via-accent-2 to-accent-3 px-7 text-[14.5px] font-medium tracking-[-0.005em] text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset,0_8px_28px_-4px_oklch(0.68_0.17_283/0.5)] hover:shadow-[0_0_0_1px_rgba(255,255,255,0.1)_inset,0_10px_36px_-4px_oklch(0.68_0.17_283/0.65)] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] hover:scale-[1.012] active:scale-[0.985] disabled:opacity-70 disabled:cursor-wait disabled:hover:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
+            className="vx-btn vx-btn--primary vx-btn--lg vx-auth__submit"
         >
-            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:translate-x-full transition-transform duration-[1100ms] ease-[cubic-bezier(0.22,1,0.36,1)]" />
-            <span className="relative">{children}</span>
+            <span>{children}</span>
             {loading ? (
-                <Loader2 className="relative h-[16px] w-[16px] animate-spin" strokeWidth={2.2} />
+                <Loader2 size={16} className="vx-spin" strokeWidth={2.2} aria-hidden="true" />
             ) : (
-                <ArrowRight className="relative h-[16px] w-[16px] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-1" strokeWidth={2.2} />
+                <ArrowRight size={16} className="vx-btn__arrow" strokeWidth={2.2} aria-hidden="true" />
             )}
         </button>
     );

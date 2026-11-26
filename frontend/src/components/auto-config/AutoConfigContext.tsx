@@ -143,7 +143,7 @@ export const AutoConfigProvider: React.FC<ProviderProps> = ({ onApply, children 
             if (!res.ok) {
                 setMessages(prev => [
                     ...prev,
-                    { role: 'assistant', content: `⚠️ ${data.error || `Auto-Configure error (HTTP ${res.status}).`}` },
+                    { role: 'assistant', content: `${data.error || `Auto-Configure error (HTTP ${res.status}).`}` },
                 ]);
             } else {
                 setMessages(prev => [
@@ -155,7 +155,7 @@ export const AutoConfigProvider: React.FC<ProviderProps> = ({ onApply, children 
             const msg = e instanceof Error ? e.message : String(e);
             setMessages(prev => [
                 ...prev,
-                { role: 'assistant', content: `⚠️ Network error: ${msg}` },
+                { role: 'assistant', content: `Network error: ${msg}` },
             ]);
         } finally {
             sendingRef.current = false;

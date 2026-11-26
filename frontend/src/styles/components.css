@@ -116,3 +116,7 @@
     font-family: inherit;
     font-style: normal;
 }
+
+/* Spinner for icons inside buttons (loading states) */
+@keyframes vx-spin { to { transform: rotate(360deg); } }
+.vx-spin { animation: vx-spin 0.9s linear infinite; }

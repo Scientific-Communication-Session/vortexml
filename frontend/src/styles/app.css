@@ -383,12 +383,13 @@
 }
 .btn-secondary:hover:not(:disabled) { border-color: var(--color-line-strong); background-color: oklch(1 0 0 / 0.06); }
 
+/* Destructive: outlined, fills only on hover, so it never outshouts the primary */
 .btn-danger {
-    color: #fff;
-    background: oklch(0.55 0.19 25);
-    border-color: oklch(0.68 0.18 25 / 0.5);
+    color: var(--color-danger);
+    background: transparent;
+    border-color: oklch(0.68 0.18 25 / 0.45);
 }
-.btn-danger:hover:not(:disabled) { background: oklch(0.6 0.19 25); }
+.btn-danger:hover:not(:disabled) { color: #fff; background: oklch(0.55 0.19 25); border-color: transparent; }
 
 .btn-sm { min-height: 32px; padding: 0 var(--space-3); font-size: var(--text-xs); }
 

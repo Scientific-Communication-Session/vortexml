@@ -1,0 +1,43 @@
+/* Sign in / Sign up. Same stage light as the landing page. */
+
+.vx-auth__light {
+    position: absolute;
+    inset: 0 0 auto;
+    height: 46rem;
+    pointer-events: none;
+    background: radial-gradient(55% 45% at 50% -4%, oklch(0.68 0.17 283 / 0.22), transparent 72%);
+}
+
+.au-field { display: flex; flex-direction: column; gap: var(--space-2); }
+.au-field__label { font-size: var(--text-sm); font-weight: 500; color: var(--color-fg-2); }
+.au-field > div { position: relative; }
+.au-field__icon {
+    position: absolute;
+    left: var(--space-4);
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--color-fg-3);
+    transition: color var(--dur-micro);
+}
+.au-field:focus-within .au-field__icon { color: var(--color-accent-text); }
+.au-field__input {
+    width: 100%;
+    min-height: 52px;
+    padding: 0 var(--space-4) 0 calc(var(--space-4) + 16px + var(--space-3));
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-line);
+    background: var(--color-raised);
+    font: 400 var(--text-base) var(--font-sans);
+    color: var(--color-fg);
+    outline: none;
+    transition: border-color var(--dur-micro), box-shadow var(--dur-micro);
+}
+.au-field__input::placeholder { color: var(--color-fg-3); }
+.au-field__input:hover { border-color: var(--color-line-strong); }
+.au-field__input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-soft); }
+
+.vx-auth__submit { width: 100%; margin-top: var(--space-3); }
+.vx-auth__submit:disabled { opacity: 0.7; cursor: wait; }

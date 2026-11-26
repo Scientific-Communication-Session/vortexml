@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { X, Send, Trash2, Loader2 } from 'lucide-react';
+import { X, Send, Trash2, Loader2, Sprout } from 'lucide-react';
 import { useChat } from './ChatContext';
 
 const TutorMarkdown = lazy(() => import('./TutorMarkdown'));
@@ -46,7 +46,7 @@ const ChatDrawer: React.FC = () => {
         <aside className={`chat-drawer ${isOpen ? 'chat-drawer--open' : ''}`} aria-hidden={!isOpen}>
             <header className="chat-drawer__header">
                 <div className="chat-drawer__title">
-                    <span className="chat-drawer__title-icon">🌿</span>
+                    <span className="chat-drawer__title-icon"><Sprout size={18} strokeWidth={1.75} aria-hidden="true" /></span>
                     <div>
                         <div className="chat-drawer__title-main">Novice Tutor</div>
                         <div className="chat-drawer__title-sub">Your ML Tutor</div>
