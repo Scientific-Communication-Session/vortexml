@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { X, Send, Trash2, Loader2 } from 'lucide-react';
 import { useChat } from './ChatContext';
+
+const TutorMarkdown = lazy(() => import('./TutorMarkdown'));
 
 const ChatDrawer: React.FC = () => {
     const { messages, isOpen, isSending, isAvailable, close, sendMessage, clear } = useChat();
@@ -78,7 +80,16 @@ const ChatDrawer: React.FC = () => {
                         key={i}
                         className={`chat-msg chat-msg--${m.role}`}
                     >
-                        <div className="chat-msg__bubble">{m.content}</div>
+                        {m.role === 'assistant' ? (
+                            <div className="chat-msg__bubble chat-msg__bubble--md">
+                                {/* Plain text until the renderer has loaded. */}
+                                <Suspense fallback={m.content}>
+                                    <TutorMarkdown>{m.content}</TutorMarkdown>
+                                </Suspense>
+                            </div>
+                        ) : (
+                            <div className="chat-msg__bubble">{m.content}</div>
+                        )}
                     </div>
                 ))}
                 {isSending && (

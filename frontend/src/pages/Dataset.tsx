@@ -343,7 +343,7 @@ const Dataset: React.FC = () => {
                                 <span>{s.rows} rows</span>
                             </button>
                         ))}
-                        <Link to="/tutorial" className="sample-row__link">New here? Follow the 5-minute tutorial →</Link>
+                        <Link to="/tutorial" className="sample-row__link">New here? Follow the 10-minute tutorial →</Link>
                     </div>
                 )}
 

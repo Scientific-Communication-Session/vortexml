@@ -520,6 +520,27 @@ body::before {
 }
 
 
+/* Skip link: off screen until it is focused */
+.skip-link {
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 100;
+    padding: 0.6rem 1rem;
+    border-radius: 10px;
+    background: #fff;
+    color: #06060f;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    transform: translateY(-200%);
+    transition: transform 0.2s;
+}
+
+.skip-link:focus {
+    transform: none;
+}
+
 /* Home walkthrough: the bar under the active step, one clip long */
 @keyframes walkthrough-fill {
     from { transform: scaleX(0); }
@@ -3333,6 +3354,57 @@ body::before {
     color: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-bottom-left-radius: 4px;
+}
+
+/* Tutor replies are rendered Markdown: let it flow, and keep its blocks tight */
+.chat-msg__bubble--md {
+    white-space: normal;
+}
+
+.chat-msg__bubble--md > :first-child {
+    margin-top: 0;
+}
+
+.chat-msg__bubble--md > :last-child {
+    margin-bottom: 0;
+}
+
+.chat-msg__bubble--md p,
+.chat-msg__bubble--md ul,
+.chat-msg__bubble--md ol {
+    margin: 0 0 0.6em;
+}
+
+.chat-msg__bubble--md ul,
+.chat-msg__bubble--md ol {
+    padding-left: 1.2em;
+}
+
+.chat-msg__bubble--md li + li {
+    margin-top: 0.25em;
+}
+
+.chat-msg__bubble--md strong {
+    color: #fff;
+    font-weight: 600;
+}
+
+.chat-msg__bubble--md h1,
+.chat-msg__bubble--md h2,
+.chat-msg__bubble--md h3,
+.chat-msg__bubble--md h4 {
+    margin: 0.7em 0 0.35em;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: #fff;
+}
+
+.chat-msg__bubble--md code {
+    padding: 0.08em 0.35em;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.09);
+    font-family: var(--font-mono);
+    font-size: 0.82em;
 }
 
 .chat-msg__bubble--typing {

@@ -1,24 +1,31 @@
 #!/usr/bin/env node
 /**
- * Records the Tutorial page's GIFs by driving the real app.
+ * Records the Tutorial's clips by driving the real app.
  *
- * Nothing here is mocked: a throwaway account is created, the bundled sample
- * dataset is uploaded through the real file input, the AI co-pilot is asked the
- * tutorial's test prompt, a model is trained on the server and then used for
- * predictions. Each scene is screen-recorded and converted to a GIF.
+ * Nothing here is mocked: an account is created through the sign-up form, the
+ * bundled sample dataset is uploaded through the real file input, the AI tutor
+ * and the AI co-pilot are asked real questions, a model is trained on the
+ * server and then used for predictions. Each scene is screen-recorded and
+ * encoded as a short looping video (H.264 .mp4, plus a .png of its first frame
+ * to stand in while it loads).
  *
- * Requirements: a running VortexML instance, Chromium/Chrome, ffmpeg.
+ * Requirements: a running VortexML instance with ANTHROPIC_API_KEY set (most
+ * scenes are about the AI features and make real LLM calls), Chromium/Chrome
+ * and ffmpeg. Record against a scratch instance, not production: the run
+ * creates an account, projects, a knowledge base and a linked device.
  *
- * Scenes: upload, columns, architect, autoconfig, train, background, predict.
- * `autoconfig` makes two real LLM calls, so it needs ANTHROPIC_API_KEY set on
- * the server; when the co-pilot is unavailable that scene is skipped with a
- * note and everything else is still recorded.
+ * Scenes, in order: account, upload, columns, autoconfig, parameters, train,
+ * explain, background, predict, assistant, chat, leaderboard, learn, device.
+ * They build on each other, so scenes that are not being recorded are still
+ * performed where a later one needs them (just not captured).
+ *
+ * Time spent waiting for the AI to answer is fast-forwarded in the clips.
  *
  * Usage (from this directory):
  *   npm install
  *   VORTEX_URL=http://127.0.0.1:5173 node record.mjs            # all scenes
  *   node record.mjs --only upload,columns                       # some scenes
- *   node record.mjs --only autoconfig                           # once a key is set
+ *   node record.mjs --skip learn,device
  *
  * Environment:
  *   VORTEX_URL      app to record            (default http://127.0.0.1:5173)
@@ -38,14 +45,17 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.VORTEX_URL || 'http://127.0.0.1:5173').replace(/\/$/, '');
 const OUT = path.resolve(process.env.TUTORIAL_OUT || path.join(HERE, '../../frontend/public/tutorial'));
 const CSV = path.resolve(HERE, '../../sample-data/student_performance.csv');
+// A real document for the Assistant scene: the notes that describe the sample datasets.
+const NOTES = path.resolve(HERE, '../../sample-data/README.md');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vortex-tutorial-'));
 
 const VIEW = { width: 1280, height: 800 };
-// GIF encoding. The UI is flat colour on a dark background, so a small palette
-// with no dithering stays crisp and roughly halves the file size.
-const GIF_WIDTH = 880;
-const GIF_FPS = 8;
-const GIF_COLORS = 128;
+// Clip encoding. Video rather than GIF: at the full capture size and 30 frames
+// a second an H.264 clip is still a fraction of the size of an 8 fps GIF.
+const CLIP_FPS = 30;
+const CLIP_CRF = 27; // x264 quality: lower is sharper and larger
+// Waiting for an LLM is dead air: those stretches play this many times faster.
+const WAIT_SPEED = 6;
 
 // Keep in sync with TEST_PROMPT in frontend/src/pages/Tutorial.tsx.
 const TEST_PROMPT = 'I want to predict whether a student will pass their final exam from their '
@@ -162,8 +172,9 @@ async function scrollTo(page, y, ms = 700) {
     await sleep(150);
 }
 
-/** Resolve a target to an element handle. Targets: CSS selector, or {text, within}. */
+/** Resolve a target to an element handle. Targets: CSS selector, {text, within}, or a handle. */
 async function resolve(page, target) {
+    if (typeof target?.boundingBox === 'function') return target;
     if (typeof target === 'string') {
         const el = await page.waitForSelector(target, { timeout: 15000 });
         return el;
@@ -220,39 +231,172 @@ async function setNumber(page, target, value) {
 }
 
 // ── Recording ───────────────────────────────────────────────────────────────
-async function record(page, name, scene) {
+// While a scene is being captured, `spans` collects the stretches spent waiting
+// for an LLM (see `waiting`), as [start, end] in ms since the capture began.
+let spans = null;
+let captureStart = 0;
+
+/** Run `fn`, which waits for the AI; that stretch is fast-forwarded in the clip. */
+async function waiting(fn) {
+    const from = Date.now();
+    try {
+        return await fn();
+    } finally {
+        if (spans) spans.push([from - captureStart, Date.now() - captureStart]);
+    }
+}
+
+/** ffmpeg filter that plays the waiting stretches WAIT_SPEED times faster. */
+function timeline(waits, total) {
+    // Leave the moment a wait begins and the moment the answer lands at normal
+    // speed, so the spinner and the reply are both seen arriving.
+    const fast = waits.map(([a, b]) => [a / 1000 + 0.7, b / 1000 - 0.4]).filter(([a, b]) => b - a > 1.5);
+    const tail = `fps=${CLIP_FPS},scale=${VIEW.width}:-2:flags=lanczos`;
+    if (!fast.length) return { filter: tail, complex: false };
+    const parts = [];
+    let at = 0;
+    for (const [a, b] of fast) {
+        if (a > at) parts.push([at, a, 1]);
+        parts.push([a, b, WAIT_SPEED]);
+        at = b;
+    }
+    parts.push([at, total + 60, 1]);
+    const split = parts.map((_, i) => `[v${i}]`).join('');
+    const cuts = parts.map(([a, b, speed], i) =>
+        `[v${i}]trim=start=${a.toFixed(3)}:end=${b.toFixed(3)},setpts=(PTS-STARTPTS)/${speed}[s${i}]`);
+    const joined = parts.map((_, i) => `[s${i}]`).join('');
+    return {
+        filter: `[0:v]split=${parts.length}${split};${cuts.join(';')};${joined}concat=n=${parts.length}:v=1:a=0,${tail}[out]`,
+        complex: true,
+    };
+}
+
+/** Capture `scene` as <name>.mp4 — or, when the scene isn't wanted, just run it. */
+async function record(page, name, scene, enabled = true) {
+    if (!enabled) {
+        await scene();
+        return;
+    }
     const webm = path.join(TMP, `${name}.webm`);
-    const gif = path.join(OUT, `${name}.gif`);
+    const clip = path.join(OUT, `${name}.mp4`);
     process.stdout.write(`● ${name} … `);
-    const recorder = await page.screencast({ path: webm });
+    const recorder = await page.screencast({ path: webm, fps: CLIP_FPS });
+    spans = [];
+    captureStart = Date.now();
     try {
         await sleep(500);
         await scene();
-        await sleep(1500); // hold the final frame before the loop restarts
+        await sleep(1800); // hold the final frame before the loop restarts
     } finally {
         await recorder.stop();
     }
-    const filter = `fps=${GIF_FPS},scale=${GIF_WIDTH}:-1:flags=lanczos,split[a][b];`
-        + `[a]palettegen=max_colors=${GIF_COLORS}:stats_mode=diff[p];`
-        + '[b][p]paletteuse=dither=none:diff_mode=rectangle';
-    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', webm, '-filter_complex', filter, gif]);
-    // A still of the last frame: the page shows it to visitors who prefer
-    // reduced motion, and it reserves the layout while the GIF loads.
-    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-sseof', '-0.3', '-i', webm,
-        '-vf', `scale=${GIF_WIDTH}:-1:flags=lanczos`, '-frames:v', '1', '-update', '1',
-        path.join(OUT, `${name}.png`)]);
+    const { filter, complex } = timeline(spans, (Date.now() - captureStart) / 1000);
+    spans = null;
+    // yuv420p + faststart: plays everywhere (Safari included) and starts
+    // before the whole file has arrived.
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', webm,
+        ...(complex ? ['-filter_complex', filter, '-map', '[out]'] : ['-vf', filter]),
+        '-c:v', 'libx264', '-preset', 'slow', '-crf', String(CLIP_CRF),
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', clip]);
+    // The first frame, as the poster: it holds the layout while the clip loads
+    // and the clip then starts from exactly that picture.
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', clip,
+        '-frames:v', '1', '-update', '1', path.join(OUT, `${name}.png`)]);
     if (process.env.TUTORIAL_VIDEO) {
         fs.mkdirSync(process.env.TUTORIAL_VIDEO, { recursive: true });
         fs.copyFileSync(webm, path.join(process.env.TUTORIAL_VIDEO, `${name}.webm`));
     }
-    console.log(`${(fs.statSync(gif).size / 1048576).toFixed(2)} MB`);
+    console.log(`${(fs.statSync(clip).size / 1048576).toFixed(2)} MB`);
+}
+
+// ── The AI tutor (the floating chat, Novice accounts only) ──────────────────
+const TUTOR = 'aside.chat-drawer:not(.auto-config-drawer)';
+
+/** Wait for the tutor to finish answering, then read the answer top to bottom. */
+async function tutorAnswers(page, { read = 3200 } = {}) {
+    await page.waitForSelector(`${TUTOR}.chat-drawer--open`, { timeout: 15000 });
+    const before = await page.$$eval(`${TUTOR} .chat-msg--assistant`, (els) => els.length);
+    await waiting(() => page.waitForFunction((sel, n) => {
+        const d = document.querySelector(sel);
+        return d && !d.querySelector('.chat-msg__bubble--typing')
+            && d.querySelectorAll('.chat-msg--assistant').length > n - 1
+            && d.querySelector('.chat-msg:last-child')?.classList.contains('chat-msg--assistant');
+    }, { timeout: 90000 }, TUTOR, before));
+    // Start at the top of the reply, then drift down through it.
+    await page.evaluate(async (sel, ms) => {
+        const box = document.querySelector(`${sel} .chat-drawer__messages`);
+        const last = box.querySelector('.chat-msg:last-child');
+        const from = Math.max(0, last.offsetTop - box.offsetTop - 8);
+        const to = box.scrollHeight - box.clientHeight;
+        box.scrollTop = from;
+        await new Promise((r) => setTimeout(r, 1300));
+        const t0 = performance.now();
+        await new Promise((resolve) => {
+            const step = (now) => {
+                const k = Math.min(1, (now - t0) / ms);
+                box.scrollTop = from + (to - from) * k;
+                if (k < 1) requestAnimationFrame(step); else resolve();
+            };
+            requestAnimationFrame(step);
+        });
+    }, TUTOR, read);
+    await sleep(1200);
+}
+
+async function closeTutor(page) {
+    await click(page, `${TUTOR} button[aria-label="Close"]`, 600);
+}
+
+/** Start the next scene with an empty tutor conversation (done off camera). */
+async function resetTutor(page) {
+    if (!(await page.$('button.chat-fab'))) return;
+    await page.evaluate((sel) => {
+        document.querySelector('button.chat-fab:not(.chat-fab--open)')?.click();
+        return new Promise((r) => setTimeout(() => {
+            document.querySelector(`${sel} button[aria-label="Clear conversation"]`)?.click();
+            document.querySelector(`${sel} button[aria-label="Close"]`)?.click();
+            setTimeout(r, 400);
+        }, 400));
+    }, TUTOR);
 }
 
 // ── Scenes ──────────────────────────────────────────────────────────────────
-async function sceneUpload(page) {
+async function sceneAccount(page, account, enabled) {
+    if (!enabled) {
+        const signup = await api(page, 'POST', '/api/auth/signup', account);
+        if (signup.status !== 201) throw new Error(`Could not create the recording account: ${JSON.stringify(signup.json)}`);
+        await api(page, 'POST', '/api/auth/survey', { is_beginner: true });
+        return;
+    }
+    await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle2' });
+    await sleep(600);
+    await record(page, '01-account', async () => {
+        await type(page, 'input[placeholder="neural@vortex.ai"]', account.email, 22);
+        await type(page, 'input[placeholder="VortexCoder99"]', account.username, 30);
+        await type(page, 'input[placeholder="6+ characters"]', account.password, 22);
+        await type(page, 'input[placeholder="Repeat password"]', account.password, 22);
+        await click(page, 'button[type=submit]', 300);
+        await page.waitForFunction(() => location.pathname === '/survey', { timeout: 20000 });
+        await page.waitForSelector('.survey-question-card');
+        await sleep(1500);
+        // Two or more "beginner" answers make a Novice account — the kind that
+        // gets the AI tutor.
+        const cards = await page.$$eval('.survey-question-card', (els) => els.length);
+        for (let i = 0; i < cards; i++) {
+            await click(page, `.survey-question-card:nth-of-type(${i + 1}) label.survey-option:has(input[value="beginner"])`, 650);
+        }
+        await sleep(500);
+        await click(page, 'button.survey-submit', 300);
+        await page.waitForFunction(() => location.pathname === '/', { timeout: 20000 });
+        await waitText(page, 'Novice');
+        await sleep(2600);
+    });
+}
+
+async function sceneUpload(page, enabled) {
     await page.goto(`${BASE}/dataset`, { waitUntil: 'networkidle2' });
     await sleep(600);
-    await record(page, '01-upload', async () => {
+    await record(page, '02-upload', async () => {
         await moveTo(page, '.upload-zone');
         await sleep(500);
         // The real upload path: hand the file to the page's own <input type=file>.
@@ -263,14 +407,20 @@ async function sceneUpload(page) {
         const top = await page.evaluate(() => document.querySelector('.data-table-wrapper').getBoundingClientRect().top + window.scrollY);
         await scrollTo(page, top - 190, 900);
         await sleep(1600);
-    });
+    }, enabled);
 }
 
-async function sceneColumns(page) {
-    await record(page, '02-columns', async () => {
+async function sceneColumns(page, enabled, tutor) {
+    await record(page, '03-columns', async () => {
         const picker = await page.evaluate(() => document.querySelector('.column-picker').getBoundingClientRect().top + window.scrollY);
         await scrollTo(page, picker - 260, 800);
         await sleep(500);
+        if (tutor && enabled) {
+            // Not sure which column is which? Ask.
+            await click(page, 'button.ask-button[aria-label="Ask the tutor about Features and Target"]', 500);
+            await tutorAnswers(page);
+            await closeTutor(page);
+        }
         const colButton = (name, cls) => page.evaluateHandle((n, c) => {
             const item = [...document.querySelectorAll('.col-item')].find((i) => i.querySelector('.col-name').textContent.trim() === n);
             return item.querySelector(c);
@@ -294,39 +444,34 @@ async function sceneColumns(page) {
         await page.waitForFunction(() => location.pathname === '/architect', { timeout: 15000 });
         await waitText(page, 'Select Architecture');
         await sleep(1200);
-    });
+    }, enabled);
 }
 
-async function sceneAutoConfig(page) {
-    const status = await api(page, 'GET', '/api/auto-config/status');
-    if (!status.json?.available) {
-        console.log(`○ 03-autoconfig skipped — ${status.json?.reason || 'AI Auto-Configure is unavailable on this server.'}`);
-        return;
-    }
+async function sceneAutoConfig(page, enabled) {
     await page.waitForFunction(() => {
         const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('AI Auto-Configure'));
         return b && !b.disabled;
     }, { timeout: 15000 });
-    await record(page, '03-autoconfig', async () => {
+    await record(page, '04-autoconfig', async () => {
         await click(page, { text: 'AI Auto-Configure', sel: '.auto-config-banner button' }, 900);
         await page.waitForSelector('.auto-config-drawer.chat-drawer--open');
         await sleep(500);
         await type(page, '.auto-config-drawer textarea', TEST_PROMPT, 12);
         await page.keyboard.press('Enter');
         // Wait for the co-pilot's reply (user bubble + a new assistant bubble, no spinner).
-        await page.waitForFunction(() => {
+        await waiting(() => page.waitForFunction(() => {
             const d = document.querySelector('.auto-config-drawer');
             return d.querySelectorAll('.chat-msg--assistant').length >= 2 && !d.querySelector('.chat-msg__bubble--typing');
-        }, { timeout: 60000 });
-        await sleep(2200);
+        }, { timeout: 60000 }));
+        await sleep(2600);
         await click(page, { text: 'Generate Configuration', sel: '.auto-config-drawer button' }, 300);
-        await page.waitForSelector('.auto-config-proposal', { timeout: 90000 });
+        await waiting(() => page.waitForSelector('.auto-config-proposal', { timeout: 90000 }));
         await sleep(600);
         await page.evaluate(() => {
             const m = document.querySelector('.auto-config-drawer .chat-drawer__messages');
             m.scrollTo({ top: m.scrollHeight, behavior: 'smooth' });
         });
-        await sleep(3200);
+        await sleep(3600);
         await click(page, { text: 'Apply to Architect', sel: '.auto-config-drawer button' }, 900);
         await sleep(700);
         const arch = await page.evaluate(() => document.querySelector('.arch-card.selected').getBoundingClientRect().top + window.scrollY);
@@ -334,8 +479,8 @@ async function sceneAutoConfig(page) {
         await sleep(1300);
         const layers = await page.evaluate(() => document.querySelector('.layer-list').getBoundingClientRect().top + window.scrollY);
         await scrollTo(page, layers - 170, 1000);
-        await sleep(1800);
-    });
+        await sleep(2000);
+    }, enabled);
 }
 
 /** The label → input lookup used on the Architect page's hyperparameter form. */
@@ -355,30 +500,50 @@ async function setField(page, handle, value) {
     await sleep(450);
 }
 
-/** Configure the model by hand — the tutorial's main track. */
+const nameProject = async (page) => setField(page, await page.$('input.form-input[placeholder="MyProject"]'), PROJECT);
+
+/** Settings entered by hand — only used when the co-pilot isn't available. */
 async function architectByHand(page) {
     await click(page, { text: 'Multi-Layer Perceptron', sel: '.arch-card' }, 900);
     const layers = await page.evaluate(() => document.querySelector('.layer-list').getBoundingClientRect().top + window.scrollY);
     await scrollTo(page, layers - 190, 900);
-    await sleep(500);
     const inputs = await page.$$('.layer-list input.layer-neurons');
     const sizes = [32, 16];
     for (let i = 0; i < sizes.length && i < inputs.length; i++) await setField(page, inputs[i], sizes[i]);
     await setField(page, await formInput(page, 'Epochs'), 30);
     await setField(page, await formInput(page, 'Learning Rate'), 0.005);
-    const nameInput = await page.$('input.form-input[placeholder="MyProject"]');
-    await setField(page, nameInput, PROJECT);
-    await sleep(700);
 }
 
-async function sceneArchitect(page) {
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await sleep(400);
-    await record(page, '03-architect', () => architectByHand(page));
+/** Ask the tutor about a parameter, then about the values the co-pilot chose. */
+async function sceneParameters(page, enabled) {
+    await resetTutor(page);
+    const lr = await page.evaluate((el) => el.value, await formInput(page, 'Learning Rate'));
+    const epochs = await page.evaluate((el) => el.value, await formInput(page, 'Epochs'));
+    const top = await page.evaluate(() => {
+        const l = [...document.querySelectorAll('.form-label')].find((x) => x.textContent.trim().startsWith('Epochs'));
+        return l.getBoundingClientRect().top + window.scrollY;
+    });
+    await scrollTo(page, top - 330, 600);
+    await sleep(500);
+    await record(page, '05-parameters', async () => {
+        await moveTo(page, await formInput(page, 'Learning Rate').then((h) => h.asElement()));
+        await sleep(700);
+        await click(page, 'button.ask-button[aria-label="Ask the tutor about Learning Rate"]', 500);
+        await tutorAnswers(page);
+        // A follow-up about this model in particular.
+        await type(page, `${TUTOR} textarea`,
+            `My table has 800 rows and 5 features. The co-pilot set learning rate ${lr} and ${epochs} epochs — should I change either?`, 14);
+        await page.keyboard.press('Enter');
+        await sleep(400);
+        await tutorAnswers(page);
+        await closeTutor(page);
+        await nameProject(page);
+        await sleep(900);
+    }, enabled);
 }
 
-async function sceneTrain(page) {
-    await record(page, '04-train', async () => {
+async function sceneTrain(page, enabled) {
+    await record(page, '06-train', async () => {
         await click(page, { text: 'Start Training ⚡' }, 300);
         await page.waitForFunction(() => location.pathname === '/training', { timeout: 15000 });
         await waitText(page, 'Compute Device');
@@ -391,14 +556,44 @@ async function sceneTrain(page) {
         await sleep(2600);
         await scrollTo(page, chart + 330, 900);
         await sleep(2200);
+    }, enabled);
+}
+
+async function sceneExplain(page) {
+    await record(page, '07-explain', async () => {
+        await click(page, { text: 'Explain Results' }, 400);
+        await waitText(page, 'Reviewing your training run', 10000).catch(() => {});
+        await waiting(() => page.waitForFunction(
+            () => [...document.querySelectorAll('.markdown-body')].some((m) => m.textContent.trim().length > 80),
+            { timeout: 90000 }));
+        await sleep(2800);
+        // Read down through the verdict.
+        await page.evaluate(async () => {
+            const body = [...document.querySelectorAll('.markdown-body')].find((m) => m.textContent.trim().length > 80);
+            let box = body;
+            while (box && box.scrollHeight <= box.clientHeight + 4) box = box.parentElement;
+            if (!box || box === document.body || box === document.documentElement) return;
+            const to = box.scrollHeight - box.clientHeight;
+            const t0 = performance.now();
+            await new Promise((resolve) => {
+                const step = (now) => {
+                    const k = Math.min(1, (now - t0) / 4200);
+                    box.scrollTop = to * k;
+                    if (k < 1) requestAnimationFrame(step); else resolve();
+                };
+                requestAnimationFrame(step);
+            });
+        });
+        await sleep(2400);
     });
+    await page.evaluate(() => document.querySelector('button[aria-label="Close"]')?.click());
 }
 
 async function scenePredict(page) {
     await page.goto(`${BASE}/predict`, { waitUntil: 'networkidle2' });
     await waitText(page, 'Choose a model');
     await sleep(500);
-    await record(page, '06-predict', async () => {
+    await record(page, '09-predict', async () => {
         // The newest model is the one just trained.
         const select = await moveTo(page, '.glass-panel select');
         const value = await page.evaluate((s) => [...s.options].find((o) => o.value)?.value, select);
@@ -439,7 +634,21 @@ async function scenePredict(page) {
     });
 }
 
-async function sceneBackground(browser, owner, credentials) {
+/** Train one more model through the API (no UI), and wait for it to finish. */
+async function trainQuietly(page, overrides) {
+    const loaded = await api(page, 'POST', '/api/demo/load', { key: 'student_performance' });
+    await api(page, 'POST', '/api/model/configure', { ...loaded.json.config, ...overrides });
+    const started = await api(page, 'POST', '/api/training/start', { device_id: null });
+    if (!started.json?.job_id) throw new Error(`Could not start "${overrides.project_name}": ${JSON.stringify(started.json)}`);
+    for (let i = 0; i < 240; i++) {
+        const active = await api(page, 'GET', '/api/training/active');
+        if (!(active.json?.jobs || []).length) return;
+        await sleep(500);
+    }
+    throw new Error(`"${overrides.project_name}" did not finish training.`);
+}
+
+async function sceneBackground(browser, owner, account) {
     // Set up a deliberately long run (thousands of epochs) so there is
     // something still training to come back to, and start it from the first
     // browser. Small datasets otherwise finish in about a second.
@@ -453,8 +662,8 @@ async function sceneBackground(browser, owner, credentials) {
     // another computer and signing in.
     const page = await newPage(browser);
     await page.goto(`${BASE}/signin`, { waitUntil: 'networkidle2' });
-    await api(page, 'POST', '/api/auth/signin', credentials);
-    await record(page, '05-background', async () => {
+    await api(page, 'POST', '/api/auth/signin', { email: account.email, password: account.password });
+    await record(page, '08-background', async () => {
         await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
         await waitText(page, 'still running');
         await sleep(3200);
@@ -474,6 +683,147 @@ async function sceneBackground(browser, owner, credentials) {
     await page.browserContext().close();
 }
 
+async function sceneAssistant(page) {
+    await page.goto(`${BASE}/assistant`, { waitUntil: 'networkidle2' });
+    await waitText(page, 'Knowledge bases');
+    await sleep(600);
+    await record(page, '10-assistant', async () => {
+        await type(page, 'input[placeholder="New knowledge base name"]', 'Dataset notes', 30);
+        await click(page, { text: 'Create', sel: 'button.btn-primary' }, 400);
+        await waitText(page, 'No documents yet');
+        await sleep(1100);
+        await moveTo(page, { text: 'Add documents', sel: 'label.btn' });
+        await sleep(500);
+        const input = await page.$('label.btn input[type=file]');
+        await input.uploadFile(NOTES);
+        await waitText(page, '📄');
+        await sleep(1500);
+        await type(page, 'input[placeholder="Ask a question about your documents…"]',
+            'Which of these datasets is synthetic, and where do the real ones come from?', 18);
+        await page.keyboard.press('Enter');
+        await waiting(() => page.waitForFunction(
+            () => [...document.querySelectorAll('.markdown-body')].some((m) => m.textContent.trim().length > 60),
+            { timeout: 120000 }));
+        await sleep(900);
+        const answer = await page.evaluate(() => document.querySelector('.markdown-body').getBoundingClientRect().top + window.scrollY);
+        await scrollTo(page, answer - 220, 900);
+        await sleep(3200);
+        // …and the passages it was grounded in, at the end of the same panel.
+        const end = await page.evaluate(() => document.querySelector('.markdown-body').closest('.glass-panel').getBoundingClientRect().bottom + window.scrollY);
+        await scrollTo(page, end - VIEW.height + 40, 1600);
+        await sleep(2600);
+    });
+}
+
+async function sceneChat(page) {
+    await page.goto(`${BASE}/chat`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('textarea');
+    // Bring the whole conversation panel, input included, onto the screen.
+    await scrollTo(page, 80, 300);
+    await sleep(700);
+    await record(page, '11-chat', async () => {
+        await type(page, 'textarea', 'My model scores 99% on training data but only 70% on validation. What is going on, and what should I try first?', 16);
+        await page.keyboard.press('Enter');
+        // Dead air until the first words arrive; the answer itself streams live.
+        await waiting(() => page.waitForFunction(
+            () => [...document.querySelectorAll('.markdown-body')].some((m) => m.textContent.replace('▍', '').trim().length > 20),
+            { timeout: 120000 }));
+        await page.waitForFunction(
+            () => !document.body.innerText.includes('▍') && [...document.querySelectorAll('button')].some((b) => b.textContent.includes('Regenerate')),
+            { timeout: 180000 });
+        await sleep(2800);
+    });
+}
+
+async function sceneLeaderboard(page) {
+    // Something to compare the tutorial model against: the same data with a
+    // far too large learning rate, and with a tiny network.
+    await trainQuietly(page, { lr: 1.0, project_name: 'Exam-Predictor-LR-1.0' });
+    await trainQuietly(page, { layer_sizes: [2], project_name: 'Exam-Predictor-Tiny' });
+    await page.goto(`${BASE}/leaderboard`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('input[type=checkbox][aria-label^="Compare"]');
+    // Those runs finished without this tab watching, so the site greets us with
+    // "your training finished while you were away". Acknowledge it off camera.
+    await waitText(page, 'while you were away', 6000).then(() => page.keyboard.press('Escape')).catch(() => {});
+    await page.waitForFunction(() => !document.body.innerText.includes('while you were away'), { timeout: 5000 })
+        .catch(() => page.evaluate(() => document.querySelector('.vx-modal button[aria-label="Close"], .vx-close')?.click()));
+    await sleep(900);
+    await record(page, '12-leaderboard', async () => {
+        const boxes = await page.$$('input[type=checkbox][aria-label^="Compare"]');
+        for (const box of boxes.slice(0, 4)) {
+            await moveTo(page, box);
+            await page.mouse.down(); await sleep(60); await page.mouse.up();
+            await sleep(650);
+        }
+        await sleep(700);
+        const charts = await page.evaluate(() => document.querySelector('.training-grid').getBoundingClientRect().top + window.scrollY);
+        await scrollTo(page, charts - 140, 1000);
+        await sleep(3400);
+        await scrollTo(page, 0, 900);
+        await click(page, { text: 'By val loss' }, 900);
+        await sleep(2200);
+    });
+}
+
+async function sceneLearn(page) {
+    await page.goto(`${BASE}/learn`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.roadmap-node');
+    await sleep(900);
+    await record(page, '13-learn', async () => {
+        await sleep(900);
+        const first = await page.evaluate(() => document.querySelector('.roadmap-node').getBoundingClientRect().top + window.scrollY);
+        await scrollTo(page, first - 250, 1400);
+        await sleep(900);
+        await scrollTo(page, first + 500, 2200);
+        await sleep(700);
+        // Any topic on screen opens a short explanation.
+        const node = await page.evaluateHandle(() => [...document.querySelectorAll('.roadmap-node')]
+            .find((n) => { const r = n.getBoundingClientRect(); return r.top > 180 && r.bottom < window.innerHeight - 120; }));
+        await moveTo(page, node.asElement());
+        await page.mouse.down(); await sleep(60); await page.mouse.up();
+        await page.waitForSelector('.roadmap-popover');
+        await sleep(2800);
+        await click(page, '.popover-close', 700);
+        await scrollTo(page, 0, 900);
+        await click(page, { text: 'Courses', sel: 'button[role=tab]' }, 900);
+        await page.waitForSelector('.bento-card');
+        await sleep(1500);
+        await click(page, '.bento-card', 400);
+        await page.waitForSelector('.markdown-content');
+        await sleep(1500);
+        await scrollTo(page, 620, 2400);
+        await sleep(1800);
+    });
+}
+
+async function sceneDevice(page) {
+    // The modal downloads the agent bundle; let it land in the temp directory.
+    const cdp = await page.createCDPSession();
+    await cdp.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: TMP });
+    await page.goto(`${BASE}/profile`, { waitUntil: 'networkidle2' });
+    await waitText(page, 'Your Devices');
+    await sleep(700);
+    await record(page, '14-device', async () => {
+        await click(page, { text: 'Link a device' }, 700);
+        await waitText(page, 'Link your own device');
+        await type(page, 'input[placeholder="e.g. Home Mac Mini"]', 'Lab workstation', 40);
+        await sleep(500);
+        await click(page, { text: 'Create & Download Agent' }, 400);
+        await waitText(page, 'is linked');
+        await sleep(3400);
+        await moveTo(page, 'button[title="Copy command to clipboard"]');
+        await sleep(1800);
+        await click(page, { text: 'Done' }, 800);
+        await waitText(page, 'Offline');
+        const row = await page.evaluate(() => {
+            const el = [...document.querySelectorAll('.glass-panel')].find((p) => p.textContent.includes('Lab workstation') && p.textContent.includes('Offline'));
+            return el.getBoundingClientRect().top + window.scrollY;
+        });
+        await scrollTo(page, row - 300, 800);
+        await sleep(2600);
+    });
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 async function main() {
     fs.mkdirSync(OUT, { recursive: true });
@@ -484,52 +834,52 @@ async function main() {
     });
     try {
         const page = await newPage(browser);
+        // Several buttons (delete, unlink, switch mode) ask with confirm().
+        page.on('dialog', (d) => d.accept().catch(() => {}));
         await page.goto(`${BASE}/`, { waitUntil: 'networkidle2' });
 
-        // A throwaway account: AI Auto-Configure, saved models and the Predict
-        // page all need one (as the tutorial tells the reader).
-        const stamp = Date.now().toString(36);
-        const credentials = { email: `tutorial-${stamp}@example.com`, password: `rec-${stamp}-pw` };
-        const signup = await api(page, 'POST', '/api/auth/signup', { ...credentials, username: `tutorial_${stamp}` });
-        if (signup.status !== 201) throw new Error(`Could not create the recording account: ${JSON.stringify(signup.json)}`);
-        await api(page, 'POST', '/api/auth/survey', { is_beginner: true });
+        // The account everything is recorded with. AI Auto-Configure, the tutor,
+        // saved models and the Predict page all need one — and the tutor needs
+        // it to be a Novice account (as the tutorial tells the reader).
+        const stamp = Date.now().toString(36).slice(-4);
+        const account = { email: `ana.${stamp}@example.com`, username: `ana_${stamp}`, password: `learn-${stamp}-ml` };
+        await sceneAccount(page, account, wants('account'));
 
-        const flow = ['upload', 'columns', 'architect', 'autoconfig', 'train', 'predict'].some(wants);
-        if (flow) {
-            // The scenes build on each other, so the ones that aren't being
-            // re-recorded are still performed (just not captured).
-            if (wants('upload')) await sceneUpload(page);
-            else {
-                await page.goto(`${BASE}/dataset`, { waitUntil: 'networkidle2' });
-                await (await page.$('.upload-zone input[type=file]')).uploadFile(CSV);
-                await waitText(page, 'Data Preview');
-            }
-            if (wants('columns')) await sceneColumns(page);
-            else {
-                await api(page, 'POST', '/api/dataset/configure', { feature_cols: FEATURES, target_col: TARGET });
-                await page.goto(`${BASE}/architect`, { waitUntil: 'networkidle2' });
-            }
-            await waitText(page, 'Select Architecture');
-            // The co-pilot first (when there is one), then the by-hand settings,
-            // which are what the tutorial trains with either way.
-            if (wants('autoconfig')) await sceneAutoConfig(page);
-            if (wants('architect')) await sceneArchitect(page);
-            else await architectByHand(page);
-            if (wants('train')) await sceneTrain(page);
-            else if (wants('predict')) {
-                await click(page, { text: 'Start Training ⚡' }, 300);
-                await page.waitForFunction(() => location.pathname === '/training', { timeout: 15000 });
-                await click(page, { text: 'Start Training', sel: '.glass-panel button.btn' }, 200);
-                await waitText(page, 'Final loss', 120000);
-            }
-            if (wants('predict')) await scenePredict(page);
+        const tutor = Boolean((await api(page, 'GET', '/api/chat/status')).json?.available);
+        const copilot = await api(page, 'GET', '/api/auto-config/status');
+        if (!copilot.json?.available) {
+            console.log(`○ AI scenes skipped — ${copilot.json?.reason || 'the AI features are unavailable on this server (no ANTHROPIC_API_KEY?).'}`);
         }
-        if (wants('background')) await sceneBackground(browser, page, credentials);
+        const ai = Boolean(copilot.json?.available);
+
+        const model = ['train', 'explain', 'predict', 'leaderboard'].some(wants);
+        if (model || ['upload', 'columns', 'autoconfig', 'parameters'].some(wants)) {
+            await sceneUpload(page, wants('upload'));
+            await sceneColumns(page, wants('columns'), tutor);
+            await waitText(page, 'Select Architecture');
+            // The co-pilot designs the network. Without it (or when its clip
+            // isn't being re-recorded) the same kind of model is entered by hand.
+            if (ai && wants('autoconfig')) await sceneAutoConfig(page, true);
+            else await architectByHand(page);
+            if (tutor && wants('parameters')) await sceneParameters(page, true);
+            else await nameProject(page);
+            if (model) {
+                await sceneTrain(page, wants('train'));
+                if (ai && wants('explain')) await sceneExplain(page);
+                if (wants('predict')) await scenePredict(page);
+            }
+        }
+        if (wants('background')) await sceneBackground(browser, page, account);
+        if (ai && wants('assistant')) await sceneAssistant(page);
+        if (ai && wants('chat')) await sceneChat(page);
+        if (wants('leaderboard')) await sceneLeaderboard(page);
+        if (wants('learn')) await sceneLearn(page);
+        if (wants('device')) await sceneDevice(page);
     } finally {
         await browser.close();
         fs.rmSync(TMP, { recursive: true, force: true });
     }
-    console.log(`\nGIFs written to ${OUT}`);
+    console.log(`\nClips written to ${OUT}`);
 }
 
 main().catch((err) => {

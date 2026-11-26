@@ -1,10 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useInView, useScroll, useTransform, useReducedMotion } from 'framer-motion';
-import { Database, Activity, ArrowRight, GraduationCap, Layers, CloudCog, Play, Trophy } from 'lucide-react';
+import { Database, Activity, ArrowDown, ArrowRight, GraduationCap, Layers, CloudCog, Play, Trophy } from 'lucide-react';
 import NeuralBackground from '../components/NeuralBackground';
 import TutorialClip from '../components/TutorialClip';
 import { cn } from '../utils/cn';
+
+// The full step-by-step guide closes the page; it is long, so it loads after
+// the hero instead of with it.
+const TutorialGuide = lazy(() => import('./Tutorial').then((m) => ({ default: m.TutorialGuide })));
 
 // Easing — one curve, used everywhere for a unified motion language
 const GLIDE = [0.22, 1, 0.36, 1] as const;
@@ -171,77 +175,87 @@ const Eyebrow: React.FC<{ number: string; label: string }> = ({ number, label })
     </div>
 );
 
-// The tutorial's clips, in order. `seconds` is each GIF's length, so the
-// walkthrough moves on exactly when the clip has played through once.
+// The core of the tutorial, in order. Each entry is one recorded clip.
 const WALKTHROUGH = [
     {
-        clip: '01-upload', seconds: 11, url: 'vortexml / dataset',
+        clip: '02-upload', url: 'vortexml / dataset',
         title: 'Upload your data',
         text: 'Drop in a CSV. You get a preview table and a summary of what is in it.',
         alt: 'Uploading a CSV on the Dataset page; the preview table appears.',
     },
     {
-        clip: '02-columns', seconds: 18.6, url: 'vortexml / dataset',
-        title: 'Choose what to predict',
-        text: 'Tick the columns the model may look at, and the one it should learn to predict.',
-        alt: 'Marking five columns as features and one as the target.',
+        clip: '03-columns', url: 'vortexml / dataset',
+        title: 'Ask the tutor, pick the columns',
+        text: 'Not sure what a feature or a target is? One click and the AI tutor explains, then you choose.',
+        alt: 'Asking the AI tutor what features and a target are, then marking the columns.',
     },
     {
-        clip: '03-architect', seconds: 19.4, url: 'vortexml / architect',
-        title: 'Design the network',
-        text: 'Pick a model type, set its layers, and decide how long it trains.',
-        alt: 'Selecting a Multi-Layer Perceptron and entering its layer sizes and hyperparameters.',
+        clip: '04-autoconfig', url: 'vortexml / architect',
+        title: 'Let the AI design the network',
+        text: 'Describe your goal in plain words. The co-pilot proposes the whole model and fills the page in.',
+        alt: 'Describing the goal to the AI co-pilot and applying its proposed configuration.',
     },
     {
-        clip: '04-train', seconds: 19.8, url: 'vortexml / training',
+        clip: '05-parameters', url: 'vortexml / architect',
+        title: 'Tune the parameters with the tutor',
+        text: 'Every setting has an ask-the-tutor button: what it does, and what value suits your data.',
+        alt: 'Asking the AI tutor about the learning rate and about the values the co-pilot chose.',
+    },
+    {
+        clip: '06-train', url: 'vortexml / training',
         title: 'Train it live',
         text: 'The loss falls and the accuracy climbs on screen, epoch by epoch.',
         alt: 'Starting a run on the Training page; the loss curve falls and accuracy rises.',
     },
     {
-        clip: '05-background', seconds: 25.8, url: 'vortexml — opened in a second browser',
+        clip: '07-explain', url: 'vortexml / training',
+        title: 'Have the AI explain the results',
+        text: 'One click turns the curves into a plain-language verdict: is it overfitting, is it ready, what next.',
+        alt: 'Clicking Explain Results after training; the AI review of the run appears.',
+    },
+    {
+        clip: '08-background', url: 'vortexml — opened in a second browser',
         title: 'Close the tab',
         text: 'The run carries on without you. Open the site in another browser and pick it up where it is.',
         alt: 'A second browser signs in while a run is training: the welcome-back prompt appears, then the dashboard with the full history.',
     },
     {
-        clip: '06-predict', seconds: 28.1, url: 'vortexml / predict',
+        clip: '09-predict', url: 'vortexml / predict',
         title: 'Ask it questions',
         text: 'Type in values the model has never seen and it answers.',
         alt: 'Entering two different students on the Predict page; the prediction changes from pass to fail.',
     },
 ];
 
-// The whole product in six recorded clips, playing one after another.
+// The whole product in a handful of recorded clips, playing one after another.
 const Walkthrough: React.FC = () => {
     const ref = useRef<HTMLDivElement>(null);
     const inView = useInView(ref, { margin: '-20% 0px' });
     const reduce = useReducedMotion();
     const [index, setIndex] = useState(0);
     const [playing, setPlaying] = useState(!reduce);
+    // Length of the clip on screen, once the browser knows it.
+    const [seconds, setSeconds] = useState<number | null>(null);
     const step = WALKTHROUGH[index];
-    const running = playing && inView;
 
-    // Fetch the next clip while this one plays, so the hand-over is seamless.
-    useEffect(() => {
-        if (!running) return;
-        const next = WALKTHROUGH[(index + 1) % WALKTHROUGH.length];
-        new Image().src = `/tutorial/${next.clip}.gif`;
-    }, [index, running]);
+    const show = (i: number) => {
+        setSeconds(null);
+        setIndex(i);
+    };
 
     return (
         <div ref={ref} className="grid gap-6 lg:grid-cols-[minmax(0,21rem)_minmax(0,1fr)] lg:gap-10 items-start">
-            <ol className="order-2 lg:order-1 flex flex-col gap-1.5 list-none p-0 m-0">
+            <ol className="order-2 lg:order-1 flex flex-col gap-1 list-none p-0 m-0">
                 {WALKTHROUGH.map((s, i) => {
                     const active = i === index;
                     return (
                         <li key={s.clip}>
                             <button
                                 type="button"
-                                onClick={() => setIndex(i)}
+                                onClick={() => show(i)}
                                 aria-current={active ? 'step' : undefined}
                                 className={cn(
-                                    'relative block w-full cursor-pointer overflow-hidden rounded-2xl border border-solid px-5 py-3.5 text-left font-sans',
+                                    'relative block w-full cursor-pointer overflow-hidden rounded-2xl border border-solid px-5 py-3 text-left font-sans',
                                     'transition-[background-color,border-color] duration-500 ease-glide',
                                     active
                                         ? 'border-accent-2/35 bg-white/[0.06]'
@@ -267,14 +281,16 @@ const Walkthrough: React.FC = () => {
                                         {s.text}
                                     </span>
                                 )}
-                                {/* Fills over the length of the clip, then hands over to the next step. */}
-                                {active && running && (
+                                {/* Fills over the length of the clip; the clip ending moves on to the next step. */}
+                                {active && seconds !== null && (
                                     <span className="absolute inset-x-0 bottom-0 h-[2px] bg-white/[0.06]">
                                         <span
                                             key={s.clip}
                                             className="block h-full origin-left bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4"
-                                            style={{ animation: `walkthrough-fill ${s.seconds}s linear forwards` }}
-                                            onAnimationEnd={() => setIndex((n) => (n + 1) % WALKTHROUGH.length)}
+                                            style={{
+                                                animation: `walkthrough-fill ${seconds}s linear forwards`,
+                                                animationPlayState: playing && inView ? 'running' : 'paused',
+                                            }}
                                         />
                                     </span>
                                 )}
@@ -291,6 +307,8 @@ const Walkthrough: React.FC = () => {
                     alt={step.alt}
                     playing={playing}
                     onToggle={() => setPlaying((p) => !p)}
+                    onDuration={setSeconds}
+                    onEnded={() => show((index + 1) % WALKTHROUGH.length)}
                     caption={<>Step {index + 1} of {WALKTHROUGH.length} · recorded from the running app, no mock-ups.</>}
                 />
             </div>
@@ -311,7 +329,7 @@ const Home: React.FC = () => {
     const opacityHero = useTransform(scrollYProgress, [0, 0.75], [1, 0]);
 
     return (
-        <div className="relative w-full bg-bg-primary overflow-hidden selection:bg-accent-2/30">
+        <div className="relative w-full bg-bg-primary overflow-clip selection:bg-accent-2/30">
             {/* Interactive Canvas Background */}
             <NeuralBackground />
 
@@ -333,21 +351,6 @@ const Home: React.FC = () => {
                         style={{ y: reduce ? 0 : yHeroText, opacity: opacityHero }}
                         className="max-w-5xl mx-auto text-center flex flex-col items-center will-change-[transform,opacity]"
                     >
-                        <motion.div
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.9, ease: GLIDE }}
-                            className="mb-4 inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/[0.04] px-5 py-2 backdrop-blur-md shadow-[0_0_20px_rgba(255,255,255,0.04)]"
-                        >
-                            <span className="relative flex h-1.5 w-1.5">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-4 opacity-70" />
-                                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-4" />
-                            </span>
-                            <span className="font-mono text-[10.5px] font-medium tracking-[0.28em] text-white/85 uppercase">
-                                Vortex Engine
-                            </span>
-                        </motion.div>
-
                         {/* Award */}
                         <motion.div
                             initial={{ opacity: 0, y: 8 }}
@@ -422,7 +425,7 @@ const Home: React.FC = () => {
                                     <GraduationCap className="h-[13px] w-[13px]" strokeWidth={2} />
                                     Tutorial
                                 </span>
-                                New here? Train your first model in five minutes
+                                New here? Train your first model in ten minutes
                                 <ArrowRight className="h-[13px] w-[13px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
                             </Link>
                         </motion.div>
@@ -442,7 +445,7 @@ const Home: React.FC = () => {
                             </em>
                         </h2>
                         <p className="text-[1.05rem] md:text-[1.15rem] text-text-secondary font-light leading-[1.65] tracking-[0.003em]">
-                            Six steps, shown exactly as they happen in the app. Pick one, or let them play through.
+                            Eight steps, with the AI tutor and co-pilot doing the hard parts. Pick one, or let them play through.
                         </p>
                     </FadeIn>
 
@@ -451,16 +454,16 @@ const Home: React.FC = () => {
                     </FadeIn>
 
                     <FadeIn delay={0.12} className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-4">
-                        <Link
-                            to="/tutorial"
+                        <a
+                            href="#tutorial"
                             className="group inline-flex h-12 items-center justify-center gap-2.5 rounded-full bg-white px-7 text-[14px] font-medium tracking-[-0.005em] text-black transition-all duration-500 ease-glide hover:scale-[1.025] active:scale-[0.98] shadow-[0_0_30px_rgba(255,255,255,0.14)] no-underline hover:no-underline"
                         >
                             <GraduationCap className="h-[16px] w-[16px]" strokeWidth={1.9} />
-                            <span>Follow the full tutorial</span>
-                            <ArrowRight className="h-[15px] w-[15px] transition-transform duration-500 ease-glide group-hover:translate-x-1" strokeWidth={2} />
-                        </Link>
+                            <span>Do it yourself, step by step</span>
+                            <ArrowDown className="h-[15px] w-[15px] transition-transform duration-500 ease-glide group-hover:translate-y-0.5" strokeWidth={2} />
+                        </a>
                         <span className="text-[13.5px] font-light text-text-secondary">
-                            It comes with a practice dataset and the exact settings to type in.
+                            It comes with a practice dataset and the exact prompt to give the AI.
                         </span>
                     </FadeIn>
                 </section>
@@ -521,6 +524,28 @@ const Home: React.FC = () => {
                     </div>
                 </section>
 
+                {/* ─── Tutorial ─── */}
+                <section id="tutorial" className="relative z-10 max-w-[1300px] mx-auto px-6 pt-10 pb-6 lg:px-8 scroll-mt-24">
+                    <FadeIn className="mb-14 md:mb-20 text-center max-w-3xl mx-auto">
+                        <Eyebrow number="03" label="Tutorial" />
+                        <h2 className="text-[clamp(2rem,3.6vw+1rem,3.5rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
+                            Your first model,{' '}
+                            <em className="not-italic font-display italic font-normal tracking-[-0.018em] whitespace-nowrap text-transparent bg-clip-text bg-gradient-to-r from-accent-1 via-accent-3 to-accent-4">
+                                step by step.
+                            </em>
+                        </h2>
+                        <p className="text-[1.05rem] md:text-[1.15rem] text-text-secondary font-light leading-[1.65] tracking-[0.003em]">
+                            In about ten minutes you will teach a neural network to predict whether a student passes
+                            an exam, with the AI tutor and co-pilot doing the hard parts. Every step shows exactly
+                            what to click and what you should see change.
+                        </p>
+                    </FadeIn>
+
+                    <Suspense fallback={<div className="py-24 text-center text-sm text-white/40">Loading the tutorial…</div>}>
+                        <TutorialGuide />
+                    </Suspense>
+                </section>
+
                 {/* ─── Final CTA ─── */}
                 <section className="relative z-10 max-w-5xl mx-auto px-6 py-28 md:py-36 text-center">
                     <FadeIn direction="up">
@@ -530,7 +555,7 @@ const Home: React.FC = () => {
                             {/* Soft inner glow */}
                             <div className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[110%] h-64 bg-accent-2/15 blur-[100px] rounded-full" />
 
-                            <Eyebrow number="03" label="Get Started" />
+                            <Eyebrow number="04" label="Get Started" />
 
                             <h2 className="text-[clamp(2.2rem,3.8vw+1rem,3.75rem)] font-semibold tracking-[-0.035em] text-white mb-6 leading-[1.04]">
                                 Ready to{' '}

@@ -64,11 +64,11 @@
 
 .tt-clip__stage {
     position: relative;
-    aspect-ratio: 880 / 550;
+    aspect-ratio: 1280 / 800;
     background: #06060f;
 }
 
-.tt-clip__stage img {
+.tt-clip__stage video {
     position: absolute;
     inset: 0;
     width: 100%;

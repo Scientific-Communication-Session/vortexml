@@ -788,7 +788,7 @@ const Demo: React.FC = () => {
                 <div className="dm-next">
                     <Link to="/tutorial">
                         <span className="dm-next__title"><BookOpen size={17} /> Follow the tutorial <ArrowRight size={15} /></span>
-                        <p>Build the same thing by hand in five minutes — upload, pick columns, design the network, train, predict. With recordings of every step.</p>
+                        <p>Build the same thing yourself in ten minutes, with the AI tutor guiding you — upload, pick columns, design the network, train, predict. With recordings of every step.</p>
                     </Link>
                     <Link to="/dataset">
                         <span className="dm-next__title"><Upload size={17} /> Bring your own data <ArrowRight size={15} /></span>

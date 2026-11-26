@@ -52,7 +52,7 @@ const Learn: React.FC = () => {
                     to="/tutorial"
                     className="group mt-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[13px] text-white/75 hover:text-white hover:border-white/25 transition-colors duration-300 no-underline"
                 >
-                    Rather learn by doing? Train your first model in five minutes
+                    Rather learn by doing? Train your first model in ten minutes
                     <ArrowRight className="h-[13px] w-[13px] transition-transform duration-500 group-hover:translate-x-1" strokeWidth={2} />
                 </Link>
             </motion.header>

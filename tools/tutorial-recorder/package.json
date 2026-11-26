@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Drives the real app in headless Chromium and records the tutorial GIFs.",
+  "description": "Drives the real app in headless Chromium and records the tutorial clips.",
   "scripts": {
     "record": "node record.mjs"
   },
