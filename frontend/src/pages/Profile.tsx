@@ -358,7 +358,7 @@ const Profile: React.FC = () => {
                                     <div style={{
                                         position: 'relative', width: 40, height: 40, borderRadius: 10,
                                         display: 'grid', placeItems: 'center',
-                                        background: 'rgba(139,92,246,0.14)', color: '#8b5cf6',
+                                        background: 'oklch(0.68 0.17 283 / 0.14)', color: 'var(--color-accent)',
                                     }}>
                                         <Laptop size={20} />
                                         <span
@@ -367,7 +367,7 @@ const Profile: React.FC = () => {
                                                 position: 'absolute', right: -3, bottom: -3,
                                                 width: 12, height: 12, borderRadius: '50%',
                                                 border: '2px solid #0e0e1a',
-                                                background: d.online ? '#22c55e' : '#5a5a7a',
+                                                background: d.online ? 'var(--color-success)' : 'var(--color-fg-3)',
                                             }}
                                         />
                                     </div>
@@ -493,8 +493,8 @@ const Profile: React.FC = () => {
                                         </div>
                                         <div style={{ fontSize: '0.85rem', marginTop: '0.45rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                                             {accuracy && (
-                                                <span><Activity size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle', color: '#22c55e' }} />
-                                                    val_acc <strong style={{ color: '#22c55e' }}>{accuracy}</strong></span>
+                                                <span><Activity size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle', color: 'var(--color-success)' }} />
+                                                    val_acc <strong style={{ color: 'var(--color-success)' }}>{accuracy}</strong></span>
                                             )}
                                             {p.final_val_loss !== null && (
                                                 <span><BarChart3 size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
@@ -565,7 +565,7 @@ const Profile: React.FC = () => {
                 </div>
                 <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: '1.1rem', maxWidth: '70ch' }}>
                     Everything in this account is yours. Take a copy whenever you like, or delete the account and
-                    all of it for good. The <Link to="/privacy" style={{ color: '#c4b5fd', textDecoration: 'underline', textUnderlineOffset: 3 }}>Privacy Policy</Link> explains
+                    all of it for good. The <Link to="/privacy" style={{ color: 'var(--color-accent-text)', textDecoration: 'underline', textUnderlineOffset: 3 }}>Privacy Policy</Link> explains
                     what is stored and why.
                 </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.9rem' }}>
@@ -580,7 +580,7 @@ const Profile: React.FC = () => {
                             Download as JSON
                         </a>
                     </div>
-                    <div style={{ flex: '1 1 300px', padding: '1rem 1.1rem', borderRadius: 14, border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.05)' }}>
+                    <div style={{ flex: '1 1 300px', padding: '1rem 1.1rem', borderRadius: 14, border: '1px solid oklch(0.68 0.18 25 / 0.25)', background: 'oklch(0.68 0.18 25 / 0.05)' }}>
                         <div style={{ fontWeight: 600, marginBottom: '0.3rem' }}>Delete my account</div>
                         <p className="text-muted" style={{ fontSize: '0.84rem', marginBottom: '0.9rem' }}>
                             Removes the account and everything in it from our servers, immediately and

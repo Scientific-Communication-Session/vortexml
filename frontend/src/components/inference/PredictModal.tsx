@@ -113,7 +113,7 @@ const PredictModal: React.FC<PredictModalProps> = ({ projectId, projectName, onC
             onClick={onClose}
             style={{
                 position: 'fixed', inset: 0, zIndex: 200,
-                background: 'rgba(8,8,16,0.72)', backdropFilter: 'blur(6px)',
+                background: 'oklch(0.12 0.008 285 / 0.72)', backdropFilter: 'blur(6px)',
                 display: 'grid', placeItems: 'center', padding: '1.5rem',
             }}
         >
@@ -128,7 +128,7 @@ const PredictModal: React.FC<PredictModalProps> = ({ projectId, projectName, onC
                 </button>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.9rem' }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'rgba(34,197,94,0.14)', color: '#22c55e' }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'oklch(0.78 0.15 155 / 0.14)', color: 'var(--color-success)' }}>
                         <Wand2 size={20} />
                     </div>
                     <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Predict with "{projectName}"</h2>
@@ -202,7 +202,7 @@ const PredictModal: React.FC<PredictModalProps> = ({ projectId, projectName, onC
                                 <div className="panel-title" style={{ fontSize: '0.95rem' }}>Result{results.length > 1 ? `s (${results.length})` : ''}</div>
                                 {results.length === 1 ? (
                                     <div className="glass-panel" style={{ padding: '1rem 1.2rem' }}>
-                                        <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#22c55e' }}>
+                                        <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--color-success)' }}>
                                             {String(results[0].prediction)}
                                         </div>
                                         {results[0].confidence != null && (
@@ -218,7 +218,7 @@ const PredictModal: React.FC<PredictModalProps> = ({ projectId, projectName, onC
                                                         <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem' }}>
                                                             <span style={{ minWidth: 70, fontFamily: 'var(--font-mono)' }}>{cls}</span>
                                                             <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 4 }}>
-                                                                <div style={{ width: `${p * 100}%`, height: '100%', background: '#8b5cf6', borderRadius: 4 }} />
+                                                                <div style={{ width: `${p * 100}%`, height: '100%', background: 'var(--color-accent)', borderRadius: 4 }} />
                                                             </div>
                                                             <span className="text-muted" style={{ minWidth: 42, textAlign: 'right' }}>{(p * 100).toFixed(1)}%</span>
                                                         </div>

@@ -5,6 +5,7 @@ import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import HelpButton from '../components/help/HelpButton';
 import AskButton from '../components/chatbot/AskButton';
+import { Check, FolderOpen, HeartPulse, Info, Lightbulb, RotateCcw, Table2, Target, TriangleAlert, Upload } from 'lucide-react';
 
 interface ColumnInfo {
     name: string;
@@ -290,7 +291,7 @@ const Dataset: React.FC = () => {
                     className="btn btn-secondary btn-sm"
                     style={{ position: 'absolute', top: 0, right: 0 }}
                 >
-                    ↻ Clear
+                    <RotateCcw size={13} aria-hidden="true" /> Clear
                 </button>
             </div>
 
@@ -307,7 +308,7 @@ const Dataset: React.FC = () => {
 
             {/* Step 1: Upload */}
             <div className={`glass-panel ${step >= 2 ? 'hidden' : ''}`} id="upload-section">
-                <div className="panel-title"><span className="pt-icon">📁</span> Upload Dataset</div>
+                <div className="panel-title"><span className="pt-icon"><FolderOpen size={18} strokeWidth={1.75} /></span> Upload Dataset</div>
                 <div
                     className={`upload-zone ${isDragging ? 'dragover' : ''}`}
                     onDragOver={handleDragOver}
@@ -315,7 +316,7 @@ const Dataset: React.FC = () => {
                     onDrop={handleDrop}
                     onClick={openFileDialog}
                 >
-                    <div className="upload-icon">⬆️</div>
+                    <div className="upload-icon"><Upload size={22} strokeWidth={1.75} aria-hidden="true" /></div>
                     <h3>Drag & drop your file here</h3>
                     <p>or click to browse — CSV, TSV, Excel, JSON, Parquet, Word/HTML tables (max 100 MB)</p>
                     <input
@@ -362,9 +363,9 @@ const Dataset: React.FC = () => {
                 <>
                     <div className="glass-panel">
                         <div className="flex-between mb-2">
-                            <div className="panel-title mb-0"><span className="pt-icon">👁️</span> Data Preview</div>
+                            <div className="panel-title mb-0"><span className="pt-icon"><Table2 size={18} strokeWidth={1.75} /></span> Data Preview</div>
                             <div>
-                                <span className="badge badge-success">✓ {filename}</span>
+                                <span className="badge badge-success"><Check size={12} aria-hidden="true" /> {filename}</span>
                             </div>
                         </div>
 
@@ -395,7 +396,7 @@ const Dataset: React.FC = () => {
 
                     {health.length > 0 && (
                         <div className="glass-panel">
-                            <div className="panel-title"><span className="pt-icon">🩺</span> Dataset Health</div>
+                            <div className="panel-title"><span className="pt-icon"><HeartPulse size={18} strokeWidth={1.75} /></span> Dataset Health</div>
                             <p className="text-muted mb-2">
                                 Automatic checks on your data — worth a look before training.
                                 {selectedTarget ? '' : ' Pick a target column to also check class balance and leakage.'}
@@ -403,13 +404,14 @@ const Dataset: React.FC = () => {
                             {health.map((w, i) => (
                                 <div
                                     key={`${w.code}-${i}`}
-                                    className="info-banner"
-                                    style={{
-                                        borderLeft: `3px solid ${w.level === 'warning' ? '#f5a623' : '#6ab0ff'}`,
-                                        marginBottom: 8,
-                                    }}
+                                    className={`info-banner${w.level === 'warning' ? ' info-banner--warning' : ''}`}
+                                    style={{ marginBottom: 'var(--space-2)' }}
                                 >
-                                    <span className="info-banner-icon">{w.level === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                                    <span className="info-banner-icon">
+                                        {w.level === 'warning'
+                                            ? <TriangleAlert size={16} aria-label="Warning" />
+                                            : <Info size={16} aria-label="Note" />}
+                                    </span>
                                     <div>
                                         <strong>{w.title}</strong>
                                         <div className="text-muted">{w.detail}</div>
@@ -421,13 +423,13 @@ const Dataset: React.FC = () => {
 
                     <div className="glass-panel">
                         <div className="panel-title">
-                            <span className="pt-icon">🎯</span> Select Columns
+                            <span className="pt-icon"><Target size={18} strokeWidth={1.75} /></span> Select Columns
                             <HelpButton topic="features_target" />
                             <AskButton topic="features_target" />
                         </div>
 
                         <div className="info-banner">
-                            <span className="info-banner-icon">💡</span>
+                            <span className="info-banner-icon"><Lightbulb size={16} aria-hidden="true" /></span>
                             <div>
                                 <strong>Features</strong> are the inputs the model uses to make a prediction
                                 (e.g. <em>hours_studied</em>, <em>attendance_rate</em>). The <strong>target</strong> is the value

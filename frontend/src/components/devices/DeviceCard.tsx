@@ -13,9 +13,9 @@ interface DeviceCardProps {
 export const DEVICE_CARD_HEIGHT = 212;
 
 const STATUS_META: Record<Device['status'], { label: string; color: string; bg: string }> = {
-    available: { label: 'Available', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
-    busy: { label: 'Training', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-    offline: { label: 'Offline', color: '#8b8ba7', bg: 'rgba(139,139,167,0.10)' },
+    available: { label: 'Available', color: 'var(--color-success)', bg: 'oklch(0.78 0.15 155 / 0.12)' },
+    busy: { label: 'Training', color: 'var(--color-warning)', bg: 'oklch(0.82 0.14 75 / 0.12)' },
+    offline: { label: 'Offline', color: 'var(--color-fg-2)', bg: 'oklch(0.7 0.02 285 / 0.10)' },
 };
 
 const SpecStat: React.FC<{ value: React.ReactNode; label: string }> = ({ value, label }) => (
@@ -60,9 +60,9 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
                 cursor: selectable ? 'pointer' : 'not-allowed',
                 opacity: device.status === 'offline' ? 0.6 : 1,
                 border: selected
-                    ? '1px solid rgba(139,92,246,0.85)'
+                    ? '1px solid oklch(0.68 0.17 283 / 0.85)'
                     : '1px solid rgba(255,255,255,0.10)',
-                boxShadow: selected ? '0 0 22px -4px rgba(139,92,246,0.45)' : undefined,
+                boxShadow: selected ? '0 0 22px -4px oklch(0.68 0.17 283 / 0.45)' : undefined,
                 transition: 'border-color 0.2s, box-shadow 0.2s, opacity 0.2s',
                 display: 'flex',
                 flexDirection: 'column',
@@ -74,8 +74,8 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
                     flexShrink: 0,
                     width: 38, height: 38, borderRadius: 10,
                     display: 'grid', placeItems: 'center',
-                    background: device.is_shared ? 'rgba(6,182,212,0.14)' : 'rgba(139,92,246,0.14)',
-                    color: device.is_shared ? '#06b6d4' : '#8b5cf6',
+                    background: device.is_shared ? 'oklch(0.74 0.12 272 / 0.14)' : 'oklch(0.68 0.17 283 / 0.14)',
+                    color: device.is_shared ? 'var(--color-accent-text)' : 'var(--color-accent)',
                 }}>
                     {device.is_shared ? <Server size={19} /> : <Laptop size={19} />}
                 </div>
@@ -131,13 +131,13 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
                 }}>
                     {specs.accelerator === 'cpu'
                         ? <Cpu size={13} style={{ flexShrink: 0 }} />
-                        : <Sparkles size={13} style={{ color: '#8b5cf6', flexShrink: 0 }} />}
+                        : <Sparkles size={13} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />}
                     {specs.accelerator_label || 'CPU only'}
                 </span>
 
                 {device.status === 'busy' && device.job ? (
                     <span
-                        style={{ fontSize: '0.72rem', color: selected ? '#8b5cf6' : status.color, fontFamily: 'var(--font-mono)', flexShrink: 0 }}
+                        style={{ fontSize: '0.72rem', color: selected ? 'var(--color-accent)' : status.color, fontFamily: 'var(--font-mono)', flexShrink: 0 }}
                         title={`Training now: epoch ${device.job.epoch}/${device.job.total_epochs}`
                             + (waiting ? ` — ${waiting} more waiting` : '')}
                     >
@@ -148,7 +148,7 @@ const DeviceCard: React.FC<DeviceCardProps> = ({ device, selected, onSelect }) =
                 ) : selected ? (
                     <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-                        fontSize: '0.74rem', fontWeight: 700, color: '#8b5cf6', flexShrink: 0,
+                        fontSize: '0.74rem', fontWeight: 700, color: 'var(--color-accent)', flexShrink: 0,
                     }}>
                         <Check size={13} /> Selected
                     </span>

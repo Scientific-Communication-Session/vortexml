@@ -1,0 +1,88 @@
+/* Training dashboard: page-specific pieces. Shared panels live in styles/app.css. */
+
+.tr-aside { font-size: var(--text-sm); color: var(--color-fg-2); }
+
+/* Device picker */
+.tr-devices {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
+    gap: var(--space-4);
+}
+.tr-add-device {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    border-radius: var(--radius-lg);
+    border: 1px dashed var(--color-line-strong);
+    background: oklch(1 0 0 / 0.02);
+    font-family: var(--font-sans);
+    color: var(--color-fg-2);
+    cursor: pointer;
+    transition: border-color var(--dur-micro), color var(--dur-micro), background-color var(--dur-micro);
+}
+.tr-add-device:hover { border-color: var(--color-accent); color: var(--color-fg); background: var(--color-accent-soft); }
+.tr-add-device:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.tr-add-device__title { font-size: var(--text-sm); font-weight: 600; }
+.tr-add-device__hint { font-size: var(--text-xs); color: var(--color-fg-3); }
+
+/* System strip */
+.tr-sys { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+.tr-sys__title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-fg-2);
+}
+.tr-sys__metrics { display: flex; flex: 1; flex-wrap: wrap; justify-content: space-around; gap: var(--space-2); }
+.tr-sys__metric { flex: 1 1 72px; min-width: 72px; text-align: center; }
+.tr-sys__value { font-size: var(--text-lg); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-fg); }
+.tr-sys__label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--color-fg-3);
+}
+.tr-sys__label i { width: 8px; height: 8px; border-radius: 50%; }
+
+/* Progress */
+.tr-progress__label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-fg-2);
+}
+.tr-progress__value { font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--color-fg-2); }
+
+/* Loss above, accuracy below: two charts, one scale each */
+.chart-container.tr-chart--split { height: 240px; }
+.tr-acc { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--color-line); }
+.tr-acc__title { margin: 0 0 var(--space-2); font-size: var(--text-sm); font-weight: 500; color: var(--color-fg-2); }
+.tr-acc__chart { position: relative; height: 140px; }
+
+/* Log actions */
+.tr-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.log-icon { display: inline-block; vertical-align: -2px; margin-right: 2px; }
+
+@keyframes tr-spin { to { transform: rotate(360deg); } }
+.tr-spin { animation: tr-spin 0.9s linear infinite; }
+
+/* System monitor */
+.tr-monitor { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-6); }
+.tr-monitor__title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-fg-2);
+}
+.tr-monitor__chart { position: relative; height: 220px; }

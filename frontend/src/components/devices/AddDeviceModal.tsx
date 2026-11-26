@@ -55,7 +55,7 @@ const AddDeviceModal: React.FC<AddDeviceModalProps> = ({ onClose, onCreated }) =
             onClick={onClose}
             style={{
                 position: 'fixed', inset: 0, zIndex: 200,
-                background: 'rgba(8,8,16,0.72)', backdropFilter: 'blur(6px)',
+                background: 'oklch(0.12 0.008 285 / 0.72)', backdropFilter: 'blur(6px)',
                 display: 'grid', placeItems: 'center', padding: '1.5rem',
             }}
         >
@@ -78,7 +78,7 @@ const AddDeviceModal: React.FC<AddDeviceModalProps> = ({ onClose, onCreated }) =
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.4rem' }}>
                             <div style={{
                                 width: 40, height: 40, borderRadius: 10, display: 'grid', placeItems: 'center',
-                                background: 'rgba(139,92,246,0.14)', color: '#8b5cf6',
+                                background: 'oklch(0.68 0.17 283 / 0.14)', color: 'var(--color-accent)',
                             }}>
                                 <Laptop size={20} />
                             </div>
@@ -120,7 +120,7 @@ const AddDeviceModal: React.FC<AddDeviceModalProps> = ({ onClose, onCreated }) =
                 ) : (
                     <>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.5rem' }}>
-                            <CircleCheck size={22} style={{ color: '#22c55e' }} />
+                            <CircleCheck size={22} style={{ color: 'var(--color-success)' }} />
                             <h2 style={{ fontSize: '1.2rem', margin: 0 }}>"{created.nickname}" is linked</h2>
                         </div>
                         <p className="text-muted" style={{ fontSize: '0.87rem', marginBottom: '1rem' }}>
@@ -136,7 +136,7 @@ const AddDeviceModal: React.FC<AddDeviceModalProps> = ({ onClose, onCreated }) =
                                     padding: '0.4rem 0.4rem 0.4rem 0.7rem', margin: '0.4rem 0',
                                     display: 'flex', alignItems: 'center', gap: '0.45rem',
                                 }}>
-                                    <Terminal size={13} style={{ color: '#8b5cf6', flexShrink: 0 }} />
+                                    <Terminal size={13} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
                                     <span style={{ flex: 1, overflowX: 'auto', whiteSpace: 'nowrap' }}>{RUN_COMMAND}</span>
                                     <button
                                         type="button"
@@ -155,7 +155,7 @@ const AddDeviceModal: React.FC<AddDeviceModalProps> = ({ onClose, onCreated }) =
                             </li>
                             <li>Leave that window open. When it prints
                                 <em> "waiting for training jobs"</em>, the device turns
-                                <strong style={{ color: '#22c55e' }}> Available</strong> here.</li>
+                                <strong style={{ color: 'var(--color-success)' }}> Available</strong> here.</li>
                         </ol>
                         <p className="text-muted" style={{ fontSize: '0.78rem', marginBottom: '1.1rem' }}>
                             The bundle holds a pairing token for your account — keep it private.

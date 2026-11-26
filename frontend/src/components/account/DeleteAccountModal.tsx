@@ -42,7 +42,7 @@ const DeleteAccountModal: React.FC<{
             onClick={onClose}
             style={{
                 position: 'fixed', inset: 0, zIndex: 200,
-                background: 'rgba(8,8,16,0.72)', backdropFilter: 'blur(6px)',
+                background: 'oklch(0.12 0.008 285 / 0.72)', backdropFilter: 'blur(6px)',
                 display: 'grid', placeItems: 'center', padding: '1.5rem',
             }}
         >
@@ -68,7 +68,7 @@ const DeleteAccountModal: React.FC<{
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.6rem' }}>
                     <div style={{
                         width: 40, height: 40, borderRadius: 10, display: 'grid', placeItems: 'center',
-                        background: 'rgba(239,68,68,0.14)', color: '#f87171',
+                        background: 'oklch(0.68 0.18 25 / 0.14)', color: 'var(--color-danger)',
                     }}>
                         <TriangleAlert size={20} />
                     </div>
@@ -86,7 +86,7 @@ const DeleteAccountModal: React.FC<{
                     <li>your linked devices, and any enquiries you sent us</li>
                     <li>any training run of yours that is running or queued right now</li>
                 </ul>
-                <p style={{ fontSize: '0.86rem', marginBottom: '1.1rem', color: '#fca5a5' }}>
+                <p style={{ fontSize: '0.86rem', marginBottom: '1.1rem', color: 'var(--color-danger)' }}>
                     It cannot be undone. Download your data first if you want to keep a copy.
                 </p>
 
@@ -103,12 +103,12 @@ const DeleteAccountModal: React.FC<{
                     style={{
                         width: '100%', padding: '0.6rem 0.75rem', borderRadius: 10,
                         background: 'rgba(255,255,255,0.05)', color: 'inherit',
-                        border: `1px solid ${error ? 'rgba(239,68,68,0.6)' : 'rgba(255,255,255,0.12)'}`,
+                        border: `1px solid ${error ? 'oklch(0.68 0.18 25 / 0.6)' : 'rgba(255,255,255,0.12)'}`,
                         fontSize: '0.9rem', marginBottom: error ? '0.4rem' : '1.2rem',
                     }}
                 />
                 {error && (
-                    <p role="alert" style={{ fontSize: '0.82rem', color: '#f87171', marginBottom: '1rem' }}>{error}</p>
+                    <p role="alert" style={{ fontSize: '0.82rem', color: 'var(--color-danger)', marginBottom: '1rem' }}>{error}</p>
                 )}
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>

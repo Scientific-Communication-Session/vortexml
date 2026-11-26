@@ -132,9 +132,9 @@ const Survey: React.FC = () => {
                             marginBottom: '0.75rem',
                             padding: '0.75rem 1rem',
                             borderRadius: '0.75rem',
-                            border: '1px solid rgba(239, 68, 68, 0.25)',
-                            background: 'rgba(239, 68, 68, 0.07)',
-                            color: '#fca5a5',
+                            border: '1px solid oklch(0.68 0.18 25 / 0.25)',
+                            background: 'oklch(0.68 0.18 25 / 0.07)',
+                            color: 'var(--color-danger)',
                             fontSize: '0.85rem',
                             fontWeight: 500,
                         }}

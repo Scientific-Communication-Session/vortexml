@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
+import './architect.css';
 import HelpButton from '../components/help/HelpButton';
 import AskButton from '../components/chatbot/AskButton';
 import { ARCH_HELP_TOPIC } from '../components/help/help-content';
@@ -11,6 +12,18 @@ import {
     type AutoConfigProposal,
 } from '../components/auto-config/AutoConfigContext';
 import AutoConfigDrawer from '../components/auto-config/AutoConfigDrawer';
+import {
+    Boxes, CheckCircle2, Columns3, Eye, Focus, History, Layers, Microscope, Network, Package, Plus,
+    Repeat, RotateCcw, RotateCw, ScanLine, Shrink, SlidersHorizontal, Sprout, TriangleAlert, Upload,
+    Wand2, Waypoints, Zap, ChevronDown, ChevronUp, Ruler, X,
+} from 'lucide-react';
+import { SERIES, INK, tint } from '../theme/chart';
+
+// One outline icon per architecture (the API sends emoji; the UI uses one icon set).
+const ARCH_ICON: Record<string, React.ElementType> = {
+    mlp: Network, dnn: Layers, cnn1d: ScanLine, rnn: Repeat, lstm: History, gru: RotateCw,
+    autoencoder: Shrink, resnet: Waypoints, transformer: Focus, wide_deep: Columns3,
+};
 
 interface Architecture {
     key: string;
@@ -228,7 +241,7 @@ const Architect: React.FC = () => {
                     ctx.beginPath();
                     ctx.moveTo(from.x, from.y);
                     ctx.lineTo(to.x, to.y);
-                    ctx.strokeStyle = 'rgba(99, 102, 241, 0.12)';
+                    ctx.strokeStyle = tint(SERIES[0], 0.14);
                     ctx.lineWidth = 1;
                     ctx.stroke();
                 }
@@ -244,16 +257,9 @@ const Architect: React.FC = () => {
                 ctx.beginPath();
                 ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2);
 
-                if (isInput) {
-                    ctx.fillStyle = 'rgba(6, 182, 212, 0.6)';
-                    ctx.strokeStyle = 'rgba(6, 182, 212, 0.8)';
-                } else if (isOutput) {
-                    ctx.fillStyle = 'rgba(249, 115, 22, 0.6)';
-                    ctx.strokeStyle = 'rgba(249, 115, 22, 0.8)';
-                } else {
-                    ctx.fillStyle = 'rgba(139, 92, 246, 0.5)';
-                    ctx.strokeStyle = 'rgba(139, 92, 246, 0.8)';
-                }
+                const nodeColor = isInput ? SERIES[2] : isOutput ? SERIES[1] : SERIES[0];
+                ctx.fillStyle = tint(nodeColor, 0.35);
+                ctx.strokeStyle = nodeColor;
 
                 ctx.lineWidth = 2;
                 ctx.fill();
@@ -264,8 +270,8 @@ const Architect: React.FC = () => {
             if (positions[l].length > 0) {
                 const x = positions[l][0].x;
                 const bottomY = positions[l][positions[l].length - 1].y + 28;
-                ctx.fillStyle = 'rgba(157, 157, 186, 0.8)';
-                ctx.font = '11px "Space Grotesk", sans-serif';
+                ctx.fillStyle = INK.fg3;
+                ctx.font = '500 11px "Cabinet Grotesk", sans-serif';
                 ctx.textAlign = 'center';
 
                 if (isInput) {
@@ -278,7 +284,7 @@ const Architect: React.FC = () => {
 
                 // Truncation indicator
                 if (allLayers[l] > maxDisplay) {
-                    ctx.fillStyle = 'rgba(139, 92, 246, 0.6)';
+                    ctx.fillStyle = INK.fg3;
                     ctx.fillText('⋮', x, H / 2 + 4);
                 }
             }
@@ -372,7 +378,7 @@ const Architect: React.FC = () => {
                 `Loaded from your account — ${(cfg.arch_type || '').toUpperCase()}, ` +
                 `${(cfg.layer_sizes || []).join('→')} neurons · ${res.weight_filename}`,
             );
-            showToast('Saved model loaded ✓', 'success');
+            showToast('Saved model loaded', 'success');
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             showToast('Load failed: ' + msg, 'error');
@@ -512,13 +518,13 @@ const Architect: React.FC = () => {
                     className="btn btn-secondary btn-sm"
                     style={{ position: 'absolute', top: 0, right: 0 }}
                 >
-                    ↻ Clear
+                    <RotateCcw size={13} aria-hidden="true" /> Clear
                 </button>
             </div>
 
             {/* Weight Upload Zone */}
             <div className="glass-panel">
-                <div className="panel-title"><span className="pt-icon">📦</span> Load a Model</div>
+                <div className="panel-title"><span className="pt-icon"><Package size={18} strokeWidth={1.75} /></span> Load a Model</div>
                 <p className="text-muted mb-2">Continue from a model you've trained before, or upload a <code>.pt</code> weight file — either one restores the architecture and hyperparameters.</p>
 
                 {user && (
@@ -547,11 +553,7 @@ const Architect: React.FC = () => {
                             </select>
                         )}
                         {!weightsLoaded && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', margin: '0.95rem 0 0.1rem' }}>
-                                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
-                                <span className="text-muted" style={{ fontSize: '0.72rem' }}>or upload a file</span>
-                                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.08)' }} />
-                            </div>
+                            <div className="ar-or"><span>or upload a file</span></div>
                         )}
                     </div>
                 )}
@@ -571,7 +573,7 @@ const Architect: React.FC = () => {
                         }}
                     >
                         <div className="upload-zone-content">
-                            <span className="upload-zone-icon">⬆️</span>
+                            <span className="upload-zone-icon"><Upload size={22} strokeWidth={1.75} aria-hidden="true" /></span>
                             <span className="upload-zone-text">Drag & drop a <strong>.pt</strong> file here, or <span className="upload-zone-link">browse</span></span>
                         </div>
                         <input
@@ -587,7 +589,7 @@ const Architect: React.FC = () => {
 
                 {weightsLoaded && (
                     <div className="weight-upload-status">
-                        <span className="upload-status-icon">✅</span>
+                        <span className="upload-status-icon"><CheckCircle2 size={18} aria-hidden="true" /></span>
                         <span className="upload-status-text">{weightStatus}</span>
                     </div>
                 )}
@@ -599,7 +601,7 @@ const Architect: React.FC = () => {
             {/* Architecture Selection */}
             <div className="glass-panel">
                 <div className="panel-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
-                    <span><span className="pt-icon">🔬</span> Select Architecture</span>
+                    <span className="ar-title"><span className="pt-icon"><Microscope size={18} strokeWidth={1.75} /></span> Select Architecture</span>
                     {isBeginner && architectures.length > 0 && (
                         <button
                             type="button"
@@ -607,13 +609,15 @@ const Architect: React.FC = () => {
                             onClick={() => setShowAllArchs((v) => !v)}
                             title={showAllArchs ? 'Show only beginner-friendly architectures' : 'Show every architecture (advanced)'}
                         >
-                            {showAllArchs ? '◴ Beginner picks only' : '⚙ Show all architectures'}
+                            {showAllArchs
+                                ? <><Sprout size={13} aria-hidden="true" /> Beginner picks only</>
+                                : <><SlidersHorizontal size={13} aria-hidden="true" /> Show all architectures</>}
                         </button>
                     )}
                 </div>
                 {isBeginner && !showAllArchs && architectures.length > 0 && (
                     <div className="info-banner" style={{ marginTop: '0.4rem' }}>
-                        <span className="info-banner-icon">🌿</span>
+                        <span className="info-banner-icon"><Sprout size={16} aria-hidden="true" /></span>
                         <div>
                             <strong>Beginner mode:</strong> we're showing the most approachable architectures.
                             Start with <strong>MLP</strong> for any tabular problem — you can switch to “Show all” once you're comfortable.
@@ -627,7 +631,9 @@ const Architect: React.FC = () => {
                             <p className="mt-1">Loading architectures...</p>
                         </div>
                     ) : (
-                        visibleArchs.map(a => (
+                        visibleArchs.map(a => {
+                            const ArchIcon = ARCH_ICON[a.key] ?? Boxes;
+                            return (
                             <div
                                 key={a.key}
                                 className={`arch-card ${selectedArch === a.key ? 'selected' : ''}`}
@@ -638,12 +644,13 @@ const Architect: React.FC = () => {
                                     <HelpButton topic={ARCH_HELP_TOPIC[a.key] ?? 'arch_mlp'} />
                                     <AskButton topic={ARCH_HELP_TOPIC[a.key] ?? 'arch_mlp'} />
                                 </div>
-                                <div className="arch-icon">{a.icon}</div>
+                                <div className="arch-icon"><ArchIcon size={18} strokeWidth={1.75} aria-hidden="true" /></div>
                                 <div className="arch-name">{a.name}</div>
                                 <div className="arch-short">{a.short}</div>
                                 <div className="arch-desc">{a.desc}</div>
                             </div>
-                        ))
+                            );
+                        })
                     )}
                 </div>
             </div>
@@ -653,7 +660,7 @@ const Architect: React.FC = () => {
                     {/* Layer Configurator */}
                     <div className="glass-panel">
                         <div className="panel-title">
-                            <span className="pt-icon">📐</span> Configure Layers
+                            <span className="pt-icon"><Ruler size={18} strokeWidth={1.75} /></span> Configure Layers
                             <HelpButton topic="layers" />
                             <AskButton topic="layers" />
                         </div>
@@ -670,24 +677,24 @@ const Architect: React.FC = () => {
                                         className="layer-neurons"
                                         onChange={e => updateLayer(i, parseInt(e.target.value) || 0)}
                                     />
-                                    <span className="text-muted" style={{ fontSize: '0.8rem' }}>neurons</span>
+                                    <span className="ar-unit">neurons</span>
                                     <button
                                         className="remove-layer"
                                         onClick={() => handleRemoveLayer(i)}
                                         disabled={layers.length <= 1}
                                         style={{ opacity: layers.length <= 1 ? 0.3 : 1 }}
-                                    >×</button>
+                                     aria-label={`Remove layer ${i + 1}`}><X size={14} aria-hidden="true" /></button>
                                 </div>
                             ))}
                         </div>
                         <div className="mt-2">
-                            <button className="btn btn-secondary btn-sm" onClick={handleAddLayer}>+ Add Layer</button>
+                            <button className="btn btn-secondary btn-sm" onClick={handleAddLayer}><Plus size={14} aria-hidden="true" /> Add Layer</button>
                         </div>
                     </div>
 
                     {/* Hyperparameters */}
                     <div className="glass-panel">
-                        <div className="panel-title"><span className="pt-icon">⚙️</span> Hyperparameters</div>
+                        <div className="panel-title"><span className="pt-icon"><SlidersHorizontal size={18} strokeWidth={1.75} /></span> Hyperparameters</div>
                         <div className="form-row">
                             <div className="form-group">
                                 <label className="form-label">Epochs <HelpButton topic="epochs" /><AskButton topic="epochs" /></label>
@@ -771,7 +778,9 @@ const Architect: React.FC = () => {
                                     onClick={() => setShowAdvanced((v) => !v)}
                                     title="Show / hide expert-only settings"
                                 >
-                                    {showAdvanced ? '▴ Hide advanced options' : '▾ Show advanced options (Early Stopping)'}
+                                    {showAdvanced
+                                        ? <><ChevronUp size={14} aria-hidden="true" /> Hide advanced options</>
+                                        : <><ChevronDown size={14} aria-hidden="true" /> Show advanced options (Early Stopping)</>}
                                 </button>
                             </div>
                         )}
@@ -788,13 +797,13 @@ const Architect: React.FC = () => {
 
                     {/* Canvas Preview */}
                     <div className="glass-panel">
-                        <div className="panel-title"><span className="pt-icon">👁️</span> Architecture Preview</div>
+                        <div className="panel-title"><span className="pt-icon"><Eye size={18} strokeWidth={1.75} /></span> Architecture Preview</div>
                         <canvas ref={canvasRef} className="network-viz" style={{ width: '100%', height: '300px' }}></canvas>
                     </div>
 
                     <div className="action-row">
-                        <button className="btn btn-secondary" onClick={() => navigate('/dataset')}>← Back to Dataset</button>
-                        <button className="btn btn-primary" ref={startTrainingBtnRef} onClick={handleStartTraining}>Start Training ⚡</button>
+                        <button className="btn btn-secondary" onClick={() => navigate('/dataset')}>Back to Dataset</button>
+                        <button className="btn btn-primary" ref={startTrainingBtnRef} onClick={handleStartTraining}>Start Training <Zap size={14} aria-hidden="true" /></button>
                     </div>
                 </>
             )}
@@ -810,25 +819,25 @@ const AutoConfigBanner: React.FC = () => {
     return (
         <div className="glass-panel auto-config-banner">
             <div className="auto-config-banner__text">
-                <div className="panel-title"><span className="pt-icon">🪄</span> Not sure what to pick?</div>
+                <div className="panel-title"><span className="pt-icon"><Wand2 size={18} strokeWidth={1.75} /></span> Not sure what to pick?</div>
                 <p className="text-muted mb-0">
                     Let an AI co-pilot choose the architecture and hyperparameters that
                     best fit your dataset and goal — describe your problem in plain words.
                 </p>
                 {!isAvailable && unavailableReason && (
-                    <p className="text-muted mb-0" style={{ marginTop: '0.4rem', fontSize: '0.78rem' }}>
-                        ⚠️ {unavailableReason}
+                    <p className="ar-unavailable">
+                        <TriangleAlert size={13} aria-hidden="true" /> {unavailableReason}
                     </p>
                 )}
             </div>
             <button
                 type="button"
-                className="btn btn-primary auto-config-banner__btn"
+                className="btn btn-secondary auto-config-banner__btn"
                 onClick={open}
                 disabled={!isAvailable}
                 title={isAvailable ? 'Open the AI Auto-Configure assistant' : unavailableReason || 'Unavailable'}
             >
-                🪄 AI Auto-Configure
+                <Wand2 size={14} aria-hidden="true" /> AI Auto-Configure
             </button>
         </div>
     );

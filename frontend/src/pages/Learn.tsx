@@ -62,7 +62,7 @@ const Learn: React.FC = () => {
                 <div
                     role="tablist"
                     aria-label="Learning mode"
-                    className="relative inline-flex items-center gap-1 p-1.5 rounded-full border border-white/[0.08] bg-[rgba(14,14,36,0.55)] backdrop-blur-2xl shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_4px_24px_-8px_rgba(99,102,241,0.15)]"
+                    className="relative inline-flex items-center gap-1 p-1.5 rounded-full border border-white/[0.08] bg-[rgba(14,14,36,0.55)] backdrop-blur-2xl shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_4px_24px_-8px_oklch(0.68_0.17_283/0.15)]"
                 >
                     {tabs.map((tab) => {
                         const isActive = activeTab === tab.id;
@@ -79,7 +79,7 @@ const Learn: React.FC = () => {
                                 {isActive && (
                                     <motion.span
                                         layoutId="learn-tab-pill"
-                                        className="absolute inset-0 rounded-full bg-gradient-to-br from-white/[0.13] to-white/[0.05] border border-white/[0.14] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_24px_-4px_rgba(139,92,246,0.35)]"
+                                        className="absolute inset-0 rounded-full bg-gradient-to-br from-white/[0.13] to-white/[0.05] border border-white/[0.14] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_24px_-4px_oklch(0.68_0.17_283/0.35)]"
                                         transition={{
                                             type: 'spring',
                                             stiffness: 380,

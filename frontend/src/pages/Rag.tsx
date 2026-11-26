@@ -297,7 +297,7 @@ const Rag: React.FC = () => {
                                 style={{
                                     cursor: 'pointer', padding: '0.6rem 0.7rem', borderRadius: 10,
                                     border: '1px solid rgba(255,255,255,0.1)',
-                                    background: selected?.id === kb.id ? 'rgba(139,92,246,0.14)' : 'rgba(255,255,255,0.03)',
+                                    background: selected?.id === kb.id ? 'oklch(0.68 0.17 283 / 0.14)' : 'rgba(255,255,255,0.03)',
                                     display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem',
                                 }}>
                                 <div style={{ minWidth: 0 }}>
@@ -389,11 +389,11 @@ const Rag: React.FC = () => {
                                                     {cat.models.map((m) => {
                                                         const inUse = isActiveModel(cat.backend, m.id);
                                                         return (
-                                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'rgba(139,92,246,0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', borderLeft: inUse ? '3px solid #8b5cf6' : '1px solid rgba(255,255,255,0.07)' }}>
+                                                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'oklch(0.68 0.17 283 / 0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', borderLeft: inUse ? '3px solid var(--color-accent)' : '1px solid rgba(255,255,255,0.07)' }}>
                                                             <div style={{ minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                                {m.downloaded ? <Check size={12} style={{ color: '#22c55e', verticalAlign: 'middle', marginRight: 4 }} /> : null}{m.id}
+                                                                {m.downloaded ? <Check size={12} style={{ color: 'var(--color-success)', verticalAlign: 'middle', marginRight: 4 }} /> : null}{m.id}
                                                                 {m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
-                                                                {inUse ? <span className="bento-tag bento-tag-sm" style={{ marginLeft: 6, background: 'rgba(139,92,246,0.18)', color: '#c4b5fd' }}><Check size={10} style={{ verticalAlign: 'middle', marginRight: 2 }} />In use</span> : null}
+                                                                {inUse ? <span className="bento-tag bento-tag-sm" style={{ marginLeft: 6, background: 'oklch(0.68 0.17 283 / 0.18)', color: 'var(--color-accent-text)' }}><Check size={10} style={{ verticalAlign: 'middle', marginRight: 2 }} />In use</span> : null}
                                                             </div>
                                                             <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
                                                                 {m.downloaded ? (
@@ -455,11 +455,11 @@ const Rag: React.FC = () => {
                                                 {[...installed.hf.map((m) => ({ ...m, source: 'transformers' })), ...installed.ollama.map((m) => ({ ...m, source: 'ollama' }))].map((m) => {
                                                     const inUse = isActiveModel(m.source, m.id);
                                                     return (
-                                                    <div key={m.source + m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'rgba(139,92,246,0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', borderLeft: inUse ? '3px solid #8b5cf6' : '1px solid rgba(255,255,255,0.07)' }}>
+                                                    <div key={m.source + m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.4rem 0.6rem', background: inUse ? 'oklch(0.68 0.17 283 / 0.08)' : 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.07)', borderLeft: inUse ? '3px solid var(--color-accent)' : '1px solid rgba(255,255,255,0.07)' }}>
                                                         <div style={{ minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {m.id}{m.size_bytes ? <span className="text-muted"> · {fmtSize(m.size_bytes)}</span> : null}
                                                             <span className="text-muted"> · {m.source === 'ollama' ? 'Ollama' : 'HF'}</span>
-                                                            {inUse ? <span className="bento-tag bento-tag-sm" style={{ marginLeft: 6, background: 'rgba(139,92,246,0.18)', color: '#c4b5fd' }}><Check size={10} style={{ verticalAlign: 'middle', marginRight: 2 }} />In use</span> : null}
+                                                            {inUse ? <span className="bento-tag bento-tag-sm" style={{ marginLeft: 6, background: 'oklch(0.68 0.17 283 / 0.18)', color: 'var(--color-accent-text)' }}><Check size={10} style={{ verticalAlign: 'middle', marginRight: 2 }} />In use</span> : null}
                                                         </div>
                                                         <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0 }}>
                                                             <button className={`btn btn-sm ${inUse ? 'btn-primary' : 'btn-secondary'}`} onClick={() => selectModel(m.source, m.id)}>{inUse ? 'In use' : 'Use'}</button>
@@ -492,13 +492,13 @@ const Rag: React.FC = () => {
                                                 <div key={b.key} onClick={() => pickBackend(b)}
                                                     style={{
                                                         cursor: 'pointer', padding: '0.7rem 0.85rem', borderRadius: 10,
-                                                        border: `1px solid ${backend === b.key ? 'rgba(139,92,246,0.6)' : 'rgba(255,255,255,0.1)'}`,
-                                                        background: backend === b.key ? 'rgba(139,92,246,0.1)' : 'rgba(255,255,255,0.02)',
+                                                        border: `1px solid ${backend === b.key ? 'oklch(0.68 0.17 283 / 0.6)' : 'rgba(255,255,255,0.1)'}`,
+                                                        background: backend === b.key ? 'oklch(0.68 0.17 283 / 0.1)' : 'rgba(255,255,255,0.02)',
                                                     }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                                         <strong style={{ fontSize: '0.92rem' }}>{b.label}</strong>
                                                         {b.recommended && <span className="bento-tag bento-tag-sm">★ recommended</span>}
-                                                        <span className="bento-tag bento-tag-sm" style={{ background: b.available ? 'rgba(34,197,94,0.15)' : 'rgba(245,166,35,0.15)' }}>
+                                                        <span className="bento-tag bento-tag-sm" style={{ background: b.available ? 'oklch(0.78 0.15 155 / 0.15)' : 'rgba(245,166,35,0.15)' }}>
                                                             {b.available ? '● available' : '○ not installed'}
                                                         </span>
                                                         <span className="text-muted" style={{ fontSize: '0.74rem' }}>{b.tagline}</span>
@@ -624,10 +624,10 @@ const DownloadBar: React.FC<{
     const phase = p?.phase || 'Downloading…';
     const width = determinate ? Math.min(100, Math.max(0, pct as number)) : 100;
     return (
-        <div style={{ marginTop: '0.6rem', padding: '0.55rem 0.7rem', background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: 10 }}>
+        <div style={{ marginTop: '0.6rem', padding: '0.55rem 0.7rem', background: 'oklch(0.68 0.17 283 / 0.06)', border: '1px solid oklch(0.68 0.17 283 / 0.25)', borderRadius: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
                 <div style={{ minWidth: 0, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <Download size={12} style={{ verticalAlign: 'middle', marginRight: 5, color: '#8b5cf6' }} />
+                    <Download size={12} style={{ verticalAlign: 'middle', marginRight: 5, color: 'var(--color-accent)' }} />
                     <span style={{ fontFamily: 'var(--font-mono)' }}>{name}</span>
                     <span className="text-muted"> · {phase}</span>
                 </div>
@@ -641,7 +641,7 @@ const DownloadBar: React.FC<{
                 <div className={determinate ? '' : 'dl-indeterminate'}
                     style={{
                         height: '100%', width: `${width}%`,
-                        background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)',
+                        background: 'linear-gradient(90deg, var(--color-accent), var(--color-accent-text))',
                         borderRadius: 6, transition: determinate ? 'width 0.2s ease' : undefined,
                     }} />
             </div>

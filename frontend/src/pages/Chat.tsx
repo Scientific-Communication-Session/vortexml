@@ -282,8 +282,8 @@ const Chat: React.FC = () => {
                                 style={{
                                     cursor: 'pointer', padding: '0.5rem 0.6rem', borderRadius: 8,
                                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem',
-                                    background: activeId === c.id ? 'rgba(139,92,246,0.14)' : 'transparent',
-                                    border: '1px solid ' + (activeId === c.id ? 'rgba(139,92,246,0.3)' : 'transparent'),
+                                    background: activeId === c.id ? 'oklch(0.68 0.17 283 / 0.14)' : 'transparent',
+                                    border: '1px solid ' + (activeId === c.id ? 'oklch(0.68 0.17 283 / 0.3)' : 'transparent'),
                                 }}>
                                 {editingId === c.id ? (
                                     <input autoFocus value={editTitle} onClick={(e) => e.stopPropagation()}
@@ -344,8 +344,8 @@ const Chat: React.FC = () => {
                         </select>
                         {activeBackend?.supports_thinking && (
                             <label title="Let the model reason step-by-step before answering (slower, often more accurate)"
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', cursor: 'pointer', userSelect: 'none', padding: '0.4rem 0.62rem', borderRadius: 8, border: '1px solid ' + (settings.reasoning ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.12)'), background: settings.reasoning ? 'rgba(139,92,246,0.18)' : 'rgba(255,255,255,0.05)' }}>
-                                <input type="checkbox" checked={settings.reasoning} onChange={(e) => patchSettings({ reasoning: e.target.checked })} style={{ accentColor: '#8b5cf6', margin: 0 }} />
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', cursor: 'pointer', userSelect: 'none', padding: '0.4rem 0.62rem', borderRadius: 8, border: '1px solid ' + (settings.reasoning ? 'oklch(0.68 0.17 283 / 0.5)' : 'rgba(255,255,255,0.12)'), background: settings.reasoning ? 'oklch(0.68 0.17 283 / 0.18)' : 'rgba(255,255,255,0.05)' }}>
+                                <input type="checkbox" checked={settings.reasoning} onChange={(e) => patchSettings({ reasoning: e.target.checked })} style={{ accentColor: 'var(--color-accent)', margin: 0 }} />
                                 💭 Reasoning
                             </label>
                         )}
@@ -354,7 +354,7 @@ const Chat: React.FC = () => {
                     {/* messages */}
                     <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.9rem', paddingRight: '0.3rem' }}>
                         {messages.length === 0 && !sending && (
-                            <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-muted, #9d9dba)' }}>
+                            <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-muted, var(--color-fg-2))' }}>
                                 <div style={{ fontSize: '2.5rem' }}>💬</div>
                                 <p>Ask anything to start the conversation.</p>
                             </div>
@@ -363,7 +363,7 @@ const Chat: React.FC = () => {
                             <div key={m.id != null ? `m${m.id}` : `i${i}`} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
                                 <div style={{
                                     maxWidth: '80%', padding: '0.7rem 0.95rem', borderRadius: 14, fontSize: '0.92rem', lineHeight: 1.5,
-                                    background: m.role === 'user' ? 'rgba(139,92,246,0.22)' : 'rgba(255,255,255,0.05)',
+                                    background: m.role === 'user' ? 'oklch(0.68 0.17 283 / 0.22)' : 'rgba(255,255,255,0.05)',
                                     border: '1px solid rgba(255,255,255,0.08)',
                                 }}>
                                     {m.role === 'user' ? (
@@ -375,10 +375,10 @@ const Chat: React.FC = () => {
                                             <>
                                                 {reasoning && (
                                                     <details open={thinkingPhase} style={{ marginBottom: answer || !m.streaming ? '0.5rem' : 0 }}>
-                                                        <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-muted, #9d9dba)', userSelect: 'none' }}>
+                                                        <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-muted, var(--color-fg-2))', userSelect: 'none' }}>
                                                             💭 Reasoning{thinkingPhase ? '…' : ''}
                                                         </summary>
-                                                        <div className="markdown-body" style={{ fontSize: '0.82rem', opacity: 0.8, marginTop: '0.35rem', paddingLeft: '0.65rem', borderLeft: '2px solid rgba(139,92,246,0.4)' }}>
+                                                        <div className="markdown-body" style={{ fontSize: '0.82rem', opacity: 0.8, marginTop: '0.35rem', paddingLeft: '0.65rem', borderLeft: '2px solid oklch(0.68 0.17 283 / 0.4)' }}>
                                                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{reasoning + (thinkingPhase ? ' ▍' : '')}</ReactMarkdown>
                                                         </div>
                                                     </details>

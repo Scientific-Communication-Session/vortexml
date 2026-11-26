@@ -276,7 +276,7 @@ export const TutorialGuide: React.FC = () => {
                     <div className="tt-account">
                         {user ? (
                             <>
-                                <CircleCheck size={18} style={{ color: '#4ade80' }} />
+                                <CircleCheck size={18} style={{ color: 'var(--color-success)' }} />
                                 <span>
                                     Signed in as <strong>{user.username}</strong> — the model you train will be saved to your account.
                                     {!user.is_beginner && <> You are in <strong>Expert</strong> mode, which hides the AI tutor: switch to Novice on your <Link to="/profile" className="vx-link">Profile</Link> to follow steps 3 and 5.</>}
@@ -284,7 +284,7 @@ export const TutorialGuide: React.FC = () => {
                             </>
                         ) : (
                             <>
-                                <UserRound size={18} style={{ color: '#a78bfa' }} />
+                                <UserRound size={18} style={{ color: 'var(--color-accent-text)' }} />
                                 <span>
                                     <strong>It is free, and the rest of the tutorial needs it:</strong> the AI tutor, the
                                     co-pilot, saved models and the Predict page all work only when you are signed in.
@@ -659,11 +659,11 @@ export const TutorialGuide: React.FC = () => {
                                             <i style={{
                                                 width: `${e.mean}%`,
                                                 background: e.mean >= 90
-                                                    ? 'linear-gradient(90deg, #22c55e, #4ade80)'
-                                                    : 'linear-gradient(90deg, #f59e0b, #f97316)',
+                                                    ? 'linear-gradient(90deg, var(--color-success), var(--color-success))'
+                                                    : 'linear-gradient(90deg, var(--color-warning), var(--color-warning))',
                                             }} />
                                         </span>
-                                        <b style={{ color: e.mean >= 90 ? '#4ade80' : '#fbbf24' }}>{e.mean.toFixed(1)}%</b>
+                                        <b style={{ color: e.mean >= 90 ? 'var(--color-success)' : 'var(--color-warning)' }}>{e.mean.toFixed(1)}%</b>
                                     </div>
                                     <small className="tt-kit__sub">runs ranged {e.range}%</small>
                                 </div>

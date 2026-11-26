@@ -1,0 +1,28 @@
+/* Architect page specifics. Shared panels and cards live in styles/app.css. */
+
+.ar-title { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+.ar-or {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: var(--space-4) 0 var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--color-fg-3);
+}
+.ar-or::before,
+.ar-or::after { content: ''; flex: 1; height: 1px; background: var(--color-line); }
+
+.ar-unit { font-size: var(--text-sm); color: var(--color-fg-3); }
+
+.ar-unavailable {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-warning);
+}
+
+/* The arch card's help buttons sit in its corner */
+.arch-card { position: relative; }
