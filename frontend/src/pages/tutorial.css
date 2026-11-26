@@ -21,7 +21,8 @@
 }
 
 .tt-rail__label {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10px;
     letter-spacing: 0.24em;
     text-transform: uppercase;
@@ -43,23 +44,24 @@
 }
 
 .tt-rail a span {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.68rem;
     color: var(--text-muted);
     transition: color 0.25s;
 }
 
 .tt-rail a:hover {
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-rail a.is-active {
-    color: #fff;
+    color: var(--color-fg);
     border-left-color: var(--accent-2);
 }
 
 .tt-rail a.is-active span {
-    color: #c4b5fd;
+    color: var(--color-accent-text);
 }
 
 /* ─── The kit ─── */
@@ -90,7 +92,7 @@
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
-    color: #c4b5fd;
+    color: var(--color-accent-text);
 }
 
 .tt-kit h3 {
@@ -129,7 +131,7 @@
 .tt-cols td:first-child {
     font-family: var(--font-mono);
     font-size: 0.76rem;
-    color: #c4b5fd;
+    color: var(--color-accent-text);
     padding-right: 1rem;
     white-space: nowrap;
 }
@@ -153,8 +155,8 @@
     margin: 0.9rem 0 1rem;
     padding: 1rem 1.1rem;
     border-radius: 14px;
-    border: 1px solid rgba(139, 92, 246, 0.3);
-    background: rgba(139, 92, 246, 0.07);
+    border: 1px solid oklch(0.68 0.17 283 / 0.3);
+    background: oklch(0.68 0.17 283 / 0.07);
     font-size: 0.95rem;
     line-height: 1.6;
     color: rgba(240, 240, 255, 0.92);
@@ -168,7 +170,7 @@
     font-family: var(--font-display);
     font-size: 2.6rem;
     line-height: 1;
-    color: rgba(168, 85, 247, 0.7);
+    color: oklch(0.68 0.17 283 / 0.7);
 }
 
 .tt-account {
@@ -220,16 +222,18 @@
     height: 46px;
     flex-shrink: 0;
     border-radius: 14px;
-    border: 1px solid rgba(139, 92, 246, 0.45);
-    background: linear-gradient(150deg, rgba(99, 102, 241, 0.28), rgba(168, 85, 247, 0.08));
-    font-family: var(--font-mono);
+    border: 1px solid oklch(0.68 0.17 283 / 0.45);
+    background: linear-gradient(150deg, oklch(0.68 0.17 283 / 0.28), oklch(0.68 0.17 283 / 0.08));
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 1rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-step__where {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10.5px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
@@ -238,12 +242,12 @@
 }
 
 .tt-step__where a {
-    color: #c4b5fd;
+    color: var(--color-accent-text);
     text-decoration: none;
 }
 
 .tt-step__where a:hover {
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-step h2 {
@@ -255,7 +259,7 @@
 
 .tt-step h2 em {
     font-family: var(--font-display);
-    font-style: italic;
+    font-style: normal;
     font-weight: 400;
 }
 
@@ -270,19 +274,20 @@
     padding: 1.15rem 1.25rem;
     border-radius: 18px;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(14, 14, 36, 0.6);
+    background: oklch(0.135 0.008 285 / 0.6);
 }
 
 .tt-card--changes {
-    border-color: rgba(6, 182, 212, 0.28);
-    background: linear-gradient(160deg, rgba(6, 182, 212, 0.09), rgba(14, 14, 36, 0.6) 60%);
+    border-color: oklch(0.68 0.17 283 / 0.28);
+    background: linear-gradient(160deg, oklch(0.68 0.17 283 / 0.09), oklch(0.135 0.008 285 / 0.6) 60%);
 }
 
 .tt-card__label {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 10.5px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
@@ -291,7 +296,7 @@
 }
 
 .tt-card--changes .tt-card__label {
-    color: #67e8f9;
+    color: var(--color-accent-text);
 }
 
 .tt-card ol,
@@ -326,11 +331,12 @@
     width: 1.2rem;
     height: 1.2rem;
     border-radius: 50%;
-    background: rgba(139, 92, 246, 0.22);
-    font-family: var(--font-mono);
+    background: oklch(0.68 0.17 283 / 0.22);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.66rem;
     font-weight: 600;
-    color: #ddd6fe;
+    color: var(--color-accent-text);
 }
 
 .tt-card ul li::before {
@@ -341,14 +347,14 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #22d3ee;
-    box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.18);
+    background: var(--accent-5);
+    box-shadow: 0 0 0 3px oklch(0.68 0.17 283 / 0.18);
 }
 
 .tt-card li b,
 .tt-card li strong {
     font-weight: 600;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-card code,
@@ -359,7 +365,7 @@
     background: rgba(255, 255, 255, 0.07);
     font-family: var(--font-mono);
     font-size: 0.82em;
-    color: #ddd6fe;
+    color: var(--color-accent-text);
 }
 
 .tt-note {
@@ -375,7 +381,7 @@
 .tt-note svg {
     flex-shrink: 0;
     margin-top: 0.16rem;
-    color: #a78bfa;
+    color: var(--color-accent-text);
 }
 
 .tt-note strong {
@@ -405,10 +411,11 @@
 }
 
 .tt-value b {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.92rem;
     font-weight: 600;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 /* Tabs (by hand / AI co-pilot) */
@@ -419,7 +426,7 @@
     margin-bottom: 1rem;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(14, 14, 36, 0.6);
+    background: oklch(0.135 0.008 285 / 0.6);
 }
 
 .tt-tabs button {
@@ -439,12 +446,12 @@
 }
 
 .tt-tabs button:hover {
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-tabs button.is-active {
     background: rgba(255, 255, 255, 0.11);
-    color: #fff;
+    color: var(--color-fg);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
@@ -466,20 +473,21 @@
 }
 
 .tt-exp__row--base {
-    border-color: rgba(34, 197, 94, 0.3);
-    background: rgba(34, 197, 94, 0.05);
+    border-color: oklch(0.78 0.15 155 / 0.3);
+    background: oklch(0.78 0.15 155 / 0.05);
 }
 
 .tt-exp__change {
     font-size: 0.92rem;
     font-weight: 500;
-    color: #fff;
+    color: var(--color-fg);
 }
 
 .tt-exp__change small {
     display: block;
     margin-top: 0.1rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.7rem;
     font-weight: 400;
     color: var(--text-muted);
@@ -517,7 +525,8 @@
 }
 
 .tt-exp__meter b {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
     font-size: 0.9rem;
     font-weight: 600;
     text-align: right;
@@ -531,11 +540,14 @@
 }
 
 @media (max-width: 1080px) {
-    .tt-layout { grid-template-columns: 1fr; gap: 0; }
+    .tt-layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .tt-rail { display: none; }
 }
 
 @media (max-width: 860px) {
-    .tt-kit, .tt-step__body { grid-template-columns: 1fr; }
-    .tt-exp__row { grid-template-columns: 1fr; gap: 0.5rem; }
+    .tt-kit, .tt-step__body { grid-template-columns: minmax(0, 1fr); }
+    .tt-exp__row { grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
 }
+
+/* Inline copies of the app's own icons inside step text */
+.tt-ico { display: inline-block; vertical-align: -2px; color: var(--color-accent-text); }

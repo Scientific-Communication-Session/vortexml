@@ -4,11 +4,12 @@ import { apiGet, showToast } from '../utils/helpers';
 import TextCourse from '../components/courses/TextCourse';
 import VideoCourse from '../components/courses/VideoCourse';
 import LabCourse from '../components/courses/LabCourse';
+import { ArrowLeft, FileText, FlaskConical, TriangleAlert, Video } from 'lucide-react';
 
-const CourseTypeIcon: Record<string, string> = {
-    text: '📄',
-    video: '🎥',
-    lab: '🔬'
+const CourseTypeIcon: Record<string, React.ElementType> = {
+    text: FileText,
+    video: Video,
+    lab: FlaskConical,
 };
 
 interface Course {
@@ -49,8 +50,8 @@ const CourseDetail: React.FC = () => {
     if (!course) {
         return (
             <div className="page-header text-center">
-                <h1>⚠️ Course Not Found</h1>
-                <button className="btn btn-primary mt-2" onClick={() => navigate('/courses')}>← Back to Courses</button>
+                <h1><TriangleAlert size={28} aria-hidden="true" style={{ verticalAlign: '-3px', color: 'var(--color-warning)' }} /> Course Not Found</h1>
+                <button className="btn btn-primary mt-2" onClick={() => navigate('/courses')}><ArrowLeft size={14} aria-hidden="true" /> Back to Courses</button>
             </div>
         );
     }
@@ -59,14 +60,14 @@ const CourseDetail: React.FC = () => {
         <div className="course-detail-container">
             <div className="flex align-center gap-1 mb-2">
                 <button className="btn btn-sm btn-ghost" onClick={() => navigate('/courses')}>
-                    ← Back
+                    <ArrowLeft size={14} aria-hidden="true" /> Back
                 </button>
             </div>
 
             <div className="page-header mb-2" style={{ textAlign: 'left', padding: 0 }}>
                 <div className="flex gap-1 align-center mb-05">
-                    <span className="course-detail-icon">{CourseTypeIcon[course.type]}</span>
-                    <span className="course-detail-type uppercase gradient-text font-mono" style={{ fontSize: '0.8rem' }}>
+                    <span className="course-detail-icon">{React.createElement(CourseTypeIcon[course.type] ?? FileText, { size: 18, strokeWidth: 1.75, 'aria-hidden': true })}</span>
+                    <span className="course-detail-type vx-label">
                         {course.type} MODULE • {course.duration}
                     </span>
                 </div>

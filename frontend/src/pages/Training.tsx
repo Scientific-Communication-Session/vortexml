@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import Chart from 'chart.js/auto';
-import { CloudCog, History, Plus } from 'lucide-react';
+import Chart, { SERIES, INK, tint, lineSeries, axis } from '../theme/chart';
+import {
+    ChartLine, CheckCircle2, CloudCog, Cpu, Download, Gauge, History, ListOrdered, LoaderCircle, Monitor,
+    Network, OctagonPause, Play, Plus, ScrollText, Sparkles, Square, Thermometer, TriangleAlert, X, Zap,
+} from 'lucide-react';
+import './training.css';
 import { apiGet, formatTime, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import { useTrainingSession } from '../context/TrainingSessionContext';
@@ -65,6 +69,9 @@ const Training: React.FC = () => {
     // Network & Chart Refs
     const chartRef = useRef<Chart | null>(null);
     const chartCanvasRef = useRef<HTMLCanvasElement>(null);
+    // Accuracy has its own chart: two measures on two scales never share an axis.
+    const accChartRef = useRef<Chart | null>(null);
+    const accCanvasRef = useRef<HTMLCanvasElement>(null);
     const networkCanvasRef = useRef<HTMLCanvasElement>(null);
     const chartJobRef = useRef<string | null>(null);
 
@@ -103,6 +110,13 @@ const Training: React.FC = () => {
 
     // Init charts
     useEffect(() => {
+        const base = {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index' as const, intersect: false },
+        };
+
+        // Loss: training and validation, one scale
         const ctx = chartCanvasRef.current?.getContext('2d');
         if (ctx) {
             chartRef.current = new Chart(ctx, {
@@ -110,77 +124,53 @@ const Training: React.FC = () => {
                 data: {
                     labels: [],
                     datasets: [
-                        {
-                            label: 'Train Loss',
-                            data: [],
-                            borderColor: '#8b5cf6',
-                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                            borderWidth: 2,
-                            fill: true,
-                            tension: 0.3,
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                        },
-                        {
-                            label: 'Val Loss',
-                            data: [],
-                            borderColor: '#06b6d4',
-                            backgroundColor: 'rgba(6, 182, 212, 0.05)',
-                            borderWidth: 2,
-                            fill: true,
-                            tension: 0.3,
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                        },
-                        {
-                            label: 'Val Accuracy',
-                            data: [],
-                            borderColor: '#22c55e',
-                            backgroundColor: 'rgba(34, 197, 94, 0.05)',
-                            borderWidth: 2,
-                            fill: false,
-                            tension: 0.3,
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                            yAxisID: 'y1',
-                            hidden: true,
-                        },
+                        lineSeries('Train Loss', 0, { fill: true }),
+                        lineSeries('Val Loss', 1),
                     ],
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    ...base,
                     animation: { duration: 300 },
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        legend: { labels: { color: '#9d9dba', font: { family: "'Space Grotesk', sans-serif", size: 12 } } },
-                    },
-                    scales: {
-                        x: {
-                            title: { display: true, text: 'Epoch', color: '#9d9dba', font: { family: "'Space Grotesk'" } },
-                            ticks: { color: '#5a5a7a', font: { family: "'JetBrains Mono'", size: 10 } },
-                            grid: { color: 'rgba(100,100,200,0.07)' },
-                        },
-                        y: {
-                            title: { display: true, text: 'Loss', color: '#9d9dba', font: { family: "'Space Grotesk'" } },
-                            ticks: { color: '#5a5a7a', font: { family: "'JetBrains Mono'", size: 10 } },
-                            grid: { color: 'rgba(100,100,200,0.07)' },
-                            position: 'left',
-                        },
-                        y1: {
-                            title: { display: true, text: 'Accuracy %', color: '#9d9dba', font: { family: "'Space Grotesk'" } },
-                            ticks: { color: '#5a5a7a', font: { family: "'JetBrains Mono'", size: 10 } },
-                            grid: { display: false },
-                            position: 'right',
-                            min: 0,
-                            max: 100,
-                        },
-                    },
+                    scales: { x: axis('Epoch'), y: axis('Loss') },
                 },
             });
         }
 
-        // Temperature chart — CPU + GPU on one graph
+        // Validation accuracy, 0–100 %
+        const actx = accCanvasRef.current?.getContext('2d');
+        if (actx) {
+            accChartRef.current = new Chart(actx, {
+                type: 'line',
+                data: { labels: [], datasets: [lineSeries('Val Accuracy', 2)] },
+                options: {
+                    ...base,
+                    animation: { duration: 300 },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: (c) => ` Val accuracy: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(1) + ' %'}` } },
+                    },
+                    scales: { x: axis('Epoch'), y: axis('Accuracy %', { min: 0, max: 100 }) },
+                },
+            });
+        }
+
+        // System monitor. CPU is slot 1 and GPU slot 2 in both charts, so each
+        // part of the machine keeps its colour.
+        const telemetry = (unit: string) => ({
+            ...base,
+            animation: { duration: 200 },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        title: () => '',
+                        label: (c: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+                            ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(1) + unit}`,
+                    },
+                },
+            },
+            scales: { x: { display: false }, y: axis(undefined, { min: 0, max: 100 }) },
+        });
+
         const tctx = tempCanvasRef.current?.getContext('2d');
         if (tctx) {
             tempChartRef.current = new Chart(tctx, {
@@ -188,66 +178,29 @@ const Training: React.FC = () => {
                 data: {
                     labels: [],
                     datasets: [
-                        { label: 'CPU °C', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.10)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, spanGaps: true },
-                        { label: 'GPU °C', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.07)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, spanGaps: true },
+                        lineSeries('CPU °C', 0, { spanGaps: true }),
+                        lineSeries('GPU °C', 1, { spanGaps: true }),
                     ],
                 },
-                options: {
-                    responsive: true, maintainAspectRatio: false, animation: { duration: 200 },
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        legend: { labels: { color: '#9d9dba', font: { family: "'Space Grotesk', sans-serif", size: 11 } } },
-                        tooltip: {
-                            mode: 'index', intersect: false,
-                            callbacks: {
-                                title: () => '',
-                                label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(1) + ' °C'}`,
-                            },
-                        },
-                    },
-                    scales: {
-                        x: { display: false },
-                        y: { min: 0, max: 100, ticks: { color: '#5a5a7a', font: { family: "'JetBrains Mono'", size: 10 } }, grid: { color: 'rgba(100,100,200,0.07)' } },
-                    },
-                },
+                options: telemetry(' °C'),
             });
         }
 
-        // Utilization chart — CPU + GPU on one graph
         const uctx = utilCanvasRef.current?.getContext('2d');
         if (uctx) {
             utilChartRef.current = new Chart(uctx, {
                 type: 'line',
                 data: {
                     labels: [],
-                    datasets: [
-                        { label: 'CPU %', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.12)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4 },
-                        { label: 'GPU %', data: [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.09)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4 },
-                    ],
+                    datasets: [lineSeries('CPU %', 0), lineSeries('GPU %', 1)],
                 },
-                options: {
-                    responsive: true, maintainAspectRatio: false, animation: { duration: 200 },
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        legend: { labels: { color: '#9d9dba', font: { family: "'Space Grotesk', sans-serif", size: 11 } } },
-                        tooltip: {
-                            mode: 'index', intersect: false,
-                            callbacks: {
-                                title: () => '',
-                                label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(1) + ' %'}`,
-                            },
-                        },
-                    },
-                    scales: {
-                        x: { display: false },
-                        y: { min: 0, max: 100, ticks: { color: '#5a5a7a', font: { family: "'JetBrains Mono'", size: 10 } }, grid: { color: 'rgba(100,100,200,0.07)' } },
-                    },
-                },
+                options: telemetry(' %'),
             });
         }
 
         return () => {
             chartRef.current?.destroy();
+            accChartRef.current?.destroy();
             tempChartRef.current?.destroy();
             utilChartRef.current?.destroy();
         };
@@ -258,12 +211,15 @@ const Training: React.FC = () => {
     // it is redrawn from the replayed history.
     useEffect(() => {
         const chart = chartRef.current;
-        if (!chart) return;
+        const acc = accChartRef.current;
+        if (!chart || !acc) return;
         const labels = (chart.data.labels ?? []) as string[];
         if (chartJobRef.current !== jobId || labels.length > history.length
             || (labels.length > 0 && history.length > 0 && labels[0] !== String(history[0].epoch))) {
-            chart.data.labels = [];
-            chart.data.datasets.forEach((ds) => { ds.data = []; });
+            for (const c of [chart, acc]) {
+                c.data.labels = [];
+                c.data.datasets.forEach((ds) => { ds.data = []; });
+            }
             chartJobRef.current = jobId;
         }
         const have = (chart.data.labels as string[]).length;
@@ -272,10 +228,11 @@ const Training: React.FC = () => {
             chart.data.labels?.push(p.epoch.toString());
             chart.data.datasets[0].data.push(p.train_loss);
             chart.data.datasets[1].data.push(p.val_loss);
-            chart.data.datasets[2].data.push(p.val_acc);
+            acc.data.labels?.push(p.epoch.toString());
+            acc.data.datasets[0].data.push(p.val_acc ?? null);
         }
-        chart.data.datasets[2].hidden = !hasAcc;
         chart.update('none');
+        acc.update('none');
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [version, jobId]);
 
@@ -395,6 +352,8 @@ const Training: React.FC = () => {
             }
 
             const pulse = (Math.sin(Date.now() / 400) + 1) / 2;
+            // Input, hidden and output layers: series slots 3, 1 and 2
+            const nodeColor = (l: number) => (l === 0 ? SERIES[2] : l === numLayers - 1 ? SERIES[1] : SERIES[0]);
 
             // Connections
             for (let l = 0; l < positions.length - 1; l++) {
@@ -404,7 +363,7 @@ const Training: React.FC = () => {
                         ctx.moveTo(from.x, from.y);
                         ctx.lineTo(to.x, to.y);
                         const alpha = isTr ? 0.06 + pulse * 0.08 : 0.08;
-                        ctx.strokeStyle = `rgba(99, 102, 241, ${alpha})`;
+                        ctx.strokeStyle = tint(SERIES[0], alpha);
                         ctx.lineWidth = 1;
                         ctx.stroke();
                     }
@@ -429,8 +388,10 @@ const Training: React.FC = () => {
 
                         ctx.beginPath();
                         ctx.arc(px, py, 3, 0, Math.PI * 2);
-                        ctx.fillStyle = `rgba(139, 92, 246, ${0.4 + pulse * 0.4})`;
+                        ctx.globalAlpha = 0.4 + pulse * 0.4;
+                        ctx.fillStyle = INK.fg;
                         ctx.fill();
+                        ctx.globalAlpha = 1;
                     }
                 }
             }
@@ -445,26 +406,16 @@ const Training: React.FC = () => {
                         ctx.beginPath();
                         ctx.arc(pos.x, pos.y, 16, 0, Math.PI * 2);
                         const g = ctx.createRadialGradient(pos.x, pos.y, 4, pos.x, pos.y, 16);
-                        if (isInput) g.addColorStop(0, `rgba(6, 182, 212, ${0.2 + pulse * 0.15})`);
-                        else if (isOutput) g.addColorStop(0, `rgba(249, 115, 22, ${0.2 + pulse * 0.15})`);
-                        else g.addColorStop(0, `rgba(139, 92, 246, ${0.2 + pulse * 0.15})`);
-                        g.addColorStop(1, 'transparent');
+                        g.addColorStop(0, tint(nodeColor(l), 0.2 + pulse * 0.15));
+                        g.addColorStop(1, tint(nodeColor(l), 0));
                         ctx.fillStyle = g;
                         ctx.fill();
                     }
 
                     ctx.beginPath();
                     ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
-                    if (isInput) {
-                        ctx.fillStyle = 'rgba(6, 182, 212, 0.7)';
-                        ctx.strokeStyle = 'rgba(6, 182, 212, 0.9)';
-                    } else if (isOutput) {
-                        ctx.fillStyle = 'rgba(249, 115, 22, 0.7)';
-                        ctx.strokeStyle = 'rgba(249, 115, 22, 0.9)';
-                    } else {
-                        ctx.fillStyle = 'rgba(139, 92, 246, 0.6)';
-                        ctx.strokeStyle = 'rgba(139, 92, 246, 0.9)';
-                    }
+                    ctx.fillStyle = tint(nodeColor(l), 0.35);
+                    ctx.strokeStyle = nodeColor(l);
                     ctx.lineWidth = 2;
                     ctx.fill();
                     ctx.stroke();
@@ -473,15 +424,15 @@ const Training: React.FC = () => {
                 if (positions[l].length > 0) {
                     const x = positions[l][0].x;
                     const bottomY = positions[l][positions[l].length - 1].y + 24;
-                    ctx.fillStyle = 'rgba(157, 157, 186, 0.7)';
-                    ctx.font = '10px "Space Grotesk", sans-serif';
+                    ctx.fillStyle = INK.fg3;
+                    ctx.font = '500 11px "Cabinet Grotesk", sans-serif';
                     ctx.textAlign = 'center';
                     if (isInput) ctx.fillText('Input', x, bottomY);
                     else if (isOutput) ctx.fillText('Output', x, bottomY);
                     else ctx.fillText(`${layerSizes[l]}n`, x, bottomY);
 
                     if (layerSizes[l] > maxDisplay) {
-                        ctx.fillStyle = 'rgba(139, 92, 246, 0.5)';
+                        ctx.fillStyle = INK.fg3;
                         ctx.fillText('⋮', x, H / 2 + 3);
                     }
                 }
@@ -536,14 +487,14 @@ const Training: React.FC = () => {
             if (final.early_stopped) {
                 lines.push({
                     key: 'es', className: 'log-entry-es',
-                    content: <span className="log-es-msg">🛑 Early stopping triggered at epoch {final.stopped_epoch}. Best weights restored.</span>,
+                    content: <span className="log-es-msg"><OctagonPause size={13} className="log-icon" aria-hidden="true" /> Early stopping triggered at epoch {final.stopped_epoch}. Best weights restored.</span>,
                 });
             }
             lines.push({
                 key: 'final', className: 'log-entry-final',
                 content: (
                     <span className="log-final">
-                        ✅ {final.message || 'Training complete!'}
+                        <CheckCircle2 size={13} className="log-icon" aria-hidden="true" /> {final.message || 'Training complete!'}
                         {final.final_train_loss != null && <> — Final loss: {final.final_train_loss.toFixed(4)}</>}
                         {final.final_val_loss != null && <> · Val loss: {final.final_val_loss.toFixed(4)}</>}
                     </span>
@@ -552,12 +503,12 @@ const Training: React.FC = () => {
         } else if (status === 'stopped') {
             lines.push({
                 key: 'stopped', className: 'log-entry-es',
-                content: <span className="log-es-msg">⏹ Training stopped{epoch ? ` at epoch ${epoch}` : ''}.</span>,
+                content: <span className="log-es-msg"><Square size={12} className="log-icon" aria-hidden="true" /> Training stopped{epoch ? ` at epoch ${epoch}` : ''}.</span>,
             });
         } else if (status === 'error') {
             lines.push({
                 key: 'error', className: 'log-entry-es',
-                content: <span className="log-es-msg">⚠️ {run.message || 'Training failed.'}</span>,
+                content: <span className="log-es-msg"><TriangleAlert size={13} className="log-icon" aria-hidden="true" /> {run.message || 'Training failed.'}</span>,
             });
         }
         return lines;
@@ -654,21 +605,19 @@ const Training: React.FC = () => {
     });
 
     const sysMetric = (label: string, value: number | null | undefined, suffix: string, color: string) => (
-        <div style={{ textAlign: 'center', flex: '1 1 70px', minWidth: 70 }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700, color }}>
-                {value == null ? '—' : Math.round(value) + suffix}
-            </div>
-            <div className="text-muted" style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                {label}
-            </div>
+        <div className="tr-sys__metric">
+            <div className="tr-sys__value">{value == null ? '—' : Math.round(value) + suffix}</div>
+            <div className="tr-sys__label"><i style={{ background: color }} aria-hidden="true" />{label}</div>
         </div>
     );
 
     const startLabel = starting
-        ? '⏳ Starting...'
+        ? <><LoaderCircle size={14} className="tr-spin" aria-hidden="true" /> Starting...</>
         : hasActiveRun
-            ? '＋ Queue another run'
-            : willQueue ? '▶ Join the queue' : '▶ Start Training';
+            ? <><Plus size={14} aria-hidden="true" /> Queue another run</>
+            : willQueue
+                ? <><Play size={13} aria-hidden="true" /> Join the queue</>
+                : <><Play size={13} aria-hidden="true" /> Start Training</>;
     const startTitle = !deviceUsable
         ? 'Select an online device above'
         : !setupReady
@@ -705,7 +654,7 @@ const Training: React.FC = () => {
                         {timeAgo(job.finished_at)} on {job.device_name || 'the server'}.
                     </span>
                     <span className="vx-banner__actions">
-                        <Link to="/dataset" className="vx-ghost-btn">＋ New run</Link>
+                        <Link to="/dataset" className="vx-ghost-btn"><Plus size={14} aria-hidden="true" /> New run</Link>
                     </span>
                 </div>
             )}
@@ -726,18 +675,14 @@ const Training: React.FC = () => {
             {/* Compute Device Picker */}
             <div className="glass-panel">
                 <div className="flex-between mb-1">
-                    <div className="panel-title mb-0"><span className="pt-icon">🖥️</span> Compute Device</div>
-                    <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                    <div className="panel-title mb-0"><span className="pt-icon"><Monitor size={18} strokeWidth={1.75} /></span> Compute Device</div>
+                    <span className="tr-aside">
                         {selectedDevice
                             ? <>Selected: <strong>{selectedDevice.nickname}</strong>{willQueue ? ' — busy, your run will queue' : ''}</>
                             : 'Choose where to train'}
                     </span>
                 </div>
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))',
-                    gap: '1rem',
-                }}>
+                <div className="tr-devices">
                     {devices.map((d) => (
                         <DeviceCard
                             key={d.id}
@@ -746,21 +691,10 @@ const Training: React.FC = () => {
                             onSelect={setSelectedDeviceId}
                         />
                     ))}
-                    <button
-                        type="button"
-                        onClick={enroll}
-                        style={{
-                            display: 'flex', flexDirection: 'column', alignItems: 'center',
-                            justifyContent: 'center', gap: '0.4rem', height: DEVICE_CARD_HEIGHT,
-                            borderRadius: 16, cursor: 'pointer', color: '#9d9dba',
-                            background: 'rgba(255,255,255,0.02)',
-                            border: '1.5px dashed rgba(255,255,255,0.16)',
-                            transition: 'border-color 0.2s, color 0.2s',
-                        }}
-                    >
-                        <Plus size={22} />
-                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Add your own device</span>
-                        <span style={{ fontSize: '0.74rem', opacity: 0.7 }}>Train on a machine you own — no queue</span>
+                    <button type="button" onClick={enroll} className="tr-add-device" style={{ height: DEVICE_CARD_HEIGHT }}>
+                        <Plus size={20} aria-hidden="true" />
+                        <span className="tr-add-device__title">Add your own device</span>
+                        <span className="tr-add-device__hint">Train on a machine you own — no queue</span>
                     </button>
                 </div>
                 <TierStrip onEnroll={enroll} onSales={openEnterprise} />
@@ -770,8 +704,8 @@ const Training: React.FC = () => {
             {jobs.length > 0 && (
                 <div className="glass-panel">
                     <div className="flex-between mb-1">
-                        <div className="panel-title mb-0"><span className="pt-icon">📋</span> Your Runs</div>
-                        <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                        <div className="panel-title mb-0"><span className="pt-icon"><ListOrdered size={18} strokeWidth={1.75} /></span> Your Runs</div>
+                        <span className="tr-aside">
                             {jobs.length === 1 ? '1 background session' : `${jobs.length} background sessions`}
                         </span>
                     </div>
@@ -792,35 +726,33 @@ const Training: React.FC = () => {
                     <div className="stat-label">Epoch <HelpButton topic="metric_epoch" size={12} /><AskButton topic="metric_epoch" size={12} /></div>
                 </div>
                 <div className="stat-card">
-                    <div className="stat-value" style={{ color: 'var(--accent-2)' }}>
+                    <div className="stat-value">
                         {lastPoint ? lastPoint.train_loss.toFixed(4) : '—'}
                     </div>
                     <div className="stat-label">Train Loss <HelpButton topic="metric_train_loss" size={12} /><AskButton topic="metric_train_loss" size={12} /></div>
                 </div>
                 <div className="stat-card">
-                    <div className="stat-value" style={{ color: hasAcc ? '#22c55e' : 'inherit' }}>
+                    <div className="stat-value">
                         {!lastPoint ? '—' : hasAcc ? lastPoint.val_acc!.toFixed(1) + '%' : lastPoint.val_loss.toFixed(4)}
                     </div>
                     <div className="stat-label">{hasAcc ? 'Val Accuracy' : 'Val Loss'} <HelpButton topic="metric_val" size={12} /><AskButton topic="metric_val" size={12} /></div>
                 </div>
                 <div className="stat-card">
-                    <div className="stat-value" style={{ color: 'var(--accent-4)' }}>{eta}</div>
+                    <div className="stat-value">{eta}</div>
                     <div className="stat-label">ETA <HelpButton topic="metric_eta" size={12} /><AskButton topic="metric_eta" size={12} /></div>
                 </div>
             </div>
 
             {/* Live system metrics from the training machine */}
             <div className="glass-panel glass-panel-sm">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.9rem', flexWrap: 'wrap' }}>
-                    <span className="text-muted" style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>
-                        ⚙ System
-                    </span>
-                    <div style={{ display: 'flex', flex: 1, gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'space-around' }}>
-                        {sysMetric('CPU', lastStat?.cpu_percent, '%', '#8b5cf6')}
-                        {sysMetric('GPU', lastStat?.gpu_percent, '%', '#06b6d4')}
-                        {sysMetric('RAM', lastStat?.ram_percent, '%', '#22c55e')}
-                        {sysMetric('CPU Temp', lastStat?.cpu_temp, '°', '#f59e0b')}
-                        {sysMetric('GPU Temp', lastStat?.gpu_temp, '°', '#ef4444')}
+                <div className="tr-sys">
+                    <span className="tr-sys__title"><Cpu size={15} strokeWidth={1.75} aria-hidden="true" /> System</span>
+                    <div className="tr-sys__metrics">
+                        {sysMetric('CPU', lastStat?.cpu_percent, '%', SERIES[0])}
+                        {sysMetric('GPU', lastStat?.gpu_percent, '%', SERIES[1])}
+                        {sysMetric('RAM', lastStat?.ram_percent, '%', SERIES[2])}
+                        {sysMetric('CPU Temp', lastStat?.cpu_temp, '°', SERIES[0])}
+                        {sysMetric('GPU Temp', lastStat?.gpu_temp, '°', SERIES[1])}
                     </div>
                 </div>
             </div>
@@ -828,10 +760,7 @@ const Training: React.FC = () => {
             {/* Progress Bar */}
             <div className="glass-panel glass-panel-sm">
                 <div className="flex-between mb-1">
-                    <span
-                        className="text-muted"
-                        style={{ fontSize: '0.85rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-                    >
+                    <span className="tr-progress__label">
                         {isQueued ? 'Waiting in the queue' : 'Training Progress'}
                         {isTraining && (
                             <span
@@ -852,15 +781,15 @@ const Training: React.FC = () => {
                                 className="es-badge"
                                 title={`Early Stopping: ${esInfo.counter}/${esInfo.patience} patience`}
                             >
-                                🛑 ES
+                                <OctagonPause size={12} aria-hidden="true" /> ES
                             </span>
                         )}
-                        <span className="text-muted" style={{ fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>
+                        <span className="tr-progress__value">
                             {isQueued && job ? `#${job.position} in line` : `${progressPct}%`}
                         </span>
                     </div>
                 </div>
-                <div className={`progress-bar-container ${isQueued ? 'vx-bar--waiting' : ''}`} style={{ height: '10px' }}>
+                <div className={`progress-bar-container ${isQueued ? 'vx-bar--waiting' : ''}`}>
                     <div className="progress-bar" style={{ width: `${progressPct}%` }}></div>
                 </div>
             </div>
@@ -868,13 +797,17 @@ const Training: React.FC = () => {
             {/* Charts + Network Viz */}
             <div className="training-grid">
                 <div className="glass-panel">
-                    <div className="panel-title"><span className="pt-icon">📈</span> Loss & Accuracy</div>
-                    <div className="chart-container">
+                    <div className="panel-title"><span className="pt-icon"><ChartLine size={18} strokeWidth={1.75} /></span> Loss & Accuracy</div>
+                    <div className={`chart-container${hasAcc ? ' tr-chart--split' : ''}`}>
                         <canvas ref={chartCanvasRef}></canvas>
+                    </div>
+                    <div className="tr-acc" hidden={!hasAcc}>
+                        <p className="tr-acc__title">Validation accuracy</p>
+                        <div className="tr-acc__chart"><canvas ref={accCanvasRef}></canvas></div>
                     </div>
                 </div>
                 <div className="glass-panel">
-                    <div className="panel-title"><span className="pt-icon">🔮</span> Network Visualization</div>
+                    <div className="panel-title"><span className="pt-icon"><Network size={18} strokeWidth={1.75} /></span> Network Visualization</div>
                     <canvas ref={networkCanvasRef} className="network-viz"></canvas>
                 </div>
             </div>
@@ -882,24 +815,24 @@ const Training: React.FC = () => {
             {/* Log + Controls */}
             <div className="glass-panel">
                 <div className="flex-between mb-1">
-                    <div className="panel-title mb-0"><span className="pt-icon">📝</span> Training Log</div>
-                    <div className="flex gap-1" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <div className="panel-title mb-0"><span className="pt-icon"><ScrollText size={18} strokeWidth={1.75} /></span> Training Log</div>
+                    <div className="tr-actions">
                         {(isComplete || !run) && weightFilename && (
-                            <button className="btn btn-save btn-sm" onClick={handleSaveWeights}>💾 Save Weights</button>
+                            <button className="btn btn-save btn-sm" onClick={handleSaveWeights}><Download size={14} aria-hidden="true" /> Save Weights</button>
                         )}
 
                         {isComplete && history.length > 0 && (
                             <button className="btn btn-secondary btn-sm" onClick={() => setExplainOpen(true)}>
-                                ✨ Explain Results
+                                <Sparkles size={14} aria-hidden="true" /> Explain Results
                             </button>
                         )}
 
                         {isTraining && jobId && (
-                            <button className="btn btn-danger btn-sm" onClick={() => stop(jobId)}>⏹ Stop Training</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => stop(jobId)}><Square size={12} aria-hidden="true" /> Stop Training</button>
                         )}
 
                         {isQueued && jobId && (
-                            <button className="btn btn-secondary btn-sm" onClick={() => cancel(jobId)}>✕ Leave queue</button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => cancel(jobId)}><X size={14} aria-hidden="true" /> Leave queue</button>
                         )}
 
                         {(setupReady || !job || !isTerminal(job.status)) && (
@@ -914,7 +847,7 @@ const Training: React.FC = () => {
                         )}
 
                         {job && isTerminal(job.status) && !setupReady && (
-                            <button className="btn btn-primary btn-sm" onClick={() => navigate('/dataset')}>＋ New Run</button>
+                            <button className="btn btn-primary btn-sm" onClick={() => navigate('/dataset')}><Plus size={14} aria-hidden="true" /> New Run</button>
                         )}
                     </div>
                 </div>
@@ -928,21 +861,17 @@ const Training: React.FC = () => {
 
             {/* System Monitor — temperature + utilization */}
             <div className="glass-panel">
-                <div className="panel-title"><span className="pt-icon">📊</span> System Monitor</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+                <div className="panel-title"><span className="pt-icon"><Gauge size={18} strokeWidth={1.75} /></span> System Monitor</div>
+                <div className="tr-monitor">
                     <div>
-                        <div className="text-muted" style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                            🌡️ Temperature — CPU vs GPU
-                        </div>
-                        <div style={{ height: 220 }}>
+                        <p className="tr-monitor__title"><Thermometer size={14} aria-hidden="true" /> Temperature — CPU vs GPU</p>
+                        <div className="tr-monitor__chart">
                             <canvas ref={tempCanvasRef}></canvas>
                         </div>
                     </div>
                     <div>
-                        <div className="text-muted" style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                            ⚡ Utilization — CPU vs GPU
-                        </div>
-                        <div style={{ height: 220 }}>
+                        <p className="tr-monitor__title"><Zap size={14} aria-hidden="true" /> Utilization — CPU vs GPU</p>
+                        <div className="tr-monitor__chart">
                             <canvas ref={utilCanvasRef}></canvas>
                         </div>
                     </div>

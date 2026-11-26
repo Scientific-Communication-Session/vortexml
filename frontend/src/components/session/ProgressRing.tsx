@@ -18,7 +18,6 @@ const ProgressRing: React.FC<Props> = ({
     const pct = Math.max(0, Math.min(100, value || 0));
     const r = (size - stroke) / 2;
     const c = 2 * Math.PI * r;
-    const gradId = React.useId();
     return (
         <span
             className={`vx-ring ${pulse ? 'vx-ring--pulse' : ''}`}
@@ -29,19 +28,12 @@ const ProgressRing: React.FC<Props> = ({
             aria-valuemax={100}
         >
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-                <defs>
-                    <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
-                        <stop offset="0%" stopColor="#6366f1" />
-                        <stop offset="55%" stopColor="#a855f7" />
-                        <stop offset="100%" stopColor="#06b6d4" />
-                    </linearGradient>
-                </defs>
                 <circle className="vx-ring__track" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} />
                 <circle
                     className="vx-ring__value"
                     cx={size / 2} cy={size / 2} r={r}
                     strokeWidth={stroke}
-                    stroke={color || `url(#${gradId})`}
+                    style={{ stroke: color || 'var(--color-accent)' }}
                     strokeDasharray={c}
                     strokeDashoffset={c * (1 - pct / 100)}
                 />

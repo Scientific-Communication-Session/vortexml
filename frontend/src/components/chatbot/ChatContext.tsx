@@ -41,7 +41,7 @@ const GREETING: ChatMessage = {
     role: 'assistant',
     content:
         "Hi! I'm your VortexML tutor. Ask me anything about machine-learning concepts (epochs, loss, learning rate…) or how to use this app. " +
-        "Click any 💬 icon next to a setting to ask about that specific thing.",
+        "Click the sparkle icon next to any setting to ask about that specific thing.",
 };
 
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -119,7 +119,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     ...prev,
                     {
                         role: 'assistant',
-                        content: `⚠️ ${data.error || `Chatbot error (HTTP ${res.status}).`}`,
+                        content: `${data.error || `Chatbot error (HTTP ${res.status}).`}`,
                     },
                 ]);
             } else {
@@ -132,7 +132,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const msg = e instanceof Error ? e.message : String(e);
             setMessages((prev) => [
                 ...prev,
-                { role: 'assistant', content: `⚠️ Network error: ${msg}` },
+                { role: 'assistant', content: `Network error: ${msg}` },
             ]);
         } finally {
             sendingRef.current = false;

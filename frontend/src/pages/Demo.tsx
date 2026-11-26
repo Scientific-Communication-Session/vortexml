@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import Chart from 'chart.js/auto';
+import Chart, { SERIES, lineSeries, axis } from '../theme/chart';
 import {
     ArrowRight, BookOpen, Check, CircleCheck, Cpu, Download, Flower2, GraduationCap, HeartPulse,
     Hourglass, LayoutDashboard, Loader2, Microscope, Play, Quote, RotateCcw, Rows3, Shuffle, Timer,
@@ -80,7 +80,8 @@ const ICONS: Record<string, React.ElementType> = {
     student_performance: GraduationCap,
 };
 
-const CLASS_COLORS = ['#8b5cf6', '#06b6d4', '#f97316', '#22c55e', '#ec4899'];
+// Class shares use the validated categorical order (theme/chart.ts)
+const CLASS_COLORS = SERIES.slice(0, 5);
 
 const fmt = (v: unknown) => {
     if (v == null || v === '') return '—';
@@ -112,6 +113,9 @@ const Demo: React.FC = () => {
 
     const liveRef = useRef<HTMLDivElement>(null);
     const chartCanvasRef = useRef<HTMLCanvasElement>(null);
+    // Accuracy gets its own chart: loss and accuracy never share an axis.
+    const accChartRef = useRef<Chart | null>(null);
+    const accCanvasRef = useRef<HTMLCanvasElement>(null);
     const chartRef = useRef<Chart | null>(null);
 
     const selected = datasets.find((d) => d.key === selectedKey) ?? null;
@@ -165,50 +169,60 @@ const Demo: React.FC = () => {
     useEffect(() => {
         const ctx = chartCanvasRef.current?.getContext('2d');
         if (!ctx) return;
-        const mono = "'JetBrains Mono'";
         chartRef.current = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: [],
-                datasets: [
-                    { label: 'Train loss', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.10)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4 },
-                    { label: 'Validation loss', data: [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.05)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4 },
-                    { label: 'Validation accuracy', data: [], borderColor: '#22c55e', borderWidth: 2, fill: false, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y1', hidden: true },
-                ],
+                datasets: [lineSeries('Train loss', 0, { fill: true }), lineSeries('Validation loss', 1)],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: false,
                 interaction: { mode: 'index', intersect: false },
-                plugins: { legend: { labels: { color: '#9d9dba', boxWidth: 10, boxHeight: 10, font: { size: 12 } } } },
-                scales: {
-                    x: { title: { display: true, text: 'Epoch', color: '#9d9dba' }, ticks: { color: '#5a5a7a', maxTicksLimit: 10, font: { family: mono, size: 10 } }, grid: { color: 'rgba(100,100,200,0.07)' } },
-                    y: { title: { display: true, text: 'Loss', color: '#9d9dba' }, ticks: { color: '#5a5a7a', font: { family: mono, size: 10 } }, grid: { color: 'rgba(100,100,200,0.07)' } },
-                    y1: { display: false, position: 'right', min: 0, max: 100, title: { display: true, text: 'Accuracy %', color: '#9d9dba' }, ticks: { color: '#5a5a7a', font: { family: mono, size: 10 } }, grid: { display: false } },
-                },
+                scales: { x: axis('Epoch', { ticks: { maxTicksLimit: 10 } }), y: axis('Loss') },
             },
         });
-        return () => { chartRef.current?.destroy(); chartRef.current = null; };
+        const actx = accCanvasRef.current?.getContext('2d');
+        if (actx) {
+            accChartRef.current = new Chart(actx, {
+                type: 'line',
+                data: { labels: [], datasets: [lineSeries('Validation accuracy', 2)] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: false } },
+                    scales: { x: axis(undefined, { ticks: { maxTicksLimit: 10 } }), y: axis('Accuracy %', { min: 0, max: 100 }) },
+                },
+            });
+        }
+        return () => {
+            chartRef.current?.destroy(); chartRef.current = null;
+            accChartRef.current?.destroy(); accChartRef.current = null;
+        };
     }, []);
 
     useEffect(() => {
         const chart = chartRef.current;
         if (!chart) return;
         const points = history.slice(0, drawn);
-        const hasAcc = points.some((p) => p.val_acc != null);
         chart.data.labels = points.map((p) => String(p.epoch));
         chart.data.datasets[0].data = points.map((p) => p.train_loss);
         chart.data.datasets[1].data = points.map((p) => p.val_loss);
-        chart.data.datasets[2].data = points.map((p) => p.val_acc);
-        chart.data.datasets[2].hidden = !hasAcc;
-        const y1 = chart.options.scales?.y1;
-        if (y1) y1.display = hasAcc;
         chart.update('none');
+        const acc = accChartRef.current;
+        if (acc) {
+            acc.data.labels = points.map((p) => String(p.epoch));
+            acc.data.datasets[0].data = points.map((p) => p.val_acc ?? null);
+            acc.update('none');
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [drawn, demoJobId]);
 
     const shownPoint = drawn > 0 ? history[Math.min(drawn, history.length) - 1] : null;
+    const shownHasAcc = history.slice(0, drawn).some((p) => p.val_acc != null);
     const replaying = drawn < history.length;
     const trainSeconds = useMemo(
         () => history.reduce((sum, p) => sum + (p.epoch_time || 0), 0),
@@ -361,9 +375,9 @@ const Demo: React.FC = () => {
                     page is pre-recorded.
                 </p>
                 <div className="dm-hero__facts">
-                    <span className="vx-chip vx-chip--violet">Real published datasets</span>
-                    <span className="vx-chip vx-chip--cyan">Real training, live metrics</span>
-                    <span className="vx-chip vx-chip--green">No account needed</span>
+                    <span className="vx-chip">Real published datasets</span>
+                    <span className="vx-chip">Real training, live metrics</span>
+                    <span className="vx-chip">No account needed</span>
                 </div>
             </header>
 
@@ -520,6 +534,7 @@ const Demo: React.FC = () => {
                 </div>
 
                 <div className="glass-panel dm-live">
+                    <div className="dm-live__charts">
                     <div className="dm-live__chart">
                         <canvas ref={chartCanvasRef} />
                         {drawn === 0 && (
@@ -528,9 +543,14 @@ const Demo: React.FC = () => {
                                     ? <span>Waiting for the Mac mini…<br />the curve starts the moment it is your turn.</span>
                                     : running
                                         ? <span>Preparing the dataset…</span>
-                                        : <span>Press <strong style={{ color: '#c4b5fd' }}>Train it live</strong> above<br />and the curves will draw here.</span>}
+                                        : <span>Press <strong>Train it live</strong> above<br />and the curves will draw here.</span>}
                             </div>
                         )}
+                    </div>
+                    <div className="dm-live__acc" hidden={!shownHasAcc}>
+                        <p className="dm-live__acc-title">Validation accuracy</p>
+                        <div className="dm-live__acc-chart"><canvas ref={accCanvasRef} /></div>
+                    </div>
                     </div>
 
                     <div>
@@ -563,7 +583,7 @@ const Demo: React.FC = () => {
                         {complete && (
                             <>
                                 <div className="dm-status">
-                                    <CircleCheck size={17} style={{ color: '#4ade80' }} />
+                                    <CircleCheck size={17} style={{ color: 'var(--color-success)' }} />
                                     {replaying ? 'Trained — drawing the curve…' : 'Training complete'}
                                 </div>
                                 <p className="dm-status__sub">
@@ -584,11 +604,11 @@ const Demo: React.FC = () => {
                                 <div className="dm-tile__label">Epoch</div>
                             </div>
                             <div className="dm-tile">
-                                <div className="dm-tile__value" style={{ color: '#a78bfa' }}>{shownPoint ? shownPoint.train_loss.toFixed(shownPoint.train_loss >= 100 ? 0 : 4) : '—'}</div>
+                                <div className="dm-tile__value">{shownPoint ? shownPoint.train_loss.toFixed(shownPoint.train_loss >= 100 ? 0 : 4) : '—'}</div>
                                 <div className="dm-tile__label">Train loss</div>
                             </div>
                             <div className="dm-tile">
-                                <div className="dm-tile__value" style={{ color: shownPoint?.val_acc != null ? '#4ade80' : '#22d3ee' }}>
+                                <div className="dm-tile__value">
                                     {!shownPoint ? '—' : shownPoint.val_acc != null
                                         ? `${shownPoint.val_acc.toFixed(1)}%`
                                         : shownPoint.val_loss.toFixed(shownPoint.val_loss >= 100 ? 0 : 4)}
@@ -752,7 +772,7 @@ const Demo: React.FC = () => {
                                                         <td>{i + 1}</td>
                                                         <td>{fmt(truth)}</td>
                                                         <td className={ok === null ? '' : ok ? 'dm-ok' : 'dm-miss'}>
-                                                            {ok === true ? '✓ ' : ok === false ? '✗ ' : ''}{fmt(p?.prediction)}
+                                                            {ok === true ? <Check size={12} aria-label="Correct" /> : ok === false ? <X size={12} aria-label="Wrong" /> : null} {fmt(p?.prediction)}
                                                         </td>
                                                         <td>
                                                             {isClassification

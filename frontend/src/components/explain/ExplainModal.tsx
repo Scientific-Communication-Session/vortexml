@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Loader2, Sparkles } from 'lucide-react';
+import { X, Loader2, Sparkles, TriangleAlert } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -49,7 +49,7 @@ const ExplainModal: React.FC<ExplainModalProps> = ({ title, request, onClose }) 
             onClick={onClose}
             style={{
                 position: 'fixed', inset: 0, zIndex: 200,
-                background: 'rgba(8,8,16,0.72)', backdropFilter: 'blur(6px)',
+                background: 'oklch(0.12 0.008 285 / 0.72)', backdropFilter: 'blur(6px)',
                 display: 'grid', placeItems: 'center', padding: '1.5rem',
             }}
         >
@@ -70,7 +70,7 @@ const ExplainModal: React.FC<ExplainModalProps> = ({ title, request, onClose }) 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.9rem' }}>
                     <div style={{
                         width: 40, height: 40, borderRadius: 10, display: 'grid', placeItems: 'center',
-                        background: 'rgba(139,92,246,0.14)', color: '#8b5cf6',
+                        background: 'oklch(0.68 0.17 283 / 0.14)', color: 'var(--color-accent)',
                     }}>
                         <Sparkles size={20} />
                     </div>
@@ -83,8 +83,8 @@ const ExplainModal: React.FC<ExplainModalProps> = ({ title, request, onClose }) 
                     </div>
                 )}
                 {error && (
-                    <div className="info-banner" style={{ borderLeft: '3px solid #ef4444' }}>
-                        <span className="info-banner-icon">⚠️</span>
+                    <div className="info-banner info-banner--danger" role="alert">
+                        <span className="info-banner-icon"><TriangleAlert size={16} aria-hidden="true" /></span>
                         <div>{error}</div>
                     </div>
                 )}

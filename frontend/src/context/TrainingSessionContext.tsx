@@ -222,9 +222,9 @@ export const TrainingSessionProvider: React.FC<{ children: React.ReactNode }> = 
         const name = run.job.project_name || 'Your run';
         if (status === 'complete') {
             if (final?.early_stopped) {
-                showToast(`${name}: early stopping at epoch ${final.stopped_epoch} 🛑`, 'warning');
+                showToast(`${name}: early stopping at epoch ${final.stopped_epoch}`, 'warning');
             } else {
-                showToast(`${name} finished training 🎉`, 'success');
+                showToast(`${name} finished training`, 'success');
             }
         } else if (status === 'error') {
             showToast(`Training error: ${message || 'the run failed'}`, 'error');

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles, Laptop, Cpu, Pencil, Check, X, Plus, Wand2, ShieldCheck } from 'lucide-react';
+import { Download, Trash2, FolderOpen, Layers, Activity, BarChart3, Sparkles, Laptop, Cpu, Pencil, Check, X, Plus, Wand2, ShieldCheck, Sprout, Flame, Monitor, Package, OctagonPause, ArrowRight, Boxes } from 'lucide-react';
+import { ARCH_ICON } from '../components/archIcons';
+import './profile.css';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 import AddDeviceModal from '../components/devices/AddDeviceModal';
@@ -31,10 +33,6 @@ interface Project {
     created_at: string;
 }
 
-const ARCH_ICON: Record<string, string> = {
-    mlp: '🔵', dnn: '🟣', cnn1d: '🟢', rnn: '🔴', lstm: '🟡',
-    gru: '🟠', autoencoder: '🔷', resnet: '⬛', transformer: '💎', wide_deep: '🌐',
-};
 
 const ARCH_LABEL: Record<string, string> = {
     mlp: 'MLP', dnn: 'DNN', cnn1d: 'CNN-1D', rnn: 'RNN', lstm: 'LSTM',
@@ -248,25 +246,24 @@ const Profile: React.FC = () => {
 
             {/* Experience level card */}
             <div
-                className="glass-panel"
+                className="glass-panel pf-row"
                 style={{
                     display: 'grid',
-                    gridTemplateColumns: 'auto 1fr auto',
                     gap: '1.25rem',
                     alignItems: 'center',
                     padding: '1.25rem 1.5rem',
                 }}
             >
-                <div style={{ fontSize: '2rem', lineHeight: 1 }}>
-                    {isBeginner ? '🌿' : '🔥'}
-                </div>
+                <span className="pf-tile">
+                    {isBeginner ? <Sprout size={22} strokeWidth={1.75} aria-hidden="true" /> : <Flame size={22} strokeWidth={1.75} aria-hidden="true" />}
+                </span>
                 <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <strong style={{ fontSize: '1.05rem' }}>
                             {isBeginner ? 'Novice mode' : 'Expert mode'}
                         </strong>
                         <span className="bento-tag bento-tag-sm">
-                            {isBeginner ? '🌿 Novice' : '🔥 Expert'}
+                            {isBeginner ? 'Novice' : 'Expert'}
                         </span>
                     </div>
                     <div className="text-muted" style={{ fontSize: '0.88rem', marginTop: '0.25rem' }}>
@@ -317,7 +314,7 @@ const Profile: React.FC = () => {
             {/* Your Devices */}
             <div className="glass-panel">
                 <div className="flex-between mb-1">
-                    <div className="panel-title mb-0"><span className="pt-icon">🖥️</span> Your Devices</div>
+                    <div className="panel-title mb-0"><span className="pt-icon"><Monitor size={18} strokeWidth={1.75} /></span> Your Devices</div>
                     <button className="btn btn-secondary btn-sm" onClick={() => setShowAddDevice(true)}>
                         <Plus size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
                         Link a device
@@ -346,11 +343,10 @@ const Profile: React.FC = () => {
                             return (
                                 <div
                                     key={d.id}
-                                    className="glass-panel"
+                                    className="glass-panel pf-row"
                                     style={{
                                         padding: '1rem 1.2rem',
                                         display: 'grid',
-                                        gridTemplateColumns: 'auto 1fr auto',
                                         gap: '1rem',
                                         alignItems: 'center',
                                     }}
@@ -358,7 +354,7 @@ const Profile: React.FC = () => {
                                     <div style={{
                                         position: 'relative', width: 40, height: 40, borderRadius: 10,
                                         display: 'grid', placeItems: 'center',
-                                        background: 'rgba(139,92,246,0.14)', color: '#8b5cf6',
+                                        background: 'oklch(0.68 0.17 283 / 0.14)', color: 'var(--color-accent)',
                                     }}>
                                         <Laptop size={20} />
                                         <span
@@ -366,8 +362,8 @@ const Profile: React.FC = () => {
                                             style={{
                                                 position: 'absolute', right: -3, bottom: -3,
                                                 width: 12, height: 12, borderRadius: '50%',
-                                                border: '2px solid #0e0e1a',
-                                                background: d.online ? '#22c55e' : '#5a5a7a',
+                                                border: '2px solid var(--color-bg-2)',
+                                                background: d.online ? 'var(--color-success)' : 'var(--color-fg-3)',
                                             }}
                                         />
                                     </div>
@@ -385,9 +381,9 @@ const Profile: React.FC = () => {
                                                         if (e.key === 'Escape') setEditingDeviceId(null);
                                                     }}
                                                     style={{
-                                                        padding: '0.3rem 0.5rem', borderRadius: 8,
-                                                        background: 'rgba(255,255,255,0.06)', color: 'inherit',
-                                                        border: '1px solid rgba(255,255,255,0.15)', fontSize: '0.95rem',
+                                                        minHeight: 34, padding: '0 var(--space-2)', borderRadius: 'var(--radius-sm)',
+                                                        background: 'var(--color-raised)', color: 'var(--color-fg)', fontFamily: 'inherit',
+                                                        border: '1px solid var(--color-accent)', fontSize: 'var(--text-sm)', outline: 'none',
                                                     }}
                                                 />
                                                 <button className="btn btn-secondary btn-sm" disabled={busy}
@@ -408,19 +404,19 @@ const Profile: React.FC = () => {
                                                     <Pencil size={12} />
                                                 </button>
                                                 <span className="bento-tag bento-tag-sm">
-                                                    {d.online ? '🟢 Online' : '⚪ Offline'}
+                                                    <i className={`pf-dot${d.online ? ' is-on' : ''}`} aria-hidden="true" />{d.online ? 'Online' : 'Offline'}
                                                 </span>
                                             </div>
                                         )}
                                         <div className="text-muted" style={{
-                                            fontSize: '0.8rem', marginTop: '0.35rem', fontFamily: 'var(--font-mono)',
+                                            fontSize: 'var(--text-sm)', marginTop: 'var(--space-1)', fontVariantNumeric: 'tabular-nums',
                                         }}>
                                             <Cpu size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
                                             {d.specs ? specLine : 'Specs appear once the node agent first connects.'}
                                         </div>
                                     </div>
 
-                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                    <div className="pf-actions">
                                         <button className="btn btn-secondary btn-sm" disabled={busy}
                                             onClick={() => handleDownloadAgent(d)} title="Re-download the node agent bundle">
                                             <Download size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
@@ -440,25 +436,25 @@ const Profile: React.FC = () => {
             </div>
 
             {projects.length === 0 ? (
-                <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
-                    <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>📁</div>
-                    <h3 style={{ marginBottom: '0.5rem' }}>No projects yet</h3>
-                    <p className="text-muted" style={{ marginBottom: '1.5rem' }}>
+                <div className="glass-panel pr-empty">
+                    <span className="pr-empty__icon"><FolderOpen size={24} strokeWidth={1.75} aria-hidden="true" /></span>
+                    <h3>No projects yet</h3>
+                    <p className="text-muted">
                         Train a model from the Architect page — completed runs are saved here automatically.
                     </p>
                     <button className="btn btn-primary" onClick={() => navigate('/dataset')}>
-                        Start a new project →
+                        Start a new project <ArrowRight size={15} aria-hidden="true" />
                     </button>
                 </div>
             ) : (
                 <div className="glass-panel">
                     <div className="panel-title">
-                        <span className="pt-icon">📦</span> Saved Projects
+                        <span className="pt-icon"><Package size={18} strokeWidth={1.75} /></span> Saved Projects
                     </div>
 
                     <div className="project-list" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                         {projects.map((p) => {
-                            const icon = ARCH_ICON[p.arch_type] ?? '🧠';
+                            const ArchIcon = ARCH_ICON[p.arch_type] ?? Boxes;
                             const archLabel = ARCH_LABEL[p.arch_type] ?? p.arch_type;
                             const accuracy = p.final_val_acc !== null
                                 ? `${p.final_val_acc.toFixed(1)}%`
@@ -468,24 +464,23 @@ const Profile: React.FC = () => {
                             return (
                                 <div
                                     key={p.id}
-                                    className="glass-panel"
+                                    className="glass-panel pf-row"
                                     style={{
                                         padding: '1.25rem 1.5rem',
                                         display: 'grid',
-                                        gridTemplateColumns: 'auto 1fr auto',
                                         gap: '1.25rem',
                                         alignItems: 'center',
                                     }}
                                 >
-                                    <div style={{ fontSize: '2.25rem', lineHeight: 1 }}>{icon}</div>
+                                    <span className="pf-tile"><ArchIcon size={22} strokeWidth={1.75} aria-hidden="true" /></span>
 
                                     <div style={{ minWidth: 0 }}>
                                         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
                                             <strong style={{ fontSize: '1.05rem' }}>{p.name}</strong>
                                             <span className="bento-tag bento-tag-sm">{archLabel}</span>
-                                            {p.early_stopped && <span className="bento-tag bento-tag-sm">🛑 ES @ {p.stopped_epoch}</span>}
+                                            {p.early_stopped && <span className="bento-tag bento-tag-sm"><OctagonPause size={11} aria-hidden="true" /> ES @ {p.stopped_epoch}</span>}
                                         </div>
-                                        <div className="text-muted" style={{ fontSize: '0.82rem', marginTop: '0.35rem', fontFamily: 'var(--font-mono)' }}>
+                                        <div className="text-muted" style={{ fontSize: 'var(--text-sm)', marginTop: 'var(--space-1)', fontVariantNumeric: 'tabular-nums' }}>
                                             <Layers size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
                                             {p.layer_sizes.join('→')} neurons
                                             {' · '}
@@ -493,8 +488,8 @@ const Profile: React.FC = () => {
                                         </div>
                                         <div style={{ fontSize: '0.85rem', marginTop: '0.45rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                                             {accuracy && (
-                                                <span><Activity size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle', color: '#22c55e' }} />
-                                                    val_acc <strong style={{ color: '#22c55e' }}>{accuracy}</strong></span>
+                                                <span><Activity size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle', color: 'var(--color-success)' }} />
+                                                    val_acc <strong style={{ color: 'var(--color-success)' }}>{accuracy}</strong></span>
                                             )}
                                             {p.final_val_loss !== null && (
                                                 <span><BarChart3 size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
@@ -504,7 +499,7 @@ const Profile: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                    <div className="pf-actions">
                                         <button
                                             className="btn btn-secondary btn-sm"
                                             onClick={() => handleLoad(p)}
@@ -565,11 +560,11 @@ const Profile: React.FC = () => {
                 </div>
                 <p className="text-muted" style={{ fontSize: '0.88rem', marginBottom: '1.1rem', maxWidth: '70ch' }}>
                     Everything in this account is yours. Take a copy whenever you like, or delete the account and
-                    all of it for good. The <Link to="/privacy" style={{ color: '#c4b5fd', textDecoration: 'underline', textUnderlineOffset: 3 }}>Privacy Policy</Link> explains
+                    all of it for good. The <Link to="/privacy" style={{ color: 'var(--color-accent-text)', textDecoration: 'underline', textUnderlineOffset: 3 }}>Privacy Policy</Link> explains
                     what is stored and why.
                 </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.9rem' }}>
-                    <div style={{ flex: '1 1 300px', padding: '1rem 1.1rem', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
+                    <div style={{ flex: '1 1 300px', padding: '1rem 1.1rem', borderRadius: 14, border: '1px solid var(--color-line)', background: 'oklch(1 0 0 / 0.03)' }}>
                         <div style={{ fontWeight: 600, marginBottom: '0.3rem' }}>Download my data</div>
                         <p className="text-muted" style={{ fontSize: '0.84rem', marginBottom: '0.9rem' }}>
                             One file with your account details, projects and their training history, devices,
@@ -580,7 +575,7 @@ const Profile: React.FC = () => {
                             Download as JSON
                         </a>
                     </div>
-                    <div style={{ flex: '1 1 300px', padding: '1rem 1.1rem', borderRadius: 14, border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.05)' }}>
+                    <div style={{ flex: '1 1 300px', padding: '1rem 1.1rem', borderRadius: 14, border: '1px solid oklch(0.68 0.18 25 / 0.25)', background: 'oklch(0.68 0.18 25 / 0.05)' }}>
                         <div style={{ fontWeight: 600, marginBottom: '0.3rem' }}>Delete my account</div>
                         <p className="text-muted" style={{ fontSize: '0.84rem', marginBottom: '0.9rem' }}>
                             Removes the account and everything in it from our servers, immediately and

@@ -20,7 +20,7 @@ const SessionPill: React.FC = () => {
     if (job.status === 'queued') {
         return (
             <Link to="/training" className="vx-pill vx-pill--queued" title={`${job.project_name || 'Your run'} is waiting in the queue`}>
-                <Hourglass size={14} style={{ marginLeft: 4, color: '#fcd34d' }} />
+                <Hourglass size={14} style={{ marginLeft: 4, color: 'var(--color-warning)' }} />
                 <span>Queued</span>
                 <span className="vx-pill__meta">#{job.position}{extra > 0 ? ` · +${extra}` : ''}</span>
             </Link>

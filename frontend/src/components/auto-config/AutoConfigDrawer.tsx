@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Send, Trash2, Loader2, Sparkles, Wand2 } from 'lucide-react';
+import { X, Send, Trash2, Loader2, Sparkles, Wand2, TriangleAlert } from 'lucide-react';
 import { useAutoConfig } from './AutoConfigContext';
 
 const ARCH_LABELS: Record<string, string> = {
@@ -63,7 +63,7 @@ const AutoConfigDrawer: React.FC = () => {
         >
             <header className="chat-drawer__header auto-config-drawer__header">
                 <div className="chat-drawer__title">
-                    <span className="chat-drawer__title-icon">🪄</span>
+                    <span className="chat-drawer__title-icon"><Wand2 size={18} strokeWidth={1.75} aria-hidden="true" /></span>
                     <div>
                         <div className="chat-drawer__title-main">AI Auto-Configure</div>
                         <div className="chat-drawer__title-sub">Two-bot model selection</div>
@@ -94,7 +94,7 @@ const AutoConfigDrawer: React.FC = () => {
             <div className="chat-drawer__messages" ref={scrollRef}>
                 {!isAvailable && unavailableReason && (
                     <div className="chat-msg chat-msg--assistant">
-                        <div className="chat-msg__bubble">⚠️ {unavailableReason}</div>
+                        <div className="chat-msg__bubble"><TriangleAlert size={14} aria-hidden="true" style={{ verticalAlign: "-2px", color: "var(--color-warning)" }} /> {unavailableReason}</div>
                     </div>
                 )}
 
@@ -124,7 +124,7 @@ const AutoConfigDrawer: React.FC = () => {
 
                 {error && (
                     <div className="chat-msg chat-msg--assistant">
-                        <div className="chat-msg__bubble auto-config-error">⚠️ {error}</div>
+                        <div className="chat-msg__bubble auto-config-error"><TriangleAlert size={14} aria-hidden="true" style={{ verticalAlign: "-2px" }} /> {error}</div>
                     </div>
                 )}
 

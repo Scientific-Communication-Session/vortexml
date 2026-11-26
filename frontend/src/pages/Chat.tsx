@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Plus, Send, Trash2, Loader2, MessageSquare, Cpu, Pencil, Square, RotateCcw } from 'lucide-react';
+import { Plus, Send, Trash2, Loader2, MessageSquare, Cpu, Pencil, Square, RotateCcw, Brain, MessagesSquare } from 'lucide-react';
+import './assistant.css';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
 import { useAuth } from '../context/AuthContext';
 
@@ -18,8 +19,9 @@ interface CatalogModel { id: string; downloaded: boolean; size_bytes: number | n
 interface CatalogEntry { backend: string; models: CatalogModel[]; }
 
 const inputStyle: React.CSSProperties = {
-    padding: '0.45rem 0.6rem', borderRadius: 8, background: 'rgba(255,255,255,0.05)',
-    color: 'inherit', border: '1px solid rgba(255,255,255,0.12)', fontSize: '0.85rem',
+    minHeight: 40, padding: '0 var(--space-3)', borderRadius: 'var(--radius-md)',
+    background: 'var(--color-raised)', color: 'var(--color-fg)', fontFamily: 'inherit',
+    border: '1px solid var(--color-line)', fontSize: 'var(--text-sm)',
 };
 
 // Split an assistant message into its reasoning + answer. Cloud/Ollama deliver
@@ -269,10 +271,10 @@ const Chat: React.FC = () => {
                 <p>Have a conversation with a local or cloud model — optionally grounded in your documents.</p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(210px, 260px) 1fr', gap: '1.25rem', alignItems: 'start' }}>
+            <div className="ch-layout">
                 {/* sidebar */}
                 <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                    <button className="btn btn-primary btn-sm" onClick={newChat} style={{ width: '100%' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={newChat} style={{ width: '100%' }}>
                         <Plus size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} /> New chat
                     </button>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', maxHeight: '60vh', overflowY: 'auto' }}>
@@ -282,8 +284,8 @@ const Chat: React.FC = () => {
                                 style={{
                                     cursor: 'pointer', padding: '0.5rem 0.6rem', borderRadius: 8,
                                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem',
-                                    background: activeId === c.id ? 'rgba(139,92,246,0.14)' : 'transparent',
-                                    border: '1px solid ' + (activeId === c.id ? 'rgba(139,92,246,0.3)' : 'transparent'),
+                                    background: activeId === c.id ? 'oklch(0.68 0.17 283 / 0.14)' : 'transparent',
+                                    border: '1px solid ' + (activeId === c.id ? 'oklch(0.68 0.17 283 / 0.3)' : 'transparent'),
                                 }}>
                                 {editingId === c.id ? (
                                     <input autoFocus value={editTitle} onClick={(e) => e.stopPropagation()}
@@ -310,9 +312,9 @@ const Chat: React.FC = () => {
                 </div>
 
                 {/* main */}
-                <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '72vh' }}>
+                <div className="glass-panel ch-main">
                     {/* settings bar */}
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', paddingBottom: '0.7rem', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '0.7rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', paddingBottom: '0.7rem', borderBottom: '1px solid var(--color-line)', marginBottom: '0.7rem' }}>
                         {!isBeginner ? (
                             <>
                                 <select value={settings.backend} onChange={(e) => { const b = backends.find((x) => x.key === e.target.value); patchSettings({ backend: e.target.value, model: b?.default_model || '' }); }} style={inputStyle}>
@@ -322,7 +324,7 @@ const Chat: React.FC = () => {
                                     style={{ ...inputStyle, maxWidth: 300 }} title="Model">
                                     <option value="">Default{activeBackend?.default_model ? ` (${activeBackend.default_model.split('/').pop()})` : ''}</option>
                                     {modelOptions.map((m) => (
-                                        <option key={m.id} value={m.id}>{activeBackend?.model_labels?.[m.id] || m.id}{m.downloaded ? ' ✓ downloaded' : (catEntry ? ' (downloads on first use)' : '')}</option>
+                                        <option key={m.id} value={m.id}>{activeBackend?.model_labels?.[m.id] || m.id}{m.downloaded ? ' · downloaded' : (catEntry ? ' (downloads on first use)' : '')}</option>
                                     ))}
                                     {settings.model && !modelOptions.some((m) => m.id === settings.model) && (
                                         <option value={settings.model}>{settings.model}</option>
@@ -330,8 +332,8 @@ const Chat: React.FC = () => {
                                 </select>
                                 {devices.length > 1 && (
                                     <select value={settings.deviceId ?? ''} onChange={(e) => patchSettings({ deviceId: e.target.value ? Number(e.target.value) : null })} style={inputStyle} title="Run on">
-                                        <option value="">🖥️ Shared M4</option>
-                                        {devices.filter((d) => !d.is_shared).map((d) => <option key={d.id} value={d.id}>💻 {d.nickname}</option>)}
+                                        <option value="">Shared M4</option>
+                                        {devices.filter((d) => !d.is_shared).map((d) => <option key={d.id} value={d.id}>{d.nickname}</option>)}
                                     </select>
                                 )}
                             </>
@@ -340,13 +342,13 @@ const Chat: React.FC = () => {
                         )}
                         <select value={settings.kbId ?? ''} onChange={(e) => patchSettings({ kbId: e.target.value ? Number(e.target.value) : null })} style={inputStyle} title="Ground answers in a knowledge base">
                             <option value="">No documents</option>
-                            {kbs.map((k) => <option key={k.id} value={k.id}>📚 {k.name}</option>)}
+                            {kbs.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
                         </select>
                         {activeBackend?.supports_thinking && (
                             <label title="Let the model reason step-by-step before answering (slower, often more accurate)"
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', cursor: 'pointer', userSelect: 'none', padding: '0.4rem 0.62rem', borderRadius: 8, border: '1px solid ' + (settings.reasoning ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.12)'), background: settings.reasoning ? 'rgba(139,92,246,0.18)' : 'rgba(255,255,255,0.05)' }}>
-                                <input type="checkbox" checked={settings.reasoning} onChange={(e) => patchSettings({ reasoning: e.target.checked })} style={{ accentColor: '#8b5cf6', margin: 0 }} />
-                                💭 Reasoning
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', cursor: 'pointer', userSelect: 'none', padding: '0.4rem 0.62rem', borderRadius: 8, border: '1px solid ' + (settings.reasoning ? 'var(--color-accent-line)' : 'var(--color-line)'), background: settings.reasoning ? 'var(--color-accent-soft)' : 'var(--color-raised)' }}>
+                                <input type="checkbox" checked={settings.reasoning} onChange={(e) => patchSettings({ reasoning: e.target.checked })} style={{ accentColor: 'var(--color-accent)', margin: 0 }} />
+                                <Brain size={14} aria-hidden="true" /> Reasoning
                             </label>
                         )}
                     </div>
@@ -354,8 +356,8 @@ const Chat: React.FC = () => {
                     {/* messages */}
                     <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.9rem', paddingRight: '0.3rem' }}>
                         {messages.length === 0 && !sending && (
-                            <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-muted, #9d9dba)' }}>
-                                <div style={{ fontSize: '2.5rem' }}>💬</div>
+                            <div className="ch-empty">
+                                <span className="as-empty__icon"><MessagesSquare size={24} strokeWidth={1.75} aria-hidden="true" /></span>
                                 <p>Ask anything to start the conversation.</p>
                             </div>
                         )}
@@ -363,8 +365,8 @@ const Chat: React.FC = () => {
                             <div key={m.id != null ? `m${m.id}` : `i${i}`} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
                                 <div style={{
                                     maxWidth: '80%', padding: '0.7rem 0.95rem', borderRadius: 14, fontSize: '0.92rem', lineHeight: 1.5,
-                                    background: m.role === 'user' ? 'rgba(139,92,246,0.22)' : 'rgba(255,255,255,0.05)',
-                                    border: '1px solid rgba(255,255,255,0.08)',
+                                    background: m.role === 'user' ? 'var(--color-accent-soft)' : 'oklch(1 0 0 / 0.04)',
+                                    border: '1px solid var(--color-line)',
                                 }}>
                                     {m.role === 'user' ? (
                                         <span style={{ whiteSpace: 'pre-wrap' }}>{m.content}</span>
@@ -375,10 +377,10 @@ const Chat: React.FC = () => {
                                             <>
                                                 {reasoning && (
                                                     <details open={thinkingPhase} style={{ marginBottom: answer || !m.streaming ? '0.5rem' : 0 }}>
-                                                        <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-muted, #9d9dba)', userSelect: 'none' }}>
-                                                            💭 Reasoning{thinkingPhase ? '…' : ''}
+                                                        <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-muted, var(--color-fg-2))', userSelect: 'none' }}>
+                                                            <Brain size={13} className="ch-ico" aria-hidden="true" /> Reasoning{thinkingPhase ? '…' : ''}
                                                         </summary>
-                                                        <div className="markdown-body" style={{ fontSize: '0.82rem', opacity: 0.8, marginTop: '0.35rem', paddingLeft: '0.65rem', borderLeft: '2px solid rgba(139,92,246,0.4)' }}>
+                                                        <div className="markdown-body" style={{ fontSize: '0.82rem', opacity: 0.8, marginTop: '0.35rem', paddingLeft: '0.65rem', borderLeft: '2px solid oklch(0.68 0.17 283 / 0.4)' }}>
                                                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{reasoning + (thinkingPhase ? ' ▍' : '')}</ReactMarkdown>
                                                         </div>
                                                     </details>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiGet, showToast } from '../utils/helpers';
+import { FileText, FlaskConical, Video } from 'lucide-react';
 
 interface CourseSummary {
     id: string;
@@ -11,17 +12,12 @@ interface CourseSummary {
     tags: string[];
 }
 
-const CourseTypeIcon: Record<string, string> = {
-    text: '📄',
-    video: '🎥',
-    lab: '🔬'
+const CourseTypeIcon: Record<string, React.ElementType> = {
+    text: FileText,
+    video: Video,
+    lab: FlaskConical,
 };
 
-const CourseTypeColor: Record<string, string> = {
-    text: 'var(--accent-2)',
-    video: 'var(--accent-3)',
-    lab: 'var(--accent-4)'
-};
 
 const Courses: React.FC = () => {
     const navigate = useNavigate();
@@ -56,8 +52,8 @@ const Courses: React.FC = () => {
                         <div className="bento-card-bg"></div>
                         <div className="bento-content">
                             <div className="bento-header flex-between mb-1">
-                                <span className="bento-icon" style={{ backgroundColor: CourseTypeColor[course.type] + '20', color: CourseTypeColor[course.type] }}>
-                                    {CourseTypeIcon[course.type]}
+                                <span className="bento-icon">
+                                    {React.createElement(CourseTypeIcon[course.type] ?? FileText, { size: 18, strokeWidth: 1.75, 'aria-hidden': true })}
                                 </span>
                                 <span className="bento-duration">{course.duration}</span>
                             </div>

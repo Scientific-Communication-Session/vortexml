@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Chart from 'chart.js/auto';
-import { Trophy, BarChart3 } from 'lucide-react';
+import Chart, { SERIES, axis } from '../theme/chart';
+import { Trophy, BarChart3, Flag, TrendingDown } from 'lucide-react';
 import { apiGet, apiPost, showToast } from '../utils/helpers';
+import './predict.css';
 import { useAuth } from '../context/AuthContext';
 
 interface HistoryPoint { epoch: number; train_loss: number | null; val_loss: number | null; val_acc: number | null; }
@@ -25,12 +26,11 @@ const ARCH_LABEL: Record<string, string> = {
     transformer: 'Transformer', wide_deep: 'Wide & Deep',
 };
 
-const PALETTE = ['#8b5cf6', '#06b6d4', '#22c55e', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#a855f7'];
 const MAX_COMPARE = 6;
 
 const chartHintStyle: React.CSSProperties = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    border: '1px dashed rgba(139,92,246,0.25)', borderRadius: '8px',
+    border: '1px dashed var(--color-line-strong)', borderRadius: 'var(--radius-md)',
 };
 
 const Leaderboard: React.FC = () => {
@@ -40,6 +40,8 @@ const Leaderboard: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [sortBy, setSortBy] = useState<'acc' | 'loss'>('acc');
     const [selected, setSelected] = useState<number[]>([]);
+    // Series slot per selected run id, kept while the run stays selected
+    const slotsRef = useRef(new Map<number, number>());
 
     const lossCanvasRef = useRef<HTMLCanvasElement>(null);
     const accCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -83,10 +85,9 @@ const Leaderboard: React.FC = () => {
                 options: {
                     responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
                     interaction: { mode: 'nearest', intersect: false },
-                    plugins: { legend: { labels: { color: '#9d9dba', font: { size: 11 } } } },
                     scales: {
-                        x: { type: 'linear', title: { display: true, text: 'Epoch', color: '#9d9dba' }, ticks: { color: '#5a5a7a' }, grid: { color: 'rgba(100,100,200,0.07)' } },
-                        y: { title: { display: true, text: yTitle, color: '#9d9dba' }, ticks: { color: '#5a5a7a' }, grid: { color: 'rgba(100,100,200,0.07)' }, min: 0, ...(yMax ? { max: yMax } : {}) },
+                        x: { ...axis('Epoch'), type: 'linear' },
+                        y: axis(yTitle, { min: 0, ...(yMax ? { max: yMax } : {}) }),
                     },
                 },
             });
@@ -115,10 +116,20 @@ const Leaderboard: React.FC = () => {
                 const byId = new Map(list.map((p) => [p.id, p]));
                 const ordered = selected.map((id) => byId.get(id)).filter(Boolean) as Project[];
 
-                const lossSets = ordered.map((p, i) => ({
+                const slots = slotsRef.current;
+                for (const id of [...slots.keys()]) if (!selected.includes(id)) slots.delete(id);
+                for (const id of selected) {
+                    if (slots.has(id)) continue;
+                    const used = new Set(slots.values());
+                    slots.set(id, SERIES.findIndex((_, i) => !used.has(i)));
+                }
+                const colorOf = (p: Project) => SERIES[slots.get(p.id) ?? 0];
+
+                const lossSets = ordered.map((p) => ({
                     label: p.name,
                     data: (p.history ?? []).filter((h) => h.val_loss != null).map((h) => ({ x: h.epoch, y: h.val_loss as number })),
-                    borderColor: PALETTE[i % PALETTE.length],
+                    borderColor: colorOf(p),
+                    pointHoverBackgroundColor: colorOf(p),
                     backgroundColor: 'transparent',
                     borderWidth: 2, tension: 0.3, pointRadius: 0, pointHoverRadius: 4,
                 }));
@@ -127,7 +138,8 @@ const Leaderboard: React.FC = () => {
                     .map((p) => ({
                         label: p.name,
                         data: (p.history ?? []).filter((h) => h.val_acc != null).map((h) => ({ x: h.epoch, y: h.val_acc as number })),
-                        borderColor: PALETTE[ordered.indexOf(p) % PALETTE.length],
+                        borderColor: colorOf(p),
+                        pointHoverBackgroundColor: colorOf(p),
                         backgroundColor: 'transparent',
                         borderWidth: 2, tension: 0.3, pointRadius: 0, pointHoverRadius: 4,
                     }));
@@ -171,17 +183,17 @@ const Leaderboard: React.FC = () => {
             </div>
 
             {projects.length === 0 ? (
-                <div className="glass-panel" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
-                    <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>🏁</div>
-                    <h3 style={{ marginBottom: '0.5rem' }}>No models yet</h3>
-                    <p className="text-muted" style={{ marginBottom: '1.5rem' }}>Train a model to see it ranked here.</p>
+                <div className="glass-panel pr-empty">
+                    <span className="pr-empty__icon"><Flag size={24} strokeWidth={1.75} aria-hidden="true" /></span>
+                    <h3>No models yet</h3>
+                    <p className="text-muted">Train a model to see it ranked here.</p>
                     <button className="btn btn-primary" onClick={() => navigate('/dataset')}>Start a new project →</button>
                 </div>
             ) : (
                 <>
                     <div className="glass-panel">
                         <div className="flex-between mb-1">
-                            <div className="panel-title mb-0"><span className="pt-icon">🏆</span> Ranking</div>
+                            <div className="panel-title mb-0"><span className="pt-icon"><Trophy size={18} strokeWidth={1.75} /></span> Ranking</div>
                             <div className="flex gap-05" style={{ display: 'flex', gap: '0.5rem' }}>
                                 <button className={`btn btn-sm ${sortBy === 'acc' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSortBy('acc')}>By accuracy</button>
                                 <button className={`btn btn-sm ${sortBy === 'loss' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSortBy('loss')}>By val loss</button>
@@ -197,14 +209,14 @@ const Leaderboard: React.FC = () => {
                                         <th>Compare</th><th>#</th><th>Project</th><th>Architecture</th><th>Task</th>
                                         <th
                                             onClick={() => setSortBy('acc')}
-                                            style={{ cursor: 'pointer', color: sortBy === 'acc' ? '#8b5cf6' : undefined, whiteSpace: 'nowrap' }}
+                                            style={{ cursor: 'pointer', color: sortBy === 'acc' ? 'var(--color-accent-text)' : undefined, whiteSpace: 'nowrap' }}
                                             title="Sort by validation accuracy (highest first)"
                                         >
                                             Val Accuracy{sortBy === 'acc' ? ' ▼' : ''}
                                         </th>
                                         <th
                                             onClick={() => setSortBy('loss')}
-                                            style={{ cursor: 'pointer', color: sortBy === 'loss' ? '#8b5cf6' : undefined, whiteSpace: 'nowrap' }}
+                                            style={{ cursor: 'pointer', color: sortBy === 'loss' ? 'var(--color-accent-text)' : undefined, whiteSpace: 'nowrap' }}
                                             title="Sort by validation loss (lowest first)"
                                         >
                                             Val Loss{sortBy === 'loss' ? ' ▲' : ''}
@@ -214,7 +226,7 @@ const Leaderboard: React.FC = () => {
                                 </thead>
                                 <tbody>
                                     {ranked.map((p, i) => (
-                                        <tr key={p.id} style={selected.includes(p.id) ? { background: 'rgba(139,92,246,0.08)' } : undefined}>
+                                        <tr key={p.id} style={selected.includes(p.id) ? { background: 'var(--color-accent-soft)' } : undefined}>
                                             <td>
                                                 <input
                                                     type="checkbox"
@@ -223,7 +235,7 @@ const Leaderboard: React.FC = () => {
                                                     aria-label={`Compare ${p.name}`}
                                                 />
                                             </td>
-                                            <td>{i === 0 ? <Trophy size={14} style={{ color: '#f59e0b', verticalAlign: 'middle' }} /> : i + 1}</td>
+                                            <td>{i === 0 ? <Trophy size={14} aria-label="First" style={{ color: 'var(--color-accent-text)', verticalAlign: 'middle' }} /> : i + 1}</td>
                                             <td>{p.name}</td>
                                             <td>{ARCH_LABEL[p.arch_type] ?? p.arch_type}</td>
                                             <td>{p.task_type}</td>
@@ -239,7 +251,7 @@ const Leaderboard: React.FC = () => {
 
                     <div className="training-grid">
                         <div className="glass-panel">
-                            <div className="panel-title"><span className="pt-icon">📉</span> Validation Loss</div>
+                            <div className="panel-title"><span className="pt-icon"><TrendingDown size={18} strokeWidth={1.75} /></span> Validation Loss</div>
                             {selected.length > 0 ? (
                                 <div className="chart-container"><canvas ref={lossCanvasRef} /></div>
                             ) : (

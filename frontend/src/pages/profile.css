@@ -1,0 +1,35 @@
+/* Profile page specifics (empty state classes come from predict.css). */
+@import './predict.css';
+
+.pf-tile {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md);
+    background: var(--color-accent-soft);
+    border: 1px solid var(--color-accent-line);
+    color: var(--color-accent-text);
+}
+
+.pf-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: var(--space-1);
+    border-radius: 50%;
+    background: var(--color-fg-3);
+    vertical-align: 1px;
+}
+.pf-dot.is-on { background: var(--color-success); }
+
+/* Rows: icon · details · actions. On phones the actions drop below. */
+.pf-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+.pf-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+
+@media (max-width: 640px) {
+    .pf-row { grid-template-columns: auto minmax(0, 1fr); }
+    .pf-row > :nth-child(3) { grid-column: 1 / -1; }
+    .pf-actions { justify-content: flex-start; }
+}

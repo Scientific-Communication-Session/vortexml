@@ -9,8 +9,8 @@ const SECTIONS: LegalSection[] = [
         title: 'Who is responsible',
         body: (
             <p>
-                VortexML is run by {SITE.operator}, based in {SITE.country}, who decides how and why the personal
-                data described here is processed (the “controller” in the words of the EU General Data
+                VortexML is run by {SITE.operator}, based in {SITE.country}, who decide how and why the personal
+                data described here is processed (the “controllers” in the words of the EU General Data
                 Protection Regulation, GDPR). To ask anything about your data, or to use any of the rights
                 listed below, write to us <Contact via />.
             </p>

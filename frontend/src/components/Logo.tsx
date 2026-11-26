@@ -16,9 +16,8 @@ const Logo: React.FC<{ size?: number; className?: string }> = ({ size = 20, clas
         >
             <defs>
                 <linearGradient id={gradient} x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-                    <stop offset="0" stopColor="#6366f1" />
-                    <stop offset="0.5" stopColor="#a855f7" />
-                    <stop offset="1" stopColor="#06b6d4" />
+                    <stop offset="0" stopColor="#c9cbff" />
+                    <stop offset="1" stopColor="#6a5dde" />
                 </linearGradient>
             </defs>
             <g fill="none" stroke={`url(#${gradient})`} strokeLinecap="round" transform="rotate(18 32 32)">

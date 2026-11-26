@@ -147,9 +147,9 @@ const ResumePrompt: React.FC<Props> = ({ mode, job, onClose, onView, onEnroll, o
                             #{job.position}
                         </span>
                     )}
-                    {job.status === 'complete' && <ProgressRing value={100} size={58} stroke={5} label color="#22c55e" />}
+                    {job.status === 'complete' && <ProgressRing value={100} size={58} stroke={5} label color="var(--color-success)" />}
                     {(failed || job.status === 'stopped') && (
-                        <span className="vx-run__pos" style={{ width: 58, height: 58, borderRadius: 16, color: '#fca5a5', background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)' }}>
+                        <span className="vx-run__pos" style={{ width: 58, height: 58, borderRadius: 16, color: 'var(--color-danger)', background: 'oklch(0.68 0.18 25 / 0.1)', borderColor: 'oklch(0.68 0.18 25 / 0.3)' }}>
                             <CircleAlert size={22} />
                         </span>
                     )}
