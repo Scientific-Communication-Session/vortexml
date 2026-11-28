@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
 #  VortexML — One-click Start Script
-#  Sets up venvs, installs packages, and launches both
-#  the Flask backend and the Vite frontend.
+#  Sets up venvs, installs packages, builds the frontend and
+#  launches the Flask backend and the frontend server.
+#
+#    ./start.sh         the built site (what production runs)
+#    ./start.sh --dev   the Vite dev server with hot reload
 # ─────────────────────────────────────────────────────────
 set -e
+
+DEV_MODE=0
+[ "${1:-}" = "--dev" ] && DEV_MODE=1
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
@@ -185,9 +191,25 @@ BACKEND_PID=$!
 # Give the backend a moment to boot
 sleep 2
 
-# Frontend (Vite dev server on port 5173)
-info "Starting frontend on http://localhost:5173 …"
-(cd "$FRONTEND_DIR" && npm run dev -- --host) &
+# Frontend on port 5173. Production serves the built, prerendered site
+# (frontend/dist) with `vite preview`; to publish a frontend change later, run
+# `npm run build` in frontend/ — the server picks the new files up, no restart.
+if [ "$DEV_MODE" -eq 1 ]; then
+    info "Starting the dev frontend on http://localhost:5173 …"
+    (cd "$FRONTEND_DIR" && npm run dev) &
+else
+    info "Building the frontend…"
+    if (cd "$FRONTEND_DIR" && npm run build); then
+        ok "Frontend built."
+    elif [ -f "$FRONTEND_DIR/dist/index.html" ]; then
+        warn "Frontend build failed — serving the previous build. Fix the error and run 'npm run build' in frontend/."
+    else
+        fail "Frontend build failed and there is no previous build to serve."
+        exit 1
+    fi
+    info "Starting frontend on http://localhost:5173 …"
+    (cd "$FRONTEND_DIR" && npm run preview) &
+fi
 FRONTEND_PID=$!
 
 echo ""
@@ -201,5 +223,13 @@ echo -e "${BOLD}║  Press ${RED}Ctrl+C${NC}${BOLD} to stop both servers.     �
 echo -e "${BOLD}╚══════════════════════════════════════════╝${NC}"
 echo ""
 
-# Wait for either process to exit
-wait
+# Run until either server stops, then stop the other and exit non-zero, so the
+# service manager (systemd / launchd) restarts both. A plain `wait` returns only
+# once *every* child has exited: with the backend dead and the frontend alive
+# the service looked healthy while /api was down. (`wait -n` would do, but the
+# /bin/bash that macOS ships is too old for it.)
+while kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null; do
+    sleep 2
+done
+fail "One of the servers stopped — shutting down."
+exit 1

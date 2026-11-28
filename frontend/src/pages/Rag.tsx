@@ -302,19 +302,22 @@ const Rag: React.FC = () => {
                                     display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem',
                                 }}>
                                 <div style={{ minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{kb.name}</div>
+                                    {/* The control for keyboards, screen readers and agents; a click anywhere on the row does the same. */}
+                                    <div style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        <button type="button" className="btn-text" aria-pressed={selected?.id === kb.id}>{kb.name}</button>
+                                    </div>
                                     <div className="text-muted" style={{ fontSize: '0.72rem' }}>{kb.n_docs} docs · {kb.n_chunks} chunks · {kb.embedder}</div>
                                 </div>
                                 <button className="btn btn-secondary btn-sm" style={{ padding: '0.25rem' }}
-                                    onClick={(e) => { e.stopPropagation(); deleteKb(kb); }} title="Delete"><Trash2 size={13} /></button>
+                                    onClick={(e) => { e.stopPropagation(); deleteKb(kb); }} title="Delete" aria-label={`Delete ${kb.name}`}><Trash2 size={13} aria-hidden="true" /></button>
                             </div>
                         ))}
                     </div>
                     <div style={{ borderTop: '1px solid var(--color-line)', paddingTop: '0.8rem' }}>
-                        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New knowledge base name"
+                        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New knowledge base name" aria-label="New knowledge base name"
                             onKeyDown={(e) => { if (e.key === 'Enter') createKb(); }} style={{ ...inputStyle, marginBottom: '0.5rem' }} />
                         {!isBeginner && (
-                            <select value={newEmbedder} onChange={(e) => setNewEmbedder(e.target.value)} style={{ ...inputStyle, marginBottom: '0.5rem' }}>
+                            <select value={newEmbedder} onChange={(e) => setNewEmbedder(e.target.value)} style={{ ...inputStyle, marginBottom: '0.5rem' }} aria-label="How documents are indexed">
                                 {embedders.map((em) => (
                                     <option key={em.key} value={em.key} disabled={!em.available}>
                                         {em.label}{em.available ? '' : ' — not installed'}
@@ -432,10 +435,10 @@ const Rag: React.FC = () => {
                                     <div style={{ borderTop: '1px solid var(--color-line)', marginTop: '0.8rem', paddingTop: '0.8rem' }}>
                                         <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Download a custom model</div>
                                         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                                            <select value={customBackend} onChange={(e) => setCustomBackend(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
+                                            <select value={customBackend} onChange={(e) => setCustomBackend(e.target.value)} style={{ ...inputStyle, width: 'auto' }} aria-label="Backend for the custom model">
                                                 {catalog.map((c) => <option key={c.backend} value={c.backend}>{c.label}</option>)}
                                             </select>
-                                            <input value={customModel} onChange={(e) => setCustomModel(e.target.value)}
+                                            <input value={customModel} onChange={(e) => setCustomModel(e.target.value)} aria-label="Custom model name"
                                                 placeholder={customBackend === 'ollama' ? 'e.g. qwen2.5:7b' : customBackend === 'llama_cpp' ? 'repo:file.gguf' : 'e.g. mlx-community/Qwen2.5-7B-Instruct-4bit'}
                                                 onKeyDown={(e) => { if (e.key === 'Enter' && customModel.trim()) { downloadModel(customBackend, customModel); setCustomModel(''); } }}
                                                 style={{ ...inputStyle, flex: 1, minWidth: 200, fontFamily: 'var(--font-mono)' }} />
@@ -497,7 +500,7 @@ const Rag: React.FC = () => {
                                                         background: backend === b.key ? 'oklch(0.68 0.17 283 / 0.1)' : 'rgba(255,255,255,0.02)',
                                                     }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                                        <strong style={{ fontSize: '0.92rem' }}>{b.label}</strong>
+                                                        <strong style={{ fontSize: '0.92rem' }}><button type="button" className="btn-text" aria-pressed={backend === b.key}>{b.label}</button></strong>
                                                         {b.recommended && <span className="bento-tag bento-tag-sm"><Star size={10} aria-hidden="true" /> recommended</span>}
                                                         <span className="bento-tag bento-tag-sm" style={{ background: b.available ? 'oklch(0.78 0.15 155 / 0.15)' : 'oklch(0.82 0.14 75 / 0.15)' }}>
                                                             {b.available ? '● available' : '○ not installed'}
@@ -513,17 +516,17 @@ const Rag: React.FC = () => {
                                     )}
                                     <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '0.6rem' }}>
                                         <div>
-                                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Model</label>
-                                            <input value={model} onChange={(e) => setModel(e.target.value)} list="rag-models" style={inputStyle} />
+                                            <label htmlFor="rag-model" style={{ fontSize: '0.74rem', fontWeight: 600 }}>Model</label>
+                                            <input id="rag-model" value={model} onChange={(e) => setModel(e.target.value)} list="rag-models" style={inputStyle} />
                                             <datalist id="rag-models">{(activeBackend?.models || []).map((m) => <option key={m} value={m}>{activeBackend?.model_labels?.[m] || m}</option>)}</datalist>
                                         </div>
                                         <div>
-                                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Top-k passages</label>
-                                            <input type="number" min={1} max={12} value={topK} onChange={(e) => setTopK(Number(e.target.value))} style={inputStyle} />
+                                            <label htmlFor="rag-top-k" style={{ fontSize: '0.74rem', fontWeight: 600 }}>Top-k passages</label>
+                                            <input id="rag-top-k" type="number" min={1} max={12} value={topK} onChange={(e) => setTopK(Number(e.target.value))} style={inputStyle} />
                                         </div>
                                         <div>
-                                            <label style={{ fontSize: '0.74rem', fontWeight: 600 }}>Temperature</label>
-                                            <input type="number" min={0} max={1.5} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} style={inputStyle} />
+                                            <label htmlFor="rag-temperature" style={{ fontSize: '0.74rem', fontWeight: 600 }}>Temperature</label>
+                                            <input id="rag-temperature" type="number" min={0} max={1.5} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} style={inputStyle} />
                                         </div>
                                     </div>
                                     {activeBackend && !activeBackend.available && (
@@ -544,9 +547,9 @@ const Rag: React.FC = () => {
                             <div className="glass-panel">
                                 <div className="panel-title"><span className="pt-icon"><MessageSquare size={18} strokeWidth={1.75} /></span> Ask</div>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ask a question about your documents…"
+                                    <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ask a question about your documents…" aria-label="Your question"
                                         onKeyDown={(e) => { if (e.key === 'Enter') ask(); }} style={inputStyle} disabled={selected.n_chunks === 0} />
-                                    <button className="btn btn-primary btn-sm" onClick={ask} disabled={asking || !query.trim() || selected.n_chunks === 0}>
+                                    <button className="btn btn-primary btn-sm" onClick={ask} disabled={asking || !query.trim() || selected.n_chunks === 0} aria-label="Ask">
                                         {asking ? <Loader2 size={15} className="chat-msg__spinner" /> : <Send size={15} />}
                                     </button>
                                 </div>

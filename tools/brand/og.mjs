@@ -5,7 +5,9 @@
  *
  *   node og.mjs          # needs Chromium, ImageMagick, and tutorial-recorder's npm install
  *
- * shot.png is a frame of the Training page; replace it after a redesign.
+ * shot.png is the finished training card of the Demo page (the curves and the
+ * four result tiles), about 1400 px wide; capture it again after a redesign.
+ * The fonts are read from frontend/src/assets/fonts, so no network is needed.
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';

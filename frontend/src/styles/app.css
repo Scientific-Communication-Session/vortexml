@@ -21,7 +21,8 @@
     margin-bottom: var(--space-10);
     animation: fadeInUp var(--dur-medium) var(--ease-out);
 }
-.page-header h1 {
+.page-header h1,
+.page-header .page-header__title {
     margin-bottom: var(--space-2);
     font-size: clamp(1.875rem, 1.6vw + 1.2rem, 2.5rem);
     font-weight: 700;
@@ -31,7 +32,8 @@
     text-wrap: balance;
 }
 .page-header h1 em,
-.page-header h1 .accent {
+.page-header h1 .accent,
+.page-header .page-header__title em {
     font-family: inherit;
     font-style: normal;
     font-weight: 400;
@@ -110,7 +112,7 @@
     color: var(--color-accent-text);
     font-size: var(--text-lg);
 }
-.upload-zone h3 { margin-bottom: var(--space-1); font-size: var(--text-md); font-weight: 600; }
+.upload-zone h2 { margin-bottom: var(--space-1); font-size: var(--text-md); font-weight: 600; }
 .upload-zone p { font-size: var(--text-sm); color: var(--color-fg-2); }
 .upload-zone input[type='file'] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
@@ -220,7 +222,7 @@
     border-radius: var(--radius-md);
     background: var(--color-raised);
     border: 1px solid var(--color-line);
-    cursor: pointer;
+    /* (Not clickable itself: its Feature and Target buttons are.) */
     transition: border-color var(--dur-micro), background-color var(--dur-micro);
 }
 .col-item:hover { border-color: var(--color-line-strong); }
@@ -365,6 +367,26 @@
 }
 .btn:active:not(:disabled) { transform: scale(0.98); }
 .btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+/* A button that looks like the text it wraps. For cards and rows that react to
+   a click anywhere on them: the label inside is the real control, so keyboards,
+   screen readers and agents have something to focus and press (its click
+   reaches the card's handler). */
+.btn-text {
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    text-align: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+.btn-text:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 
 .btn-primary {
@@ -765,7 +787,8 @@ html { scrollbar-color: oklch(1 0 0 / 0.14) transparent; }
 
 /* Toggle switch */
 .toggle-switch { position: relative; display: inline-block; flex-shrink: 0; width: 40px; height: 24px; }
-.toggle-switch input { width: 0; height: 0; opacity: 0; }
+/* The real checkbox, invisible, laid over the switch: clicks land on it. */
+.toggle-switch input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .toggle-slider {
     position: absolute;
     inset: 0;

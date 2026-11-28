@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { apiGet, showToast } from '../utils/helpers';
+import { preloaded } from '../preloaded';
 import { FileText, FlaskConical, Video } from 'lucide-react';
 
 interface CourseSummary {
@@ -19,36 +20,36 @@ const CourseTypeIcon: Record<string, React.ElementType> = {
 };
 
 
-const Courses: React.FC = () => {
-    const navigate = useNavigate();
-    const [courses, setCourses] = useState<CourseSummary[]>([]);
-    const [loading, setLoading] = useState(true);
+// `embedded`: shown as a tab of the Learn page, which has the page's h1.
+const Courses: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
+    const Title = embedded ? 'h2' : 'h1';
+    // The list this page was built with, if any; the fetch below brings it up to date.
+    const [courses, setCourses] = useState<CourseSummary[]>(() => preloaded<CourseSummary[]>('/api/courses') ?? []);
+    const [loading, setLoading] = useState(() => !preloaded('/api/courses'));
 
     useEffect(() => {
         apiGet('/api/courses')
             .then(data => setCourses(data))
-            .catch(err => showToast(`Failed to load courses: ${err.message}`, 'error'))
+            .catch(err => {
+                if (!preloaded('/api/courses')) showToast(`Failed to load courses: ${err.message}`, 'error');
+            })
             .finally(() => setLoading(false));
     }, []);
 
     if (loading) {
-        return <div className="page-header"><h1>Loading courses...</h1></div>;
+        return <div className="page-header"><Title className="page-header__title">Loading courses...</Title></div>;
     }
 
     return (
         <div className="courses-container">
             <div className="page-header" style={{ marginBottom: '2.5rem' }}>
-                <h1>ML <em>Learning Paths.</em></h1>
+                <Title className="page-header__title">ML <em>Learning Paths.</em></Title>
                 <p>Master Machine Learning concepts securely and interactively.</p>
             </div>
 
             <div className="bento-grid">
                 {courses.map(course => (
-                    <div
-                        key={course.id}
-                        className="bento-card"
-                        onClick={() => navigate(`/courses/${course.id}`)}
-                    >
+                    <Link key={course.id} to={`/courses/${course.id}`} className="bento-card">
                         <div className="bento-card-bg"></div>
                         <div className="bento-content">
                             <div className="bento-header flex-between mb-1">
@@ -57,7 +58,7 @@ const Courses: React.FC = () => {
                                 </span>
                                 <span className="bento-duration">{course.duration}</span>
                             </div>
-                            <h3 className="bento-title">{course.title}</h3>
+                            {React.createElement(embedded ? 'h3' : 'h2', { className: 'bento-title' }, course.title)}
                             <p className="bento-desc text-muted">{course.description}</p>
 
                             <div className="bento-tags flex gap-05">
@@ -67,7 +68,7 @@ const Courses: React.FC = () => {
                             </div>
                         </div>
                         <div className="bento-hover-effect"></div>
-                    </div>
+                    </Link>
                 ))}
             </div>
         </div>

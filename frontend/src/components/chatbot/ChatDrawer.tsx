@@ -43,7 +43,7 @@ const ChatDrawer: React.FC = () => {
     };
 
     return (
-        <aside className={`chat-drawer ${isOpen ? 'chat-drawer--open' : ''}`} aria-hidden={!isOpen}>
+        <aside className={`chat-drawer ${isOpen ? 'chat-drawer--open' : ''}`} aria-hidden={!isOpen} inert={!isOpen}>
             <header className="chat-drawer__header">
                 <div className="chat-drawer__title">
                     <span className="chat-drawer__title-icon"><Sprout size={18} strokeWidth={1.75} aria-hidden="true" /></span>
@@ -108,6 +108,7 @@ const ChatDrawer: React.FC = () => {
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={handleKeyDown}
+                    aria-label="Ask the tutor"
                     placeholder="Ask about epochs, loss, or anything ML…"
                     rows={2}
                     disabled={isSending}

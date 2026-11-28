@@ -2,7 +2,7 @@
 
 Site: https://vortexml.ro
 Short guide with links: https://vortexml.ro/llms.txt
-Last updated: 2026-11-26
+Last updated: 2026-11-28
 
 ## What VortexML is
 
@@ -14,8 +14,12 @@ VortexML won 1st place at the Scientific Communication Session 2026, Politehnica
 
 ## How the site is built (useful for agents)
 
-- It is a single-page application. A plain HTTP fetch of any page returns the same HTML shell; the content is drawn by JavaScript. Use a browser to interact with it, or read this file.
-- The top bar links to every section: Demo, Tutorial, Dataset, Architect, Training, Predict, Assistant, Chat, Leaderboard, Learn. Sign In and Sign Up are on the right.
+- Every public page is served as complete HTML with its own title, description and canonical URL, so a plain HTTP fetch returns the page's text. The pages are also a single-page application: once the script loads, links change the page without a reload. Doing things (uploading, training, asking the AI) needs a browser with JavaScript.
+- Every public page is also served as Markdown: add `.md` to its address (https://vortexml.ro/tutorial.md, and https://vortexml.ro/index.md for the home page), or request the page with the header `Accept: text/markdown`.
+- Predict, Assistant, Chat, Leaderboard and Profile need an account: without one they lead to the sign-in page.
+- The controls are ordinary links, buttons and labelled form fields, so a browser-driving agent can find them by role and name ("Sign Up" link, "Email" field, "Start Training" button).
+- An address that does not exist answers with HTTP 404.
+- The top bar has Demo and three menus. Build: Dataset, Architect, Training, Predict. AI: Assistant, Chat. Learn: Tutorial, Learn, Leaderboard. Sign In and Sign Up are on the right. The footer links to About, Contact, the Terms, the Privacy Policy and the Cookie Policy.
 - Deep links work: https://vortexml.ro/tutorial, https://vortexml.ro/demo and so on open that section directly.
 - Public JSON that needs no session: `GET /api/demo/datasets`, `GET /api/courses`, `GET /api/courses/{id}`. Every other `/api/` route needs a session cookie.
 - Signing up is a form with email, username and password, followed by three multiple-choice questions.
@@ -114,7 +118,7 @@ Pick one of four bundled datasets and press one button: a real model trains on t
 
 Learn (https://vortexml.ro/learn) has a roadmap of eight milestones: Mathematics and Fundamentals, Data Preprocessing, Supervised Learning, Unsupervised Learning, Model Evaluation and Validation, Ensemble Methods, Deep Learning, and MLOps and Deployment. Each topic opens a short explanation.
 
-Courses (https://vortexml.ro/courses), each a written lesson:
+Courses (https://vortexml.ro/courses), each a written lesson with formulas and PyTorch code. The full text of every lesson is at the end of this file:
 
 - Introduction to Neural Networks — /courses/intro-nn
 - MLP and Deep Neural Networks — /courses/course-mlp-dnn
@@ -127,7 +131,7 @@ Courses (https://vortexml.ro/courses), each a written lesson:
 
 ## Price
 
-VortexML is free to use. The shared server is the free tier, with a queue. Enterprise arrangements (dedicated capacity, no queue, parallel training) are discussed individually through the "Contact Sales" form in the footer.
+VortexML is free to use. The shared server is the free tier, with a queue. Enterprise arrangements (dedicated capacity, no queue, parallel training) are discussed individually through the "Contact" form in the footer.
 
 ## Policies
 

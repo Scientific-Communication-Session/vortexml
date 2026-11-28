@@ -532,6 +532,7 @@ const Architect: React.FC = () => {
                         ) : (
                             <select
                                 className="form-select"
+                                aria-label="Load a saved model from your account"
                                 value=""
                                 disabled={loadingProject}
                                 onChange={(e) => { if (e.target.value) loadFromAccount(parseInt(e.target.value)); }}
@@ -569,7 +570,8 @@ const Architect: React.FC = () => {
                     >
                         <div className="upload-zone-content">
                             <span className="upload-zone-icon"><Upload size={22} strokeWidth={1.75} aria-hidden="true" /></span>
-                            <span className="upload-zone-text">Drag & drop a <strong>.pt</strong> file here, or <span className="upload-zone-link">browse</span></span>
+                            {/* (The button's click reaches the zone, which opens the file dialog.) */}
+                            <span className="upload-zone-text">Drag & drop a <strong>.pt</strong> file here, or <button type="button" className="btn-text upload-zone-link" aria-label="browse for a .pt weight file">browse</button></span>
                         </div>
                         <input
                             type="file"
@@ -640,7 +642,10 @@ const Architect: React.FC = () => {
                                     <AskButton topic={ARCH_HELP_TOPIC[a.key] ?? 'arch_mlp'} />
                                 </div>
                                 <div className="arch-icon"><ArchIcon size={18} strokeWidth={1.75} aria-hidden="true" /></div>
-                                <div className="arch-name">{a.name}</div>
+                                {/* The control for keyboards, screen readers and agents; a click anywhere on the card does the same. */}
+                                <div className="arch-name">
+                                    <button type="button" className="btn-text" aria-pressed={selectedArch === a.key}>{a.name}</button>
+                                </div>
                                 <div className="arch-short">{a.short}</div>
                                 <div className="arch-desc">{a.desc}</div>
                             </div>
@@ -667,6 +672,7 @@ const Architect: React.FC = () => {
                                     <span className="layer-label">Layer {i + 1}</span>
                                     <input
                                         type="number"
+                                        aria-label={`Neurons in layer ${i + 1}`}
                                         value={l}
                                         min="1" max="2048"
                                         className="layer-neurons"
@@ -693,17 +699,17 @@ const Architect: React.FC = () => {
                         <div className="form-row">
                             <div className="form-group">
                                 <label className="form-label">Epochs <HelpButton topic="epochs" /><AskButton topic="epochs" /></label>
-                                <NumericInput min="1" max="100000" step="1" value={epochs} onValue={setEpochs}
+                                <NumericInput aria-label="Epochs" min="1" max="100000" step="1" value={epochs} onValue={setEpochs}
                                     parse={(t) => parseInt(t, 10)} valid={(v) => v >= 1} />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Learning Rate <HelpButton topic="learning_rate" /><AskButton topic="learning_rate" /></label>
-                                <NumericInput min="0.000001" max="10" step="0.0001" value={lr} onValue={setLr}
+                                <NumericInput aria-label="Learning Rate" min="0.000001" max="10" step="0.0001" value={lr} onValue={setLr}
                                     parse={parseFloat} valid={(v) => v > 0} />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Batch Size <HelpButton topic="batch_size" /><AskButton topic="batch_size" /></label>
-                                <select className="form-select" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value) || 32)}>
+                                <select className="form-select" aria-label="Batch Size" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value) || 32)}>
                                     <option value="16">16</option>
                                     <option value="32">32</option>
                                     <option value="64">64</option>
@@ -713,7 +719,7 @@ const Architect: React.FC = () => {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Optimizer <HelpButton topic="optimizer" /><AskButton topic="optimizer" /></label>
-                                <select className="form-select" value={optimizer} onChange={e => setOptimizer(e.target.value)}>
+                                <select className="form-select" aria-label="Optimizer" value={optimizer} onChange={e => setOptimizer(e.target.value)}>
                                     <option value="adam">Adam</option>
                                     <option value="adamw">AdamW</option>
                                     <option value="sgd">SGD</option>
@@ -722,7 +728,7 @@ const Architect: React.FC = () => {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Activation <HelpButton topic="activation" /><AskButton topic="activation" /></label>
-                                <select className="form-select" value={activation} onChange={e => setActivation(e.target.value)}>
+                                <select className="form-select" aria-label="Activation" value={activation} onChange={e => setActivation(e.target.value)}>
                                     <option value="relu">ReLU</option>
                                     <option value="leaky_relu">Leaky ReLU</option>
                                     <option value="elu">ELU</option>
@@ -739,7 +745,7 @@ const Architect: React.FC = () => {
                             <div className="es-section">
                                 <div className="es-header">
                                     <label className="toggle-switch">
-                                        <input type="checkbox" checked={esEnabled} onChange={e => setEsEnabled(e.target.checked)} />
+                                        <input type="checkbox" aria-label="Early Stopping" checked={esEnabled} onChange={e => setEsEnabled(e.target.checked)} />
                                         <span className="toggle-slider"></span>
                                     </label>
                                     <span className="es-label">Early Stopping</span>
@@ -751,12 +757,12 @@ const Architect: React.FC = () => {
                                         <div className="form-row">
                                             <div className="form-group">
                                                 <label className="form-label">Patience <HelpButton topic="patience" /><AskButton topic="patience" /></label>
-                                                <input type="number" className="form-input" value={esPatience} onChange={e => setEsPatience(parseInt(e.target.value) || 10)} />
+                                                <input type="number" className="form-input" aria-label="Patience" value={esPatience} onChange={e => setEsPatience(parseInt(e.target.value) || 10)} />
                                                 <span className="form-hint">Epochs to wait for improvement</span>
                                             </div>
                                             <div className="form-group">
                                                 <label className="form-label">Min Delta <HelpButton topic="min_delta" /><AskButton topic="min_delta" /></label>
-                                                <input type="number" className="form-input" step="0.0001" value={esDelta} onChange={e => setEsDelta(parseFloat(e.target.value) || 0.0001)} />
+                                                <input type="number" className="form-input" aria-label="Min Delta" step="0.0001" value={esDelta} onChange={e => setEsDelta(parseFloat(e.target.value) || 0.0001)} />
                                                 <span className="form-hint">Minimum change to qualify as improvement</span>
                                             </div>
                                         </div>
@@ -784,7 +790,7 @@ const Architect: React.FC = () => {
                         <div className="form-row mt-2">
                             <div className="form-group" style={{ flex: 1 }}>
                                 <label className="form-label">Project Name <HelpButton topic="project_name" /><AskButton topic="project_name" /></label>
-                                <input type="text" className="form-input" value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="MyProject" />
+                                <input type="text" className="form-input" aria-label="Project Name" value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="MyProject" />
                                 <span className="form-hint">Used in the weight filename</span>
                             </div>
                         </div>

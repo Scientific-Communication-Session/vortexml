@@ -825,6 +825,7 @@ const CurvedConnectors: React.FC<{
     return (
         <svg
             ref={svgRef}
+            aria-hidden="true"
             className="subbranch-svg"
             style={{
                 position: 'absolute',
@@ -1053,15 +1054,28 @@ const Roadmap: React.FC = () => {
                                             {/* Node card */}
                                             <div className={`node-card ${isExpanded ? 'node-card-expanded' : ''}`}>
                                                 <span className="node-icon"><TopicIcon e={node.icon} /></span>
-                                                <span className="node-title">{node.title}</span>
+                                                {/* The control for keyboards, screen readers and agents; a click
+                                                    anywhere on the card does the same. The explanation it opens is
+                                                    also in the page as its description, so it can be read (by a
+                                                    screen reader, a crawler) without opening anything. */}
+                                                <span className="node-title">
+                                                    <button type="button" className="btn-text" aria-haspopup="dialog" aria-describedby={`topic-${node.id}`}>
+                                                        {node.title}
+                                                    </button>
+                                                    <span id={`topic-${node.id}`} className="sr-only">
+                                                        {node.description}
+                                                        {hasChildren && ` Covers: ${node.children!.map((c) => c.title).join(', ')}.`}
+                                                    </span>
+                                                </span>
                                                 {hasChildren && (
                                                     <button
                                                         className={`node-expand-btn ${isExpanded ? 'expanded' : ''}`}
                                                         onClick={(e) => handleToggleExpand(e, node.id)}
-                                                        aria-label={isExpanded ? 'Collapse' : 'Expand sub-topics'}
+                                                        aria-label={isExpanded ? `Collapse ${node.title}` : `Show the sub-topics of ${node.title}`}
+                                                        aria-expanded={isExpanded}
                                                         style={{ '--node-color': category.color } as React.CSSProperties}
                                                     >
-                                                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
                                                             <path
                                                                 d={isLeft ? 'M8.5 3L4.5 7L8.5 11' : 'M5.5 3L9.5 7L5.5 11'}
                                                                 stroke="currentColor"
@@ -1144,7 +1158,8 @@ const Roadmap: React.FC = () => {
 
             {/* ── Popover — portalled to <body> so transformed ancestors
                   (Learn's AnimatePresence wrapper) don't trap the fixed overlay ── */}
-            {createPortal(
+            {/* A portal needs the browser's document; the prerendered page has none. */}
+            {typeof document !== 'undefined' && createPortal(
                 <AnimatePresence>
                     {selectedNode && (
                         <motion.div
@@ -1157,6 +1172,9 @@ const Roadmap: React.FC = () => {
                         >
                             <motion.div
                                 className="roadmap-popover"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-labelledby="roadmap-topic-title"
                                 initial={{ opacity: 0, scale: 0.92, y: 18 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.92, y: 18 }}
@@ -1186,7 +1204,7 @@ const Roadmap: React.FC = () => {
                                 </div>
                                 <div className="popover-body">
                                     <div className="popover-icon-large" style={{ color: selectedNode.category.color }}><TopicIcon e={selectedNode.node.icon} size={32} /></div>
-                                    <h3>{selectedNode.node.title}</h3>
+                                    <h3 id="roadmap-topic-title">{selectedNode.node.title}</h3>
                                     <p>{selectedNode.node.description}</p>
                                 </div>
                             </motion.div>

@@ -6,6 +6,7 @@
 @import 'tailwindcss/base';
 @import 'tailwindcss/components';
 @import 'tailwindcss/utilities';
+@import './styles/fonts.css';
 @import './styles/tokens.css';
 @import './styles/components.css';
 @import './styles/app.css';
@@ -124,6 +125,10 @@ body::before {
 }
 
 .bento-card {
+    /* A link to the lesson: the whole card is the target. */
+    display: block;
+    color: inherit;
+    text-decoration: none;
     position: relative;
     padding: 1.5rem;
     border-radius: var(--radius-xl);
@@ -266,9 +271,11 @@ body::before {
     font-weight: 300;
 }
 
-.markdown-content h1,
+/* A lesson's "# Title" is drawn as an h2, "##" as an h3 and so on: the page
+   already has its h1 (components/courses/TextCourse.tsx). */
 .markdown-content h2,
-.markdown-content h3 {
+.markdown-content h3,
+.markdown-content h4 {
     margin-top: 2.25rem;
     margin-bottom: 1rem;
     color: var(--text-primary);
@@ -277,15 +284,15 @@ body::before {
     line-height: 1.18;
 }
 
-.markdown-content h1 {
+.markdown-content h2 {
     font-size: 2.1rem;
     border-bottom: 1px solid var(--border-glass);
     padding-bottom: 0.55rem;
     letter-spacing: -0.028em;
 }
 
-.markdown-content h2 { font-size: 1.55rem; }
-.markdown-content h3 { font-size: 1.25rem; letter-spacing: -0.018em; }
+.markdown-content h3 { font-size: 1.55rem; }
+.markdown-content h4 { font-size: 1.25rem; letter-spacing: -0.018em; }
 
 .markdown-content p {
     margin-bottom: 1.25rem;
@@ -582,7 +589,7 @@ body::before {
     margin: 0 auto 1.5rem;
 }
 
-.survey-header h2 {
+.survey-header h1 {
     font-size: clamp(2rem, 3vw + 1.2rem, 2.75rem);
     margin-bottom: 1rem;
     letter-spacing: -0.035em;
@@ -590,8 +597,8 @@ body::before {
     font-weight: 600;
 }
 
-.survey-header h2 em,
-.survey-header h2 .accent {
+.survey-header h1 em,
+.survey-header h1 .accent {
     font-family: var(--font-display);
     font-style: normal;
     font-weight: 400;
@@ -634,10 +641,22 @@ body::before {
     position: relative;
 }
 
+/* The real radio button, invisible, laid over the whole option: a click
+   anywhere lands on it, so it can be pressed by whatever finds it by role. */
 .survey-option input {
     position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    margin: 0;
     opacity: 0;
     cursor: pointer;
+}
+
+.survey-option input:focus-visible + .option-content {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
 }
 
 .survey-option .option-content {
@@ -1721,7 +1740,7 @@ body::before {
 
 .chat-drawer__title-sub {
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--color-fg-3);
     font-family: var(--font-sans);
 }
 

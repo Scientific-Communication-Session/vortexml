@@ -208,18 +208,20 @@ const Leaderboard: React.FC = () => {
                                     <tr>
                                         <th>Compare</th><th>#</th><th>Project</th><th>Architecture</th><th>Task</th>
                                         <th
-                                            onClick={() => setSortBy('acc')}
-                                            style={{ cursor: 'pointer', color: sortBy === 'acc' ? 'var(--color-accent-text)' : undefined, whiteSpace: 'nowrap' }}
-                                            title="Sort by validation accuracy (highest first)"
+                                            aria-sort={sortBy === 'acc' ? 'descending' : undefined}
+                                            style={{ color: sortBy === 'acc' ? 'var(--color-accent-text)' : undefined, whiteSpace: 'nowrap' }}
                                         >
-                                            Val Accuracy{sortBy === 'acc' ? ' ▼' : ''}
+                                            <button type="button" className="btn-text" onClick={() => setSortBy('acc')} title="Sort by validation accuracy (highest first)">
+                                                Val Accuracy{sortBy === 'acc' ? ' ▼' : ''}
+                                            </button>
                                         </th>
                                         <th
-                                            onClick={() => setSortBy('loss')}
-                                            style={{ cursor: 'pointer', color: sortBy === 'loss' ? 'var(--color-accent-text)' : undefined, whiteSpace: 'nowrap' }}
-                                            title="Sort by validation loss (lowest first)"
+                                            aria-sort={sortBy === 'loss' ? 'ascending' : undefined}
+                                            style={{ color: sortBy === 'loss' ? 'var(--color-accent-text)' : undefined, whiteSpace: 'nowrap' }}
                                         >
-                                            Val Loss{sortBy === 'loss' ? ' ▲' : ''}
+                                            <button type="button" className="btn-text" onClick={() => setSortBy('loss')} title="Sort by validation loss (lowest first)">
+                                                Val Loss{sortBy === 'loss' ? ' ▲' : ''}
+                                            </button>
                                         </th>
                                         <th>Epochs</th>
                                     </tr>

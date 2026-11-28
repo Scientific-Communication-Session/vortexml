@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { apiGet, showToast } from '../utils/helpers';
+import { preloaded } from '../preloaded';
+import { setPageTitle } from '../pageMeta';
 import TextCourse from '../components/courses/TextCourse';
 import VideoCourse from '../components/courses/VideoCourse';
 import LabCourse from '../components/courses/LabCourse';
@@ -29,9 +31,9 @@ interface Course {
 
 const CourseDetail: React.FC = () => {
     const { id } = useParams();
-    const navigate = useNavigate();
-    const [course, setCourse] = useState<Course | null>(null);
-    const [loading, setLoading] = useState(true);
+    // The lesson this page was built with, if it is this one; the fetch below brings it up to date.
+    const [course, setCourse] = useState<Course | null>(() => preloaded<Course>(`/api/courses/${id}`) ?? null);
+    const [loading, setLoading] = useState(() => !preloaded(`/api/courses/${id}`));
 
     useEffect(() => {
         apiGet(`/api/courses/${id}`)
@@ -39,9 +41,17 @@ const CourseDetail: React.FC = () => {
                 if (data.error) showToast(data.error, 'error');
                 else setCourse(data);
             })
-            .catch(err => showToast(`Failed to load course: ${err.message}`, 'error'))
+            .catch(err => {
+                // A page built with the lesson still shows it: nothing to report.
+                if (!preloaded(`/api/courses/${id}`)) showToast(`Failed to load course: ${err.message}`, 'error');
+            })
             .finally(() => setLoading(false));
     }, [id]);
+
+    // Each lesson gets its own title and description (the route only knows "Courses").
+    useEffect(() => {
+        if (course) setPageTitle(course.title, course.description);
+    }, [course]);
 
     if (loading) {
         return <div className="page-header"><h1>Loading course module...</h1></div>;
@@ -51,7 +61,7 @@ const CourseDetail: React.FC = () => {
         return (
             <div className="page-header text-center">
                 <h1><TriangleAlert size={28} aria-hidden="true" style={{ verticalAlign: '-3px', color: 'var(--color-warning)' }} /> Course Not Found</h1>
-                <button className="btn btn-primary mt-2" onClick={() => navigate('/courses')}><ArrowLeft size={14} aria-hidden="true" /> Back to Courses</button>
+                <Link className="btn btn-primary mt-2" to="/courses"><ArrowLeft size={14} aria-hidden="true" /> Back to Courses</Link>
             </div>
         );
     }
@@ -59,9 +69,9 @@ const CourseDetail: React.FC = () => {
     return (
         <div className="course-detail-container">
             <div className="flex align-center gap-1 mb-2">
-                <button className="btn btn-sm btn-ghost" onClick={() => navigate('/courses')}>
-                    <ArrowLeft size={14} aria-hidden="true" /> Back
-                </button>
+                <Link className="btn btn-sm btn-ghost" to="/courses">
+                    <ArrowLeft size={14} aria-hidden="true" /> All courses
+                </Link>
             </div>
 
             <div className="page-header mb-2" style={{ textAlign: 'left', padding: 0 }}>

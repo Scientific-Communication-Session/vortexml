@@ -1,37 +1,47 @@
 <!doctype html><html><head><meta charset="utf-8">
-<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,700,800&display=block" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400;1,500&family=JetBrains+Mono:wght@500&display=block" rel="stylesheet">
+<!-- The link-preview picture, 1200 × 630. Same tokens as the site (frontend/src/styles/tokens.css):
+     near-black page, one periwinkle accent, glass surfaces, Cabinet Grotesk. Rendered by og.mjs. -->
 <style>
+@font-face{font-family:'Cabinet Grotesk';src:url('../../frontend/src/assets/fonts/cabinet-grotesk-400.woff2') format('woff2');font-weight:400}
+@font-face{font-family:'Cabinet Grotesk';src:url('../../frontend/src/assets/fonts/cabinet-grotesk-500.woff2') format('woff2');font-weight:500}
+@font-face{font-family:'Cabinet Grotesk';src:url('../../frontend/src/assets/fonts/cabinet-grotesk-700.woff2') format('woff2');font-weight:700}
+@font-face{font-family:'Cabinet Grotesk';src:url('../../frontend/src/assets/fonts/cabinet-grotesk-800.woff2') format('woff2');font-weight:800}
+@font-face{font-family:'JetBrains Mono';src:url('../../frontend/src/assets/fonts/jetbrains-mono-latin.woff2') format('woff2');font-weight:400 600}
 *{box-sizing:border-box;margin:0}
-body{width:1200px;height:630px;background:#06060f;color:#fff;font-family:'Cabinet Grotesk',system-ui,sans-serif;overflow:hidden;position:relative}
-.blob{position:absolute;border-radius:50%;filter:blur(110px)}
-.b1{width:620px;height:620px;left:-220px;top:-260px;background:rgba(99,102,241,.42)}
-.b2{width:520px;height:520px;right:-160px;bottom:-240px;background:rgba(6,182,212,.26)}
-.b3{width:380px;height:380px;left:420px;top:330px;background:rgba(168,85,247,.2)}
-.grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:44px 44px}
-.wrap{position:absolute;inset:0;padding:58px 64px;display:flex;flex-direction:column}
-.brand{display:flex;align-items:center;gap:16px;font-size:34px;font-weight:700;letter-spacing:-.02em}
-.brand img{width:52px;height:52px}
-.brand em{font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:500;color:#a78bfa;margin-left:1px}
-h1{margin-top:62px;font-size:88px;line-height:.95;font-weight:700;letter-spacing:-.045em}
-h1 em{display:block;font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:400;letter-spacing:-.015em;font-size:104px;padding-bottom:10px;background:linear-gradient(90deg,#818cf8,#c084fc 55%,#22d3ee);-webkit-background-clip:text;color:transparent}
-p{margin-top:22px;font-size:29px;line-height:1.35;color:rgba(255,255,255,.72);max-width:560px;font-weight:400}
-.foot{margin-top:auto;display:flex;align-items:center;gap:22px}
-.award{display:flex;align-items:center;gap:12px;padding:11px 18px;border-radius:16px;border:1px solid rgba(252,211,77,.38);background:linear-gradient(90deg,rgba(251,191,36,.16),rgba(251,191,36,.04));color:#fef3c7;font-size:20px;font-weight:700;letter-spacing:-.01em}
-.award small{display:block;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:rgba(253,230,138,.7);font-weight:500;margin-top:2px}
-.url{position:absolute;right:64px;top:70px;font-family:'JetBrains Mono',monospace;font-size:24px;color:rgba(255,255,255,.7);letter-spacing:.02em}
-.shot{position:absolute;right:-150px;top:150px;width:640px;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.16);box-shadow:0 40px 110px -20px rgba(0,0,0,.9),0 0 0 1px rgba(139,92,246,.18);transform:perspective(1600px) rotateY(-14deg) rotateX(3deg)}
+body{width:1200px;height:630px;background:#08080b;color:#f5f5f8;font-family:'Cabinet Grotesk',system-ui,sans-serif;overflow:hidden;position:relative;-webkit-font-smoothing:antialiased}
+/* The violet light of the hero: one wide glow behind the product, a faint one top-left */
+.glow{position:absolute;inset:0;background:
+  radial-gradient(520px 420px at 900px 360px,rgba(106,93,222,.42),transparent 70%),
+  radial-gradient(520px 300px at 120px -40px,rgba(140,134,252,.16),transparent 70%),
+  radial-gradient(700px 260px at 600px 700px,rgba(106,93,222,.18),transparent 70%)}
+.wrap{position:absolute;inset:0;padding:56px 64px;display:flex;flex-direction:column}
+.brand{display:flex;align-items:center;gap:14px;font-size:32px;font-weight:700;letter-spacing:-.02em}
+.brand img{width:46px;height:46px}
+.brand b{font-weight:500;color:#b7b9ff}
+.url{position:absolute;right:64px;top:66px;font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:500;color:#afb0be;letter-spacing:.01em}
+h1{margin-top:58px;font-size:96px;line-height:.96;letter-spacing:-.045em;font-weight:800}
+h1 span{display:block;font-weight:400;color:#afb0be}
+p{margin-top:26px;font-size:28px;line-height:1.35;color:#afb0be;max-width:520px;letter-spacing:-.008em}
+.award{margin-top:auto;align-self:flex-start;display:flex;align-items:center;gap:14px;padding:10px 20px 10px 10px;border-radius:18px;
+  border:1px solid rgba(255,255,255,.12);background:linear-gradient(180deg,rgba(40,38,58,.9),rgba(24,23,34,.92));box-shadow:inset 0 1px 0 rgba(255,255,255,.09)}
+.award i{display:grid;place-items:center;width:44px;height:44px;border-radius:10px;background:rgba(140,134,252,.14);border:1px solid rgba(140,134,252,.4);color:#b7b9ff}
+.award strong{display:block;font-size:20px;font-weight:500;letter-spacing:-.01em}
+.award small{display:block;font-size:16px;color:#afb0be;margin-top:1px}
+/* The product: the demo's training card, tilted like the landing page's reveal */
+.shot{position:absolute;left:640px;top:150px;width:760px;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+  box-shadow:0 50px 120px -30px rgba(0,0,0,.95),0 0 90px -20px rgba(106,93,222,.55);transform:perspective(1800px) rotateY(-13deg) rotateX(4deg);transform-origin:left center}
 .shot img{display:block;width:100%}
-.shot::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(6,6,15,0) 55%,rgba(6,6,15,.75))}
+.shot::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(8,8,11,0) 60%,rgba(8,8,11,.7))}
 </style></head><body>
-<div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="grid"></div>
+<div class="glow"></div>
 <div class="shot"><img src="shot.png"></div>
 <div class="wrap">
-  <div class="brand"><img src="../../frontend/public/logo.svg"><span>Vortex<em>ML</em></span></div>
-  <h1>Intelligence,<em>Simplified.</em></h1>
+  <div class="brand"><img src="../../frontend/public/logo.svg"><span>Vortex<b>ML</b></span></div>
+  <h1>Intelligence,<span>Simplified.</span></h1>
   <p>Train neural networks in your browser, with an AI tutor at every step.</p>
-  <div class="foot">
-    <div class="award"><span style="font-size:26px">🏆</span><span>1st place · Scientific Communication Session 2026<small>Politehnica University of Bucharest</small></span></div>
+  <div class="award">
+    <i><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14.66v1.626a2 2 0 0 1-.976 1.696A5 5 0 0 0 7 21.978"/><path d="M14 14.66v1.626a2 2 0 0 0 .976 1.696A5 5 0 0 1 17 21.978"/><path d="M18 9h1.5a1 1 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M6 9a6 6 0 0 0 12 0V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1z"/><path d="M6 9H4.5a1 1 0 0 1 0-5H6"/></svg></i>
+    <span><strong>1st place — Scientific Communication Session 2026</strong><small>Politehnica University of Bucharest</small></span>
   </div>
 </div>
 <div class="url">vortexml.ro</div></body></html>

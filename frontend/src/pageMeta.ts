@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { SITE } from './site';
+import { preloaded } from './preloaded';
 
 // Title and description per route, for the browser tab, bookmarks, search
 // engines that render JavaScript, and agents reading the page. (Link-preview
@@ -71,6 +72,7 @@ const PAGES: Record<string, { title: string; description: string }> = {
         title: 'Privacy Policy',
         description: 'What data VortexML collects, why, who it is shared with, how long it is kept, and your rights.',
     },
+    '/404': { title: 'Page not found', description: 'There is no page at this address.' },
     '/cookies': {
         title: 'Cookie Policy',
         description: 'The one essential cookie VortexML sets, and what it stores in your browser.',
@@ -81,20 +83,49 @@ const setMeta = (selector: string, attr: string, value: string) => {
     document.head.querySelector(selector)?.setAttribute(attr, value);
 };
 
+/** The title, description and canonical URL of a route. Also used by the build to write each page's static HTML. */
+export function metaFor(pathname: string) {
+    const path = pathname.replace(/\/+$/, '') || '/';
+    const url = `${SITE.url}${path === '/' ? '/' : path}`;
+    if (path.startsWith('/courses/')) {
+        // A lesson the page was built with has its own title; any other one
+        // gets it from setPageTitle once it has loaded.
+        const course = preloaded<{ title: string; description: string }>(`/api${path}`);
+        if (course) {
+            const title = `${course.title} · ${SITE.name}`;
+            return { title, description: course.description, url, ogTitle: title };
+        }
+    }
+    const page = PAGES[path] ?? (path.startsWith('/courses/') ? PAGES['/courses'] : undefined);
+    return {
+        title: page ? `${page.title} · ${SITE.name}` : DEFAULT.title,
+        description: page?.description ?? DEFAULT.description,
+        url,
+        ogTitle: page ? `${page.title} · ${SITE.name}` : 'VortexML — Intelligence, Simplified',
+    };
+}
+
+const applyTitle = (title: string, ogTitle: string, description: string) => {
+    document.title = title;
+    setMeta('meta[name="description"]', 'content', description);
+    setMeta('meta[property="og:title"]', 'content', ogTitle);
+    setMeta('meta[property="og:description"]', 'content', description);
+    setMeta('meta[name="twitter:title"]', 'content', ogTitle);
+    setMeta('meta[name="twitter:description"]', 'content', description);
+};
+
 /** Keep the document title, description and canonical URL in step with the route. */
 export function usePageMeta(pathname: string) {
     useEffect(() => {
-        const path = pathname.replace(/\/+$/, '') || '/';
-        const page = PAGES[path] ?? (path.startsWith('/courses/') ? PAGES['/courses'] : undefined);
-        const title = page ? `${page.title} · ${SITE.name}` : DEFAULT.title;
-        const description = page?.description ?? DEFAULT.description;
-        const url = `${SITE.url}${path === '/' ? '/' : path}`;
-
-        document.title = title;
-        setMeta('meta[name="description"]', 'content', description);
+        const { title, description, url, ogTitle } = metaFor(pathname);
+        applyTitle(title, ogTitle, description);
         setMeta('link[rel="canonical"]', 'href', url);
         setMeta('meta[property="og:url"]', 'content', url);
-        setMeta('meta[property="og:title"]', 'content', page ? title : 'VortexML — Intelligence, Simplified');
-        setMeta('meta[property="og:description"]', 'content', description);
     }, [pathname]);
+}
+
+/** For a page whose title is only known once its data has loaded (a course). */
+export function setPageTitle(pageTitle: string, description: string) {
+    const title = `${pageTitle} · ${SITE.name}`;
+    applyTitle(title, title, description);
 }

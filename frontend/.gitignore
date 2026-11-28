@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Cabinet Grotesk: its licence does not allow passing the files on through a
+# repository. scripts/fetch-fonts.mjs downloads them from Fontshare.
+src/assets/fonts/cabinet-grotesk-*.woff2
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -92,15 +92,15 @@ const Survey: React.FC = () => {
                 <div className="icon-wrapper glass-icon">
                     <span className="card-icon"><Brain size={28} strokeWidth={1.75} aria-hidden="true" /></span>
                 </div>
-                <h2>Machine Learning Experience</h2>
+                <h1>Machine Learning Experience</h1>
                 <p>Welcome to Vortex ML. Let's customize your journey by understanding your background.</p>
             </div>
 
             <div className="survey-questions-grid">
                 {SURVEY_QUESTIONS.map((q, index) => (
                     <div key={q.id} className="survey-question-card glass-panel" style={{ animationDelay: `${index * 0.15}s` }}>
-                        <h3>{q.id}. {q.text}</h3>
-                        <div className="options-group">
+                        <h3 id={`survey-q-${q.id}`}>{q.id}. {q.text}</h3>
+                        <div className="options-group" role="radiogroup" aria-labelledby={`survey-q-${q.id}`}>
                             {q.options.map((opt, i) => {
                                 const isSelected = answers[q.id] === opt.value;
                                 return (

@@ -4,6 +4,7 @@ import { motion, useInView, useReducedMotion, useScroll, useTransform } from 'fr
 import { Activity, ArrowDown, ArrowRight, CloudCog, Database, GraduationCap, Layers, Pause, Play, Trophy } from 'lucide-react';
 import VortexField from '../components/VortexField';
 import TutorialClip from '../components/TutorialClip';
+import { clipUrl } from '../components/tutorialClips';
 import ProgressRing from '../components/session/ProgressRing';
 import './home.css';
 
@@ -39,43 +40,35 @@ const SectionHead: React.FC<{ label: string; title: React.ReactNode; children: R
 );
 
 // ─── Hero ────────────────────────────────────────────────────────────────────
-const Hero: React.FC = () => {
-    const reduce = useReducedMotion();
-    // Each headline line rises out of its own mask, one after the other.
-    const line = (i: number) => ({
-        initial: reduce ? { opacity: 0 } : { y: '105%' },
-        animate: reduce ? { opacity: 1 } : { y: '0%' },
-        transition: { duration: 0.7, delay: 0.1 + i * 0.08, ease: GLIDE },
-    });
-    const rise = (delay: number) => ({
-        initial: reduce ? { opacity: 0 } : { opacity: 0, y: 12 },
-        animate: { opacity: 1, y: 0 },
-        transition: { duration: 0.5, delay, ease: GLIDE },
-    });
+// The entrance is plain CSS (home.css, "Hero entrance"), not the animation
+// library: the first screen is in the page's HTML and must appear with it,
+// without waiting for the script. `--d` is each element's delay.
+const delay = (seconds: number) => ({ '--d': `${seconds}s` }) as React.CSSProperties;
 
+const Hero: React.FC = () => {
     return (
         <section className="vx-hero">
             <div className="vx-container vx-hero__grid">
                 <div className="vx-hero__copy">
-                    <motion.div {...rise(0)} className="vx-award vx-glass">
+                    <div className="vx-award vx-glass vx-rise">
                         <span className="vx-award__icon"><Trophy size={18} strokeWidth={1.75} aria-hidden="true" /></span>
                         <span className="vx-award__text">
                             <span className="vx-award__title">1st place — Scientific Communication Session 2026</span>
                             <span className="vx-award__sub">Politehnica University of Bucharest</span>
                         </span>
-                    </motion.div>
+                    </div>
 
                     <h1 className="vx-hero__title">
-                        <span className="vx-hero__line vx-hero__line--strong"><motion.span {...line(0)}>Intelligence,</motion.span></span>
-                        <span className="vx-hero__line vx-hero__line--light"><motion.span {...line(1)}>Simplified.</motion.span></span>
+                        <span className="vx-hero__line vx-hero__line--strong"><span style={delay(0.1)}>Intelligence,</span></span>
+                        <span className="vx-hero__line vx-hero__line--light"><span style={delay(0.18)}>Simplified.</span></span>
                     </h1>
 
-                    <motion.p {...rise(0.3)} className="vx-hero__lead">
+                    <p className="vx-hero__lead vx-rise" style={delay(0.3)}>
                         The most advanced visual node platform for neural networks.
                         Build, configure, and train models in a gorgeous, highly-optimized environment.
-                    </motion.p>
+                    </p>
 
-                    <motion.div {...rise(0.38)} className="vx-hero__ctas">
+                    <div className="vx-hero__ctas vx-rise" style={delay(0.38)}>
                         <Link to="/dataset" className="vx-btn vx-btn--primary vx-btn--lg">
                             Start Building
                             <ArrowRight size={16} strokeWidth={2} className="vx-btn__arrow" aria-hidden="true" />
@@ -84,9 +77,9 @@ const Hero: React.FC = () => {
                             <Play size={13} fill="currentColor" strokeWidth={0} aria-hidden="true" style={{ marginLeft: 2 }} />
                             Watch a live demo
                         </Link>
-                    </motion.div>
+                    </div>
 
-                    <motion.div {...rise(0.46)}>
+                    <div className="vx-rise" style={delay(0.46)}>
                         <Link to="/tutorial" className="vx-tutorial-link">
                             <span className="vx-tutorial-link__tag">
                                 <GraduationCap size={13} strokeWidth={2} aria-hidden="true" />
@@ -95,17 +88,12 @@ const Hero: React.FC = () => {
                             New here? Train your first model in ten minutes
                             <ArrowRight size={14} strokeWidth={2} className="vx-btn__arrow" aria-hidden="true" />
                         </Link>
-                    </motion.div>
+                    </div>
                 </div>
 
-                <motion.div
-                    className="vx-hero__visual"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.6, ease: GLIDE }}
-                >
+                <div className="vx-hero__visual">
                     <VortexField className="vx-hero__vortex" label="The VortexML mark, two rings turning around a core, drawn in particles" />
-                </motion.div>
+                </div>
             </div>
         </section>
     );
@@ -155,11 +143,11 @@ const ProductReveal: React.FC = () => {
                         <div className="vx-frame__screen">
                             <video
                                 ref={video}
-                                src="/tutorial/06-train.mp4"
-                                poster="/tutorial/06-train.png"
+                                src={clipUrl('06-train.mp4')}
+                                poster={clipUrl('06-train.webp')}
                                 aria-label="Starting a run on the Training page; the loss curve falls and accuracy rises."
-                                width={1280}
-                                height={800}
+                                width={1600}
+                                height={1000}
                                 muted
                                 loop
                                 playsInline

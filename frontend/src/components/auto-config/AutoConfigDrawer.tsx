@@ -60,6 +60,7 @@ const AutoConfigDrawer: React.FC = () => {
         <aside
             className={`chat-drawer auto-config-drawer ${isOpen ? 'chat-drawer--open' : ''}`}
             aria-hidden={!isOpen}
+            inert={!isOpen}
         >
             <header className="chat-drawer__header auto-config-drawer__header">
                 <div className="chat-drawer__title">
@@ -201,6 +202,7 @@ const AutoConfigDrawer: React.FC = () => {
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={handleKey}
+                    aria-label="Describe your problem"
                     placeholder={isAvailable ? 'Describe your problem…' : 'Auto-Configure unavailable'}
                     rows={2}
                     disabled={inputsDisabled}

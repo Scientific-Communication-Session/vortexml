@@ -161,6 +161,7 @@ const PredictModal: React.FC<PredictModalProps> = ({ projectId, projectName, onC
                                     </label>
                                     {f.kind === 'categorical' && f.options?.length ? (
                                         <select
+                                            aria-label={f.name}
                                             value={values[f.name] ?? ''}
                                             onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
                                             style={inputStyle}
@@ -169,6 +170,7 @@ const PredictModal: React.FC<PredictModalProps> = ({ projectId, projectName, onC
                                         </select>
                                     ) : (
                                         <input
+                                            aria-label={f.name}
                                             type={f.kind === 'numeric' ? 'number' : 'text'}
                                             step="any"
                                             value={values[f.name] ?? ''}

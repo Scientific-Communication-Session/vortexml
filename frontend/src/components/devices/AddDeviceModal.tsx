@@ -90,10 +90,11 @@ const AddDeviceModal: React.FC<AddDeviceModalProps> = ({ onClose, onCreated }) =
                             your account, and you can drive it from any browser, even one with no ML power.
                         </p>
 
-                        <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
+                        <label htmlFor="add-device-nickname" style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
                             Device nickname
                         </label>
                         <input
+                            id="add-device-nickname"
                             type="text"
                             value={nickname}
                             autoFocus

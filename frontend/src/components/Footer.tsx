@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Trophy } from 'lucide-react';
 import { useTrainingSession } from '../context/TrainingSessionContext';
 import Logo from './Logo';
+import { SITE } from '../site';
 import './footer.css';
 
 type FooterLink = { to: string; label: string };
@@ -62,7 +63,7 @@ const Footer: React.FC = () => {
 
                     {COLUMNS.map((col) => (
                         <div key={col.title}>
-                            <h3 className="vx-footer__heading">{col.title}</h3>
+                            <h2 className="vx-footer__heading">{col.title}</h2>
                             <ul className="vx-footer__list">
                                 {col.links.map((l) => (
                                     <li key={l.label}>
@@ -81,11 +82,20 @@ const Footer: React.FC = () => {
                 </div>
 
                 <div className="vx-footer__base">
-                    <p>&copy; {new Date().getFullYear()} VortexML — All rights reserved</p>
+                    <div className="vx-footer__owner">
+                        <p>&copy; {new Date().getFullYear()} VortexML — All rights reserved</p>
+                        <p>
+                            Operated by {SITE.operator}, {SITE.country}.
+                            {SITE.contactEmail && (
+                                <> Contact: <a href={`mailto:${SITE.contactEmail}`} className="vx-footer__link vx-footer__mail">{SITE.contactEmail}</a></>
+                            )}
+                        </p>
+                    </div>
                     <div className="vx-footer__legal">
-                        <Link to="/privacy" className="vx-footer__link">Privacy</Link>
+                        <Link to="/privacy" className="vx-footer__link">Privacy Policy</Link>
                         <Link to="/terms" className="vx-footer__link">Terms</Link>
-                        <Link to="/cookies" className="vx-footer__link">Cookies</Link>
+                        <Link to="/cookies" className="vx-footer__link">Cookie Policy</Link>
+                        <Link to="/cookies#control" className="vx-footer__link">Cookie settings</Link>
                     </div>
                 </div>
             </div>

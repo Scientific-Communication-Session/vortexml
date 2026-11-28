@@ -1,7 +1,27 @@
 # VortexML — https://vortexml.ro
 # Crawlers, AI crawlers and AI agents are all welcome on the public pages.
 
+# One set of rules for everyone. The AI crawlers and agents are named so that
+# nobody has to wonder whether "*" was meant to include them: it is.
 User-agent: *
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: Amazonbot
+User-agent: Meta-ExternalAgent
+User-agent: MistralAI-User
+User-agent: DuckAssistBot
+User-agent: CCBot
+# What the content may be used for (https://contentsignals.org): showing it in
+# search results, and reading it to answer someone's question.
+Content-Signal: search=yes, ai-input=yes
 Allow: /
 # Public, read-only JSON (no sign-in needed)
 Allow: /api/demo/datasets
@@ -11,9 +31,13 @@ Disallow: /api/
 Disallow: /socket.io/
 # Signed-in pages: nothing to see without an account
 Disallow: /profile
+Disallow: /survey
 
 Sitemap: https://vortexml.ro/sitemap.xml
 
-# A plain-text guide to this site for language models and agents:
-#   https://vortexml.ro/llms.txt        (overview and links)
-#   https://vortexml.ro/llms-full.txt   (the full content, including the tutorial)
+# For language models and agents:
+#   https://vortexml.ro/llms.txt        a guide to the site, with links
+#   https://vortexml.ro/llms-full.txt   everything in one file: the guide, the tutorial and every lesson
+#   Every page is also served as Markdown: add ".md" to its address
+#   (https://vortexml.ro/tutorial.md, and /index.md for the home page),
+#   or ask for it with the header "Accept: text/markdown".

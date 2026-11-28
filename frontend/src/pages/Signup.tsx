@@ -71,7 +71,7 @@ const Signup: React.FC = () => {
                         <p className="vx-label mb-4">
                             Step 00 / Sign Up
                         </p>
-                        <h2
+                        <h1
                             className="text-white font-semibold tracking-[-0.035em] leading-[1.04] mb-3"
                             style={{ fontSize: 'clamp(2rem, 3.4vw + 0.5rem, 2.85rem)' }}
                         >
@@ -79,7 +79,7 @@ const Signup: React.FC = () => {
                             <em className="not-italic font-normal text-text-secondary">
                                 Vortex.
                             </em>
-                        </h2>
+                        </h1>
                         <p className="text-text-secondary font-light leading-[1.6] text-[15px]">
                             Create an account to start training models.
                         </p>
@@ -154,7 +154,7 @@ const Signup: React.FC = () => {
                             Already have an account?{' '}
                             <Link
                                 to="/signin"
-                                className="text-white/90 hover:text-white transition-colors no-underline border-b border-white/30 hover:border-white pb-px"
+                                className="text-white/90 hover:text-white transition-colors underline underline-offset-4 decoration-white/30 hover:decoration-white"
                             >
                                 Sign in
                             </Link>

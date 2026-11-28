@@ -31,14 +31,14 @@
       property="og:description"
       content="Train neural networks in your browser, with an AI tutor at every step. Free, no code, no installation."
     />
-    <meta property="og:image" content="https://vortexml.ro/og.jpg" />
-    <meta property="og:image:secure_url" content="https://vortexml.ro/og.jpg" />
+    <meta property="og:image" content="https://vortexml.ro/og.jpg?v=2" />
+    <meta property="og:image:secure_url" content="https://vortexml.ro/og.jpg?v=2" />
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="VortexML — Intelligence, Simplified. The training dashboard with loss and accuracy curves."
+      content="VortexML — Intelligence, Simplified. A finished training run: the loss curve falling and the accuracy rising."
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="VortexML — Intelligence, Simplified" />
@@ -46,7 +46,7 @@
       name="twitter:description"
       content="Train neural networks in your browser, with an AI tutor at every step. Free, no code, no installation."
     />
-    <meta name="twitter:image" content="https://vortexml.ro/og.jpg" />
+    <meta name="twitter:image" content="https://vortexml.ro/og.jpg?v=2" />
 
     <!-- For language models and agents: the site's content as plain text -->
     <link rel="alternate" type="text/plain" href="/llms.txt" title="VortexML — guide for language models" />
@@ -63,7 +63,21 @@
             "url": "https://vortexml.ro/",
             "name": "VortexML",
             "description": "Build, train and use neural networks in your browser, with an AI tutor at every step.",
-            "inLanguage": "en"
+            "inLanguage": "en",
+            "publisher": { "@id": "https://vortexml.ro/#org" }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://vortexml.ro/#org",
+            "name": "VortexML",
+            "url": "https://vortexml.ro/",
+            "logo": "https://vortexml.ro/icon-512.png",
+            "email": "andreisebastian.nita@gmail.com",
+            "founder": [
+              { "@type": "Person", "name": "Rădulescu Răzvan-Alexandru" },
+              { "@type": "Person", "name": "Niță Andrei-Sebastian" }
+            ],
+            "award": "1st place, Scientific Communication Session 2026, Politehnica University of Bucharest"
           },
           {
             "@type": "WebApplication",
@@ -74,9 +88,10 @@
             "operatingSystem": "Any (web browser)",
             "browserRequirements": "Requires JavaScript",
             "description": "Upload a table, let an AI co-pilot design a neural network, watch it train live, and ask the trained model for predictions. An AI tutor explains every setting.",
-            "image": "https://vortexml.ro/og.jpg",
-            "screenshot": "https://vortexml.ro/og.jpg",
+            "image": "https://vortexml.ro/og.jpg?v=2",
+            "screenshot": "https://vortexml.ro/og.jpg?v=2",
             "isAccessibleForFree": true,
+            "publisher": { "@id": "https://vortexml.ro/#org" },
             "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
             "award": "1st place, Scientific Communication Session 2026, Politehnica University of Bucharest",
             "featureList": [
@@ -96,21 +111,26 @@
       }
     </script>
 
-    <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
-    <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- The typefaces are served from this site (src/styles/fonts.css). The
+         three weights the first screen is set in start loading with the page. -->
+    <link rel="preload" href="/src/assets/fonts/cabinet-grotesk-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/assets/fonts/cabinet-grotesk-500.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/assets/fonts/cabinet-grotesk-800.woff2" as="font" type="font/woff2" crossorigin />
 
-    <link
-      href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,700,800&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Without JavaScript: the pages are complete HTML, but parts of them wait,
+         invisible, for the script to animate them in. Show them. -->
+    <noscript>
+      <style>
+        [style*="opacity:0"], [style*="opacity: 0"] { opacity: 1 !important; transform: none !important; }
+      </style>
+    </noscript>
   </head>
   <body>
+    <!-- Cloudflare's "Email Address Obfuscation" rewrites addresses in the HTML it
+         passes on. That would hide the contact address from readers without
+         JavaScript and no longer match what the app renders; these markers
+         switch it off for the page. -->
+    <!--email_off-->
     <div id="root"></div>
     <!-- Shown to visitors, crawlers and agents that do not run JavaScript. -->
     <noscript>
@@ -134,10 +154,15 @@
           <li><a href="/demo">Live demo</a> — train a real model in one click</li>
           <li><a href="/dataset">Dataset</a>, <a href="/architect">Architect</a>, <a href="/training">Training</a>, <a href="/predict">Predict</a></li>
           <li><a href="/assistant">Assistant</a>, <a href="/chat">Chat</a>, <a href="/leaderboard">Leaderboard</a>, <a href="/learn">Learn</a></li>
-          <li><a href="/about">About</a>, <a href="/terms">Terms</a>, <a href="/privacy">Privacy</a>, <a href="/cookies">Cookies</a></li>
+          <li><a href="/about">About</a>, <a href="/terms">Terms</a>, <a href="/privacy">Privacy Policy</a>, <a href="/cookies">Cookie Policy</a>, <a href="/cookies#control">Cookie settings</a></li>
         </ul>
+        <p>
+          Operated by Rădulescu Răzvan-Alexandru and Niță Andrei-Sebastian, Romania. Contact:
+          <a href="mailto:andreisebastian.nita@gmail.com">andreisebastian.nita@gmail.com</a>
+        </p>
       </div>
     </noscript>
     <script type="module" src="/src/main.tsx"></script>
+    <!--/email_off-->
   </body>
 </html>

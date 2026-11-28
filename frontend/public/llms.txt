@@ -4,35 +4,48 @@
 
 Things worth knowing before you browse:
 
-- The site is a single-page application: pages are drawn by JavaScript, so a plain HTTP fetch of a page returns only a shell. This file and [llms-full.txt](https://vortexml.ro/llms-full.txt) carry the content as plain text.
+- Every public page is served as complete HTML, so a plain HTTP fetch returns its text: the home page, tutorial, demo, Learn, every course lesson, the policies and the rest of the list below. Pages that work on your own data (Predict, Assistant, Chat, Leaderboard, Profile) need an account and JavaScript.
+- Every public page is also served as Markdown. The links below go to those versions: remove `.md` for the page a person sees (`/index.md` is the home page). Asking for a page with the header `Accept: text/markdown` returns the same Markdown.
+- [llms-full.txt](https://vortexml.ro/llms-full.txt) carries all of it as one plain-text file: this guide expanded, the tutorial and every lesson.
+- To use the app rather than read about it, drive it in a browser: the controls are ordinary links, buttons and labelled form fields, and every section has its own address.
 - Training runs on the server (a shared Mac mini, the free tier, one run at a time with a queue), not in the browser. A run keeps going if the tab is closed.
 - Trying the demo needs no account. The AI features (tutor, co-pilot, Explain Results, Assistant, Chat), saved models and the Predict page need a free account.
 - VortexML won 1st place at the Scientific Communication Session 2026, Politehnica University of Bucharest.
 
 ## Start here
 
-- [Home](https://vortexml.ro/): what the product is, a recorded walkthrough, and the full tutorial
-- [Tutorial](https://vortexml.ro/tutorial): train a first model in about ten minutes, step by step, with a practice dataset and a test prompt
-- [Live demo](https://vortexml.ro/demo): train a real model on a bundled dataset in one click, no account needed
+- [Home](https://vortexml.ro/index.md): what the product is, a recorded walkthrough, and the full tutorial
+- [Tutorial](https://vortexml.ro/tutorial.md): train a first model in about ten minutes, step by step, with a practice dataset and a test prompt
+- [Live demo](https://vortexml.ro/demo.md): train a real model on a bundled dataset in one click, no account needed
 - [Full text for language models](https://vortexml.ro/llms-full.txt): everything on this list, expanded
 
 ## The workflow
 
-- [Dataset](https://vortexml.ro/dataset): upload a CSV, TSV, Excel, JSON or Parquet file (up to 100 MB), preview it, mark feature columns and the target column
-- [Architect](https://vortexml.ro/architect): choose one of ten network types, set layers and hyperparameters, or let AI Auto-Configure do it from a plain-language description
-- [Training](https://vortexml.ro/training): start or queue a run, watch loss and accuracy live, get an AI explanation of the result
-- [Predict](https://vortexml.ro/predict): enter new values, or upload a file, and get predictions from a saved model
+- [Dataset](https://vortexml.ro/dataset.md): upload a CSV, TSV, Excel, JSON or Parquet file (up to 100 MB), preview it, mark feature columns and the target column
+- [Architect](https://vortexml.ro/architect.md): choose one of ten network types, set layers and hyperparameters, or let AI Auto-Configure do it from a plain-language description
+- [Training](https://vortexml.ro/training.md): start or queue a run, watch loss and accuracy live, get an AI explanation of the result
+- [Predict](https://vortexml.ro/predict): enter new values, or upload a file, and get predictions from a saved model (needs an account)
 
 ## AI features
+
+Both need a free account; without one these addresses lead to the sign-in page.
 
 - [Assistant](https://vortexml.ro/assistant): upload documents into a knowledge base and ask questions; answers cite the passages they came from
 - [Chat](https://vortexml.ro/chat): a saved, streaming conversation with a language model, optionally grounded in a knowledge base
 
 ## Learn
 
-- [Learn](https://vortexml.ro/learn): a roadmap of eight milestones, from mathematics to deployment
-- [Courses](https://vortexml.ro/courses): eight written lessons on neural network architectures
-- [Leaderboard](https://vortexml.ro/leaderboard): compare your own training runs side by side
+- [Learn](https://vortexml.ro/learn.md): a roadmap of eight milestones, from mathematics to deployment
+- [Courses](https://vortexml.ro/courses.md): eight written lessons on neural network architectures, with formulas and PyTorch code:
+  [Introduction to Neural Networks](https://vortexml.ro/courses/intro-nn.md),
+  [MLP & Deep Neural Networks](https://vortexml.ro/courses/course-mlp-dnn.md),
+  [1D Convolutional Networks](https://vortexml.ro/courses/course-cnn1d.md),
+  [Sequences: RNN, LSTM, GRU](https://vortexml.ro/courses/course-rnn-lstm-gru.md),
+  [Autoencoders & Bottlenecks](https://vortexml.ro/courses/course-autoencoders.md),
+  [Residual Networks (ResNet)](https://vortexml.ro/courses/course-resnet.md),
+  [Transformers & Attention](https://vortexml.ro/courses/course-transformers.md),
+  [Wide & Deep Networks](https://vortexml.ro/courses/course-wide-deep.md)
+- [Leaderboard](https://vortexml.ro/leaderboard): compare your own training runs side by side (needs an account)
 
 ## Public data (JSON, no sign-in)
 
@@ -41,10 +54,10 @@ Things worth knowing before you browse:
 
 ## About and policies
 
-- [About](https://vortexml.ro/about): who makes VortexML and how to get in touch
-- [Terms of Service](https://vortexml.ro/terms)
-- [Privacy Policy](https://vortexml.ro/privacy)
-- [Cookie Policy](https://vortexml.ro/cookies)
+- [About](https://vortexml.ro/about.md): who makes VortexML and how to get in touch
+- [Terms of Service](https://vortexml.ro/terms.md)
+- [Privacy Policy](https://vortexml.ro/privacy.md)
+- [Cookie Policy](https://vortexml.ro/cookies.md)
 
 ## Optional
 

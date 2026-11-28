@@ -19,10 +19,24 @@ const Layout: React.FC = () => {
     const isAuth = location.pathname === '/signin' || location.pathname === '/signup';
     const isFullBleed = isHome || isAuth;
 
-    // Scroll to top on route change
+    // Scroll to top on route change, or to the #anchor the link named. The
+    // page is lazy, so the target may only appear a moment later.
     useEffect(() => {
-        window.scrollTo(0, 0);
-    }, [location.pathname]);
+        const id = decodeURIComponent(location.hash.slice(1));
+        if (!id) {
+            window.scrollTo(0, 0);
+            return;
+        }
+        let tries = 0;
+        let timer = 0;
+        const seek = () => {
+            const target = document.getElementById(id);
+            if (target) target.scrollIntoView();
+            else if (++tries < 20) timer = window.setTimeout(seek, 100);
+        };
+        seek();
+        return () => window.clearTimeout(timer);
+    }, [location.pathname, location.hash]);
 
 
     return (

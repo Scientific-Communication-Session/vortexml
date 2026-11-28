@@ -144,17 +144,13 @@ const SECTIONS: LegalSection[] = [
                                 <td>Language models behind the AI features</td>
                                 <td>What section 4 lists, only when you use an AI feature</td>
                             </tr>
-                            <tr>
-                                <td><strong>Fontshare, Google Fonts</strong></td>
-                                <td>Serve the typefaces the site uses</td>
-                                <td>Your IP address, when your browser downloads the fonts</td>
-                            </tr>
                         </tbody>
                     </table>
                 </div>
                 <p>
                     The application itself, its database and your files run on hardware operated by the project,
-                    not on a public cloud. We may also disclose data if the law requires it.
+                    not on a public cloud. The typefaces are served from this site too, so no font service sees
+                    your visit. We may also disclose data if the law requires it.
                 </p>
                 <p>
                     Some of these providers process data outside the European Economic Area, including in the
@@ -198,6 +194,12 @@ const SECTIONS: LegalSection[] = [
                     <li>have its processing restricted, or object to processing based on our legitimate interests;</li>
                     <li>receive the data you gave us in a portable format.</li>
                 </ul>
+                <p>
+                    <strong>Withdrawing consent.</strong> Nothing we do with your data today relies on your
+                    consent: each use rests on one of the legal bases in section 3. If we ever ask for your
+                    consent to something, you will be able to withdraw it at any time, as easily as you gave it,
+                    and withdrawing it will not affect what was done before.
+                </p>
                 <p>
                     Two of these you can do yourself, at any time, under <strong>Your Data</strong> on your{' '}
                     <Link to="/profile">Profile</Link>: <strong>Download my data</strong> gives you a copy of

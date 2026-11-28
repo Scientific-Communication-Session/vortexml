@@ -134,7 +134,7 @@ const Learn: React.FC = () => {
                         transition={{ duration: 0.5, ease: GLIDE }}
                         className="will-change-[transform,opacity]"
                     >
-                        {activeTab === 'roadmap' ? <Roadmap /> : <Courses />}
+                        {activeTab === 'roadmap' ? <Roadmap /> : <Courses embedded />}
                     </motion.div>
                 </AnimatePresence>
             </div>

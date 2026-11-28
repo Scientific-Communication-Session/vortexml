@@ -27,6 +27,7 @@ const About = lazy(() => import('./pages/legal/About'));
 const Terms = lazy(() => import('./pages/legal/Terms'));
 const Privacy = lazy(() => import('./pages/legal/Privacy'));
 const Cookies = lazy(() => import('./pages/legal/Cookies'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 const App: React.FC = () => {
   return (
@@ -54,6 +55,7 @@ const App: React.FC = () => {
           <Route path="predict" element={<Playground />} />
           <Route path="assistant" element={<Rag />} />
           <Route path="chat" element={<Chat />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
     </AuthProvider>

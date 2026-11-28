@@ -16,10 +16,6 @@
   <url><loc>https://vortexml.ro/dataset</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://vortexml.ro/architect</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://vortexml.ro/training</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://vortexml.ro/predict</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>
-  <url><loc>https://vortexml.ro/assistant</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>
-  <url><loc>https://vortexml.ro/chat</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>
-  <url><loc>https://vortexml.ro/leaderboard</loc><lastmod>2026-11-26</lastmod><changefreq>monthly</changefreq><priority>0.4</priority></url>
   <url><loc>https://vortexml.ro/about</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.6</priority></url>
   <url><loc>https://vortexml.ro/signup</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.5</priority></url>
   <url><loc>https://vortexml.ro/signin</loc><lastmod>2026-11-26</lastmod><changefreq>yearly</changefreq><priority>0.3</priority></url>

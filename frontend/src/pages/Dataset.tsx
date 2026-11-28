@@ -317,8 +317,9 @@ const Dataset: React.FC = () => {
                     onClick={openFileDialog}
                 >
                     <div className="upload-icon"><Upload size={22} strokeWidth={1.75} aria-hidden="true" /></div>
-                    <h3>Drag & drop your file here</h3>
-                    <p>or click to browse — CSV, TSV, Excel, JSON, Parquet, Word/HTML tables (max 100 MB)</p>
+                    <h2>Drag & drop your file here</h2>
+                    {/* (The button's click reaches the zone, which opens the file dialog.) */}
+                    <p>or <button type="button" className="btn-text" aria-label="click to browse for a dataset file">click to browse</button> — CSV, TSV, Excel, JSON, Parquet, Word/HTML tables (max 100 MB)</p>
                     <input
                         type="file"
                         ref={fileInputRef}
@@ -460,15 +461,20 @@ const Dataset: React.FC = () => {
                                             <div className="col-dtype">{col.dtype} {col.is_numeric ? `· ${col.unique} unique` : `· ${col.unique} categories`}</div>
                                         </div>
                                         <div className="col-controls">
+                                            {/* Named with the column, so the twelve "Feature" and "Target" buttons can be told apart. */}
                                             <button
                                                 className={`col-btn btn-feat ${isFeature ? 'active-feature' : ''}`}
                                                 onClick={() => toggleFeature(col.name)}
+                                                aria-label={`Feature: ${col.name}`}
+                                                aria-pressed={isFeature}
                                             >
                                                 Feature
                                             </button>
                                             <button
                                                 className={`col-btn btn-tgt ${isTarget ? 'active-target' : ''}`}
                                                 onClick={() => setTarget(col.name)}
+                                                aria-label={`Target: ${col.name}`}
+                                                aria-pressed={isTarget}
                                             >
                                                 Target
                                             </button>

@@ -93,7 +93,10 @@
     color: var(--color-fg-3);
 }
 .vx-footer__base p { margin: 0; }
-.vx-footer__legal { display: flex; gap: var(--space-6); }
+.vx-footer__owner { display: grid; gap: var(--space-1); line-height: 1.6; }
+/* A link inside a sentence: it flows with the words, and the underline tells it from them. */
+.vx-footer__mail { display: inline; min-height: 0; font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.vx-footer__legal { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-6); }
 .vx-footer__legal .vx-footer__link { font-size: var(--text-xs); }
 
 @media (max-width: 767px) {

@@ -72,8 +72,8 @@ const SECTIONS: LegalSection[] = [
                     to tell visitors from automated attacks.
                 </p>
                 <p>
-                    The typefaces are loaded from Fontshare and Google Fonts. They do not set cookies for this,
-                    but they do see your IP address when your browser downloads the fonts.
+                    Nothing else on the pages comes from another company: the typefaces, scripts and images are
+                    all served from this site.
                 </p>
                 <p>We use no analytics, advertising or social-media cookies.</p>
             </>
@@ -81,10 +81,11 @@ const SECTIONS: LegalSection[] = [
     },
     {
         id: 'control',
-        title: 'Your choices',
+        title: 'Your cookie settings and choices',
         body: (
             <p>
-                You can delete or block cookies in your browser’s settings. If you block the session cookie you
+                Because the only cookie is one the service needs, there is nothing to accept or refuse here
+                and no consent to withdraw. You can delete or block cookies in your browser’s settings. If you block the session cookie you
                 can still read the site, but you cannot sign in, and uploads and training will not carry over
                 from one page to the next. Questions: <Contact />. See also the{' '}
                 <Link to="/privacy">Privacy Policy</Link>.

@@ -372,6 +372,7 @@ const Profile: React.FC = () => {
                                         {editing ? (
                                             <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                                                 <input
+                                                    aria-label="Device nickname"
                                                     value={editName}
                                                     autoFocus
                                                     maxLength={80}

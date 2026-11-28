@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
+import { clipUrl } from './tutorialClips';
 import './tutorial-clip.css';
 
 // ── A recorded clip, shown in a browser frame ───────────────────────────────
@@ -24,11 +25,15 @@ const TutorialClip: React.FC<{
     const ref = useRef<HTMLElement>(null);
     const video = useRef<HTMLVideoElement>(null);
     // Without IntersectionObserver there is nothing to wait for — play right away.
-    const [inView, setInView] = useState(() => !('IntersectionObserver' in window));
+    // (`window` is absent while the build prerenders the page: wait there.)
+    const [inView, setInView] = useState(() => typeof window !== 'undefined' && !('IntersectionObserver' in window));
     const [own, setOwn] = useState(
-        () => !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+        () => typeof window === 'undefined' || !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     );
     const playing = controlled ?? own;
+    // The poster (the clip's first frame) is only worth downloading once the
+    // clip is about a screen away; the frame keeps its shape meanwhile.
+    const [near, setNear] = useState(() => typeof window !== 'undefined' && !('IntersectionObserver' in window));
 
     useEffect(() => {
         const el = ref.current;
@@ -37,8 +42,13 @@ const TutorialClip: React.FC<{
             (entries) => setInView(entries.some((e) => e.isIntersecting)),
             { threshold: 0.2 },
         );
+        const ahead = new IntersectionObserver(
+            (entries) => { if (entries.some((e) => e.isIntersecting)) { setNear(true); ahead.disconnect(); } },
+            { rootMargin: '100% 0px' },
+        );
         io.observe(el);
-        return () => io.disconnect();
+        ahead.observe(el);
+        return () => { io.disconnect(); ahead.disconnect(); };
     }, []);
 
     useEffect(() => {
@@ -66,11 +76,11 @@ const TutorialClip: React.FC<{
             <div className="tt-clip__stage">
                 <video
                     ref={video}
-                    src={`/tutorial/${name}.mp4`}
-                    poster={`/tutorial/${name}.png`}
+                    src={clipUrl(`${name}.mp4`)}
+                    poster={near ? clipUrl(`${name}.webp`) : undefined}
                     aria-label={alt}
-                    width={1280}
-                    height={800}
+                    width={1600}
+                    height={1000}
                     muted
                     playsInline
                     loop={!onEnded}

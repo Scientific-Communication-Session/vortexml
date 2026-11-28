@@ -288,7 +288,7 @@ const Chat: React.FC = () => {
                                     border: '1px solid ' + (activeId === c.id ? 'oklch(0.68 0.17 283 / 0.3)' : 'transparent'),
                                 }}>
                                 {editingId === c.id ? (
-                                    <input autoFocus value={editTitle} onClick={(e) => e.stopPropagation()}
+                                    <input autoFocus aria-label="Conversation title" value={editTitle} onClick={(e) => e.stopPropagation()}
                                         onChange={(e) => setEditTitle(e.target.value)}
                                         onBlur={() => renameConversation(c.id)}
                                         onKeyDown={(e) => { if (e.key === 'Enter') renameConversation(c.id); if (e.key === 'Escape') setEditingId(null); }}
@@ -297,7 +297,10 @@ const Chat: React.FC = () => {
                                     <span title="Double-click to rename"
                                         onDoubleClick={(e) => { e.stopPropagation(); setEditingId(c.id); setEditTitle(c.title); }}
                                         style={{ minWidth: 0, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                        <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.7 }} />{c.title}
+                                        <MessageSquare size={13} style={{ flexShrink: 0, opacity: 0.7 }} aria-hidden="true" />
+                                        {/* The control for keyboards, screen readers and agents; a click anywhere on the row does the same. */}
+                                        <button type="button" className="btn-text" aria-current={activeId === c.id ? 'true' : undefined}
+                                            style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</button>
                                     </span>
                                 )}
                                 <div style={{ display: 'flex', gap: '0.15rem', flexShrink: 0 }}>
@@ -317,11 +320,11 @@ const Chat: React.FC = () => {
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', paddingBottom: '0.7rem', borderBottom: '1px solid var(--color-line)', marginBottom: '0.7rem' }}>
                         {!isBeginner ? (
                             <>
-                                <select value={settings.backend} onChange={(e) => { const b = backends.find((x) => x.key === e.target.value); patchSettings({ backend: e.target.value, model: b?.default_model || '' }); }} style={inputStyle}>
+                                <select value={settings.backend} onChange={(e) => { const b = backends.find((x) => x.key === e.target.value); patchSettings({ backend: e.target.value, model: b?.default_model || '' }); }} style={inputStyle} aria-label="Backend">
                                     {backends.map((b) => <option key={b.key} value={b.key} disabled={!b.available}>{b.label}{b.available ? '' : ' (not installed)'}</option>)}
                                 </select>
                                 <select value={settings.model} onChange={(e) => patchSettings({ model: e.target.value })}
-                                    style={{ ...inputStyle, maxWidth: 300 }} title="Model">
+                                    style={{ ...inputStyle, maxWidth: 300 }} title="Model" aria-label="Model">
                                     <option value="">Default{activeBackend?.default_model ? ` (${activeBackend.default_model.split('/').pop()})` : ''}</option>
                                     {modelOptions.map((m) => (
                                         <option key={m.id} value={m.id}>{activeBackend?.model_labels?.[m.id] || m.id}{m.downloaded ? ' · downloaded' : (catEntry ? ' (downloads on first use)' : '')}</option>
@@ -331,7 +334,7 @@ const Chat: React.FC = () => {
                                     )}
                                 </select>
                                 {devices.length > 1 && (
-                                    <select value={settings.deviceId ?? ''} onChange={(e) => patchSettings({ deviceId: e.target.value ? Number(e.target.value) : null })} style={inputStyle} title="Run on">
+                                    <select value={settings.deviceId ?? ''} onChange={(e) => patchSettings({ deviceId: e.target.value ? Number(e.target.value) : null })} style={inputStyle} title="Run on" aria-label="Run on">
                                         <option value="">Shared M4</option>
                                         {devices.filter((d) => !d.is_shared).map((d) => <option key={d.id} value={d.id}>{d.nickname}</option>)}
                                     </select>
@@ -340,7 +343,7 @@ const Chat: React.FC = () => {
                         ) : (
                             <span className="text-muted" style={{ fontSize: '0.82rem' }}>Chatting with <strong>{backends.find((b) => b.key === recommended)?.label}</strong></span>
                         )}
-                        <select value={settings.kbId ?? ''} onChange={(e) => patchSettings({ kbId: e.target.value ? Number(e.target.value) : null })} style={inputStyle} title="Ground answers in a knowledge base">
+                        <select value={settings.kbId ?? ''} onChange={(e) => patchSettings({ kbId: e.target.value ? Number(e.target.value) : null })} style={inputStyle} title="Ground answers in a knowledge base" aria-label="Knowledge base to ground answers in">
                             <option value="">No documents</option>
                             {kbs.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
                         </select>
@@ -430,16 +433,17 @@ const Chat: React.FC = () => {
                     {/* composer */}
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem' }}>
                         <textarea value={input} onChange={(e) => setInput(e.target.value)} rows={1}
+                            aria-label="Message"
                             placeholder="Message your model…  (Enter to send, Shift+Enter for newline)"
                             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
                             style={{ ...inputStyle, flex: 1, resize: 'none', fontSize: '0.92rem' }} />
                         {sending ? (
-                            <button className="btn btn-danger" onClick={stop} title="Stop generating">
+                            <button className="btn btn-danger" onClick={stop} title="Stop generating" aria-label="Stop generating">
                                 <Square size={15} style={{ verticalAlign: 'middle' }} />
                             </button>
                         ) : (
-                            <button className="btn btn-primary" onClick={send} disabled={!input.trim()}>
-                                <Send size={16} />
+                            <button className="btn btn-primary" onClick={send} disabled={!input.trim()} aria-label="Send message">
+                                <Send size={16} aria-hidden="true" />
                             </button>
                         )}
                     </div>

@@ -179,6 +179,7 @@ const Playground: React.FC = () => {
                     <div className="glass-panel">
                         <div className="panel-title"><span className="pt-icon"><Boxes size={18} strokeWidth={1.75} /></span> Choose a model</div>
                         <select
+                            aria-label="Choose a model"
                             value={selectedId ?? ''}
                             onChange={(e) => { setSelectedId(e.target.value ? Number(e.target.value) : null); setSchema(null); setResult(null); setLiveStats(null); }}
                             className="form-select"
@@ -197,7 +198,7 @@ const Playground: React.FC = () => {
                             <div className="pr-row">
                                 <span className="pr-hint">Run inference on:</span>
                                 <select value={deviceId ?? ''} onChange={(e) => setDeviceId(e.target.value ? Number(e.target.value) : null)}
-                                    className="form-select" style={{ maxWidth: 240 }} title="Where the forward pass runs">
+                                    className="form-select" style={{ maxWidth: 240 }} title="Where the forward pass runs" aria-label="Run inference on">
                                     <option value="">Shared device</option>
                                     {devices.filter((d) => !d.is_shared).map((d) => <option key={d.id} value={d.id}>{d.nickname}</option>)}
                                 </select>
