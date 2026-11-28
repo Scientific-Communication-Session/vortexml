@@ -6,7 +6,7 @@
  * bundled sample dataset is uploaded through the real file input, the AI tutor
  * and the AI co-pilot are asked real questions, a model is trained on the
  * server and then used for predictions. Each scene is screen-recorded and
- * encoded as a short looping video (H.264 .mp4, plus a .png of its first frame
+ * encoded as a short looping video (H.264 .mp4, plus a .webp of its first frame
  * to stand in while it loads).
  *
  * Requirements: a running VortexML instance with ANTHROPIC_API_KEY set (most
@@ -49,7 +49,10 @@ const CSV = path.resolve(HERE, '../../sample-data/student_performance.csv');
 const NOTES = path.resolve(HERE, '../../sample-data/README.md');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vortex-tutorial-'));
 
-const VIEW = { width: 1280, height: 800 };
+// The window the app is recorded in. Wider than a laptop on purpose: at 1280 × 800
+// a page such as the Training dashboard only half fits, and the clip looks
+// zoomed in. The clips are shown in a 16:10 frame, so keep that shape.
+const VIEW = { width: 1600, height: 1000 };
 // Clip encoding. Video rather than GIF: at the full capture size and 30 frames
 // a second an H.264 clip is still a fraction of the size of an 8 fps GIF.
 const CLIP_FPS = 30;
@@ -130,7 +133,7 @@ function installCursor() {
 }
 
 // ── Page helpers ────────────────────────────────────────────────────────────
-let mouse = { x: 640, y: 420 };
+let mouse = { x: VIEW.width / 2, y: VIEW.height * 0.52 };
 
 async function newPage(browser) {
     const context = await browser.createBrowserContext();
@@ -301,7 +304,7 @@ async function record(page, name, scene, enabled = true) {
     // The first frame, as the poster: it holds the layout while the clip loads
     // and the clip then starts from exactly that picture.
     execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', clip,
-        '-frames:v', '1', '-update', '1', path.join(OUT, `${name}.png`)]);
+        '-frames:v', '1', '-update', '1', '-c:v', 'libwebp', '-quality', '82', path.join(OUT, `${name}.webp`)]);
     if (process.env.TUTORIAL_VIDEO) {
         fs.mkdirSync(process.env.TUTORIAL_VIDEO, { recursive: true });
         fs.copyFileSync(webm, path.join(process.env.TUTORIAL_VIDEO, `${name}.webm`));
@@ -544,11 +547,11 @@ async function sceneParameters(page, enabled) {
 
 async function sceneTrain(page, enabled) {
     await record(page, '06-train', async () => {
-        await click(page, { text: 'Start Training ⚡' }, 300);
+        await click(page, { text: 'Start Training', sel: 'button.btn-primary' }, 300);
         await page.waitForFunction(() => location.pathname === '/training', { timeout: 15000 });
         await waitText(page, 'Compute Device');
         await sleep(1400);
-        await click(page, { text: 'Start Training', sel: '.glass-panel button.btn' }, 200);
+        await click(page, { text: 'Start Training', sel: 'button.btn-primary' }, 200);
         await sleep(350);
         const chart = await page.evaluate(() => document.querySelector('.training-top-bar').getBoundingClientRect().top + window.scrollY);
         await scrollTo(page, chart - 100, 700);
@@ -655,7 +658,7 @@ async function sceneBackground(browser, owner, account) {
     const loaded = await api(owner, 'POST', '/api/demo/load', { key: 'student_performance' });
     await api(owner, 'POST', '/api/model/configure', { ...loaded.json.config, epochs: 6000, project_name: PROJECT });
     await owner.goto(`${BASE}/training`, { waitUntil: 'networkidle2' });
-    await click(owner, { text: 'Start Training', sel: '.glass-panel button.btn' }, 300);
+    await click(owner, { text: 'Start Training', sel: 'button.btn-primary' }, 300);
     await waitText(owner, 'Epoch 150/', 120000);
 
     // A second browser: no cookies, no history — like opening the site on
@@ -689,14 +692,14 @@ async function sceneAssistant(page) {
     await sleep(600);
     await record(page, '10-assistant', async () => {
         await type(page, 'input[placeholder="New knowledge base name"]', 'Dataset notes', 30);
-        await click(page, { text: 'Create', sel: 'button.btn-primary' }, 400);
+        await click(page, { text: 'Create', sel: 'button.btn' }, 400);
         await waitText(page, 'No documents yet');
         await sleep(1100);
         await moveTo(page, { text: 'Add documents', sel: 'label.btn' });
         await sleep(500);
         const input = await page.$('label.btn input[type=file]');
         await input.uploadFile(NOTES);
-        await waitText(page, '📄');
+        await waitText(page, path.basename(NOTES));
         await sleep(1500);
         await type(page, 'input[placeholder="Ask a question about your documents…"]',
             'Which of these datasets is synthetic, and where do the real ones come from?', 18);
