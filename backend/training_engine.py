@@ -6,6 +6,7 @@ Vortex ML — Training Engine
 import os
 import copy
 import time
+import uuid
 import math
 import re
 import tempfile
@@ -707,6 +708,13 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
                 best_val_loss = val_loss
                 best_model_state = copy.deepcopy(model.state_dict())
 
+        # A learning rate that is too high sends the loss to infinity or NaN.
+        # Nothing after that is worth training, and NaN is not valid JSON: one
+        # stored in the history broke every page that later loaded this run.
+        if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
+            raise ValueError("Training diverged: the loss stopped being a number. "
+                             "Lower the learning rate and try again.")
+
         # ---- Timing ----
         epoch_time = time.time() - epoch_start
         epoch_times.append(epoch_time)
@@ -748,8 +756,11 @@ def train_model(model, train_loader, val_loader, task_type, config, socketio,
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
 
-    # ---- Save model with smart filename (unique per run via timestamp) ----
-    unique_suffix = time.strftime("%Y%m%dT%H%M%S")
+    # ---- Save model with smart filename (unique per run) ----
+    # The timestamp alone is not unique: two people training the default
+    # project with the same settings in the same second shared one file, and
+    # each then predicted with whichever model was written last.
+    unique_suffix = f'{time.strftime("%Y%m%dT%H%M%S")}-{uuid.uuid4().hex[:8]}'
     weight_filename = _build_weight_filename(config, unique_suffix=unique_suffix)
     model_path = os.path.join(WEIGHTS_DIR, weight_filename)
     # Save a CPU-mapped state dict so the .pt file is portable regardless of

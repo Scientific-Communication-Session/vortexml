@@ -103,7 +103,8 @@ def main():
     anon = app.test_client()
     expect(alice.get("/api/auth/me").status_code == 200, "alice authenticated")
     expect(bob.get("/api/auth/me").status_code == 200, "bob authenticated")
-    expect(anon.get("/api/auth/me").status_code == 401, "anon /me -> 401")
+    me = anon.get("/api/auth/me")
+    expect(me.status_code == 200 and me.get_json()["user"] is None, "anon /me -> no user")
 
     # Alice owns a project (with weights), a KB, a conversation, and a device.
     pid, wf = _make_project(alice_email)

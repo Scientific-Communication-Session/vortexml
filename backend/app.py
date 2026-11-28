@@ -20,11 +20,12 @@ import threading
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 
-from flask import Flask, request, jsonify, session, send_file, make_response
+from flask import Flask, request, jsonify, session, send_file, make_response, has_request_context
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room
 
+import hashlib
 import json as _json
 
 import anthropic
@@ -43,6 +44,7 @@ from auto_config_rules import (
     recommend_config, guard_config, VALID_OPTIMIZERS, VALID_ACTIVATIONS,
 )
 import rag
+import claude_models
 import demo_data
 from system_stats import SystemMonitor, sample as sample_stats
 
@@ -51,7 +53,23 @@ from system_stats import SystemMonitor, sample as sample_stats
 # streams training updates and chat tokens.
 from eventlet import tpool
 _run_blocking = tpool.execute
-from sqlalchemy import or_
+
+
+def _iter_blocking(iterator):
+    """Iterate something whose every step may wait on the network (a streamed
+    model reply), taking each step in a worker thread.
+
+    This server is one event loop. A handler that waits on a socket itself
+    holds the loop for as long as it waits: while one person's answer was
+    being generated, nobody else's request or training update moved.
+    """
+    done = object()
+    iterator = iter(iterator)
+    while True:
+        item = _run_blocking(next, iterator, done)
+        if item is done:
+            return
+        yield item
 
 from models import (db, User, Project, Device, KnowledgeBase, Document,
                     Conversation, ChatMessage, SalesInquiry)
@@ -59,6 +77,16 @@ from models import (db, User, Project, Device, KnowledgeBase, Document,
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("vortex")
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _json_body():
+    """The request's JSON object, or {} when the body is anything else (absent,
+    not JSON, or a JSON list/string/number — `.get` on those would be a 500)."""
+    body = request.get_json(silent=True)
+    return body if isinstance(body, dict) else {}
 
 
 def _internal_error(context, exc, status=500, public_msg=None):
@@ -131,9 +159,20 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 
+def _client_ip():
+    """The visitor's address.
+
+    Every request reaches this process from the frontend server on loopback, so
+    `remote_addr` is always 127.0.0.1 and would put the whole internet in one
+    rate-limit bucket. Cloudflare names the real client in CF-Connecting-IP (it
+    overwrites anything the visitor sends under that name).
+    """
+    return request.headers.get("CF-Connecting-IP") or get_remote_address()
+
+
 def _rate_key():
     uid = session.get("user_id")
-    return f"user:{uid}" if uid else get_remote_address()
+    return f"user:{uid}" if uid else _client_ip()
 
 
 limiter = Limiter(
@@ -155,6 +194,12 @@ def _handle_rate_limited(e):
 @app.errorhandler(413)
 def _handle_too_large(e):
     return jsonify({"error": "That upload is too large (100 MB maximum)."}), 413
+
+
+@app.errorhandler(500)
+def _handle_server_error(e):
+    # Flask has already logged the traceback; the client gets no detail.
+    return jsonify({"error": "Something went wrong on the server. Please try again."}), 500
 
 
 def _ensure_columns():
@@ -233,6 +278,35 @@ _states = defaultdict(_default_state)
 _state_last_seen = {}
 
 
+def _session_mark(user):
+    """A value that ties a session to one particular account.
+
+    The cookie used to carry only `user_id`. SQLite hands a deleted account's
+    id to the next person who registers, so a cookie kept from a deleted
+    account signed its holder in as that newcomer. The mark changes with the
+    account (and with its password), and a session without the right one is
+    not a login.
+    """
+    return hashlib.sha256(f"{user.id}:{user.password_hash}".encode()).hexdigest()[:24]
+
+
+def _sign_in(user):
+    session["user_id"] = user.id
+    session["user_mark"] = _session_mark(user)
+
+
+@app.before_request
+def _drop_stale_login():
+    """Forget a login whose account is gone or is no longer the same account."""
+    uid = session.get("user_id")
+    if uid is None:
+        return
+    user = db.session.get(User, uid)
+    if user is None or session.get("user_mark") != _session_mark(user):
+        session.pop("user_id", None)
+        session.pop("user_mark", None)
+
+
 def _state_key():
     """Stable key for the caller's working state. Must run in a request context.
 
@@ -281,6 +355,11 @@ _queues = defaultdict(list)  # device_id -> [pending job dicts] (FIFO)
 _recent_runs = {}
 _RECENT_RUN_TTL = 24 * 3600  # seconds a finished run stays replayable
 _MAX_RESUME_ATTEMPTS = 1     # auto-restart an interrupted remote job this many times
+# Limits that keep one caller from taking the shared machine away from the rest.
+_MAX_ACTIVE_JOBS = 3         # one caller's runs, training + waiting, at a time
+_MAX_QUEUE_LENGTH = 25       # runs waiting for one device
+_MAX_LAYER_PRODUCT = 10_000_000   # sum of (width × next width) over a network's layers
+_MAX_MODEL_PARAMS = 50_000_000    # checked on the built model, for the shared device
 _rag_jobs = {}     # job_id -> {citations, chunks, backend, model, room} for remote RAG queries
 _rag_download_cancels = {}  # job_id -> threading.Event() for in-flight model downloads (local + remote)
 _chat_jobs = {}    # job_id -> {conversation_id, owner_user_id, citations, model, room} for remote chat turns
@@ -318,6 +397,22 @@ def _purge_state(key):
     # Weights no saved project points at are only reachable through this
     # state, so once it is gone they are orphaned — reclaim them too.
     _remove_orphan_weights(st.get("last_weights_file"))
+
+
+def _discard_dataset(st):
+    """Delete the upload a working state points at, when the caller replaces or
+    resets it. A run that is still reading the file keeps it (the run deletes
+    it when it ends); queued runs have their own copy."""
+    path = st.get("dataset_path")
+    if not path or os.path.dirname(os.path.abspath(path)) != os.path.abspath(UPLOAD_DIR):
+        return
+    in_use = any(j.get("dataset_path") == path for j in _jobs.values())
+    in_use = in_use or any(j.get("dataset_path") == path for q in _queues.values() for j in q)
+    if not in_use and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _purge_state_after_jobs(key, timeout=900):
@@ -380,15 +475,24 @@ def index():
 # ─────────────────────────────────────────────────────────
 
 @app.route("/api/auth/signup", methods=["POST"])
-@limiter.limit("10 per hour", key_func=get_remote_address)
+@limiter.limit("10 per hour", key_func=_client_ip)
 def signup():
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     email = data.get("email")
     username = data.get("username")
     password = data.get("password")
 
     if not email or not username or not password:
         return jsonify({"error": "Missing required fields"}), 400
+    if not all(isinstance(v, str) for v in (email, username, password)):
+        return jsonify({"error": "Email, username and password must be text."}), 400
+    email, username = email.strip(), username.strip()
+    if len(email) > 120 or not _EMAIL_RE.match(email):
+        return jsonify({"error": "Please enter a valid email address."}), 400
+    if not (1 <= len(username) <= 80):
+        return jsonify({"error": "The username must be between 1 and 80 characters."}), 400
+    if not (6 <= len(password) <= 1024):
+        return jsonify({"error": "The password must be at least 6 characters."}), 400
 
     if User.query.filter_by(email=email).first():
         return jsonify({"error": "Email already in use"}), 409
@@ -407,21 +511,23 @@ def signup():
     _purge_state(f"user:{new_user.id}")
 
     # Log them in automatically
-    session["user_id"] = new_user.id
+    _sign_in(new_user)
     
     return jsonify({"message": "User registered successfully", "user": new_user.to_dict()}), 201
 
 
 @app.route("/api/auth/signin", methods=["POST"])
-@limiter.limit("10 per minute; 50 per hour", key_func=get_remote_address)
+@limiter.limit("10 per minute; 50 per hour", key_func=_client_ip)
 def signin():
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     email = data.get("email")
     password = data.get("password")
+    if not isinstance(email, str) or not isinstance(password, str):
+        return jsonify({"error": "Invalid email or password"}), 401
 
-    user = User.query.filter_by(email=email).first()
+    user = User.query.filter_by(email=email.strip()).first()
     if user and user.check_password(password):
-        session["user_id"] = user.id
+        _sign_in(user)
         return jsonify({"message": "Signed in successfully", "user": user.to_dict()})
         
     return jsonify({"error": "Invalid email or password"}), 401
@@ -429,22 +535,17 @@ def signin():
 
 @app.route("/api/auth/me", methods=["GET"])
 def get_me():
+    """Who is signed in. `{"user": null}` for a visitor without an account —
+    that is an answer, not an error, so it is a 200 like any other."""
     user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Not authenticated"}), 401
-        
-    user = User.query.get(user_id)
-    if not user:
-        # Invalid session, clear it
-        session.pop("user_id", None)
-        return jsonify({"error": "User not found"}), 404
-        
-    return jsonify({"user": user.to_dict()})
+    user = db.session.get(User, user_id) if user_id else None
+    return jsonify({"user": user.to_dict() if user else None})
 
 
 @app.route("/api/auth/logout", methods=["POST"])
 def logout():
     session.pop("user_id", None)
+    session.pop("user_mark", None)
     return jsonify({"message": "Logged out successfully"})
 
 
@@ -454,7 +555,7 @@ def submit_survey():
     if not user_id:
         return jsonify({"error": "Not authenticated"}), 401
 
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     is_beginner = data.get("is_beginner")
 
     if is_beginner is None:
@@ -477,7 +578,7 @@ def update_beginner_status():
     if not user_id:
         return jsonify({"error": "Not authenticated"}), 401
 
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     is_beginner = data.get("is_beginner")
     if not isinstance(is_beginner, bool):
         return jsonify({"error": "is_beginner must be a boolean"}), 400
@@ -499,8 +600,10 @@ def export_account():
     user, err = _require_user()
     if err:
         return err
-    enquiries = SalesInquiry.query.filter(
-        or_(SalesInquiry.user_id == user.id, SalesInquiry.email == user.email)).all()
+    # By account, never by address: an address typed into the sign-up form is
+    # not proof of owning it, and matching on it handed a stranger's enquiry to
+    # whoever registered with their email.
+    enquiries = SalesInquiry.query.filter(SalesInquiry.user_id == user.id).all()
     data = {
         "service": "VortexML",
         "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -538,8 +641,9 @@ def delete_account():
     user, err = _require_user()
     if err:
         return err
-    body = request.get_json(silent=True) or {}
-    if not user.check_password(body.get("password") or ""):
+    body = _json_body()
+    password = body.get("password")
+    if not isinstance(password, str) or not user.check_password(password):
         return jsonify({"error": "That password is not correct."}), 403
 
     key = f"user:{user.id}"
@@ -574,9 +678,7 @@ def delete_account():
 
     # 3. The rows. Projects, devices, knowledge bases and conversations go with
     #    the user (ORM cascade); enquiries are only linked, so remove them here.
-    SalesInquiry.query.filter(
-        or_(SalesInquiry.user_id == user.id, SalesInquiry.email == user.email)
-    ).delete(synchronize_session=False)
+    SalesInquiry.query.filter(SalesInquiry.user_id == user.id).delete(synchronize_session=False)
     db.session.delete(user)
     db.session.commit()
 
@@ -619,8 +721,15 @@ def upload_file():
 
     try:
         filename, filepath = save_uploaded_file(file)
-        info = analyze_dataset(filepath)
+        try:
+            info = analyze_dataset(filepath)
+        except Exception:
+            # Not a usable table: do not keep it.
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            raise
         st = _get_state()
+        _discard_dataset(st)  # the upload this one replaces
         st["dataset_file"] = filename
         st["dataset_path"] = filepath
         st["dataset_info"] = info
@@ -646,7 +755,7 @@ def get_dataset_info():
 
 @app.route("/api/dataset/configure", methods=["POST"])
 def configure_dataset():
-    data = request.get_json(silent=True)
+    data = _json_body()
     if not data:
         return jsonify({"error": "No JSON body"}), 400
 
@@ -690,7 +799,7 @@ def dataset_health_route():
     st = _get_state()
     if not st.get("dataset_path"):
         return jsonify({"error": "No dataset uploaded yet"}), 404
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     feature_cols = body.get("feature_cols")
     if not isinstance(feature_cols, list):
         feature_cols = st.get("feature_cols") or []
@@ -747,7 +856,7 @@ def list_architectures():
 
 @app.route("/api/model/configure", methods=["POST"])
 def configure_model():
-    data = request.get_json(silent=True)
+    data = _json_body()
     if not data:
         return jsonify({"error": "No JSON body"}), 400
 
@@ -758,10 +867,19 @@ def configure_model():
     batch_size = data.get("batch_size", 32)
     optimizer = data.get("optimizer", "adam")
     activation = data.get("activation", "relu")
+    # Becomes part of the weights file name, so it must be text of a sane length
+    # (a null or a 300-character name used to fail the run after its last epoch).
     project_name = data.get("project_name", "VortexProject")
+    if project_name is None or project_name == "":
+        project_name = "VortexProject"
+    if not isinstance(project_name, str) or len(project_name.strip()) > 80:
+        return jsonify({"error": "The project name must be text of at most 80 characters."}), 400
+    project_name = project_name.strip() or "VortexProject"
 
     # Early stopping
     early_stopping = data.get("early_stopping", {})
+    if not isinstance(early_stopping, dict):
+        early_stopping = {}
 
     if arch_type not in MODEL_REGISTRY:
         return jsonify({"error": f"Unknown architecture: {arch_type}"}), 400
@@ -779,6 +897,11 @@ def configure_model():
         return jsonify({"error": "layer_sizes must contain whole numbers"}), 400
     if any(n < 1 or n > 8192 for n in layer_sizes):
         return jsonify({"error": "each layer width must be between 1 and 8192"}), 400
+    # Weights grow with the product of neighbouring widths. Sixteen layers of
+    # 8192 would ask this machine for tens of gigabytes; stop well short of that.
+    if sum(a * b for a, b in zip(layer_sizes, layer_sizes[1:])) > _MAX_LAYER_PRODUCT:
+        return jsonify({"error": "That network is too large for this server. "
+                                 "Use fewer or narrower layers."}), 400
     try:
         epochs = int(epochs)
     except (TypeError, ValueError):
@@ -839,7 +962,7 @@ def start_training():
     if not st["model_config"]:
         return jsonify({"error": "Model not configured"}), 400
 
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     device_id = body.get("device_id")
     socket_id = body.get("socket_id")
 
@@ -860,6 +983,17 @@ def start_training():
     # background task, the queue, and socket relays don't depend on state
     # another request might mutate (or clean up) while it runs/waits.
     state_key = _state_key()
+
+    # Fair use: a caller holds a few runs at a time, and a queue has an end.
+    # (Each queued run also keeps a private copy of its dataset on disk.)
+    mine = [j for j in _jobs.values() if j.get("state_key") == state_key]
+    mine += [j for q in _queues.values() for j in q if j.get("state_key") == state_key]
+    if len(mine) >= _MAX_ACTIVE_JOBS:
+        return jsonify({"error": f"You already have {len(mine)} runs training or waiting. "
+                                 "Let one finish, or cancel it, before starting another."}), 429
+    if len(_queues.get(device.id) or []) >= _MAX_QUEUE_LENGTH:
+        return jsonify({"error": "The queue for this device is full right now. "
+                                 "Please try again in a little while."}), 429
     config = st["model_config"]
     ds_path = st["dataset_path"]
     job_id = uuid.uuid4().hex[:12]
@@ -940,8 +1074,10 @@ def start_training():
 
 @app.route("/api/training/stop", methods=["POST"])
 def stop_training_route():
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     job_id = body.get("job_id")
+    if not isinstance(job_id, str):
+        job_id = None
     key = _peek_state_key()
     job = _jobs.get(job_id) if job_id else None
     # A run can only be stopped by whoever started it — otherwise anyone could
@@ -1006,7 +1142,7 @@ def attach_job(job_id):
     caller's last finished run (snapshot only; there is nothing left to stream).
     """
     key = _peek_state_key()
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     job = _find_job(job_id)
     if job is not None and key and job.get("state_key") == key:
         # Join first, snapshot second: nothing yields in between, so the
@@ -1042,15 +1178,17 @@ def cancel_queued(job_id):
 def reset_state():
     """
     Clear in-memory app state. Accepts JSON body {"scope": "dataset"|"model"|"all"}.
-    Default scope is "all". Uploaded files on disk are left untouched.
+    Default scope is "all". Resetting the dataset also deletes the uploaded file
+    (unless a run is still training on it; that run deletes it when it ends).
     """
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     scope = data.get("scope", "all")
     if scope not in ("dataset", "model", "all"):
         return jsonify({"error": "scope must be one of: dataset, model, all"}), 400
 
     st = _get_state()
     if scope in ("dataset", "all"):
+        _discard_dataset(st)
         st["dataset_file"] = None
         st["dataset_path"] = None
         st["dataset_info"] = None
@@ -1137,16 +1275,17 @@ def upload_weights():
         return jsonify({"error": "Invalid weights filename"}), 400
 
     try:
-        # Save the file
-        filepath = os.path.join(WEIGHTS_DIR, safe)
-        file.save(filepath)
-
-        # Parse config from filename
+        # The name describes the network: read it before anything is written,
+        # so a file we cannot use is never stored.
         config = parse_weight_filename(safe)
-
-        # Validate architecture exists
         if config["arch_type"] not in MODEL_REGISTRY:
             return jsonify({"error": f"Unknown architecture in weights: {config['arch_type']}"}), 400
+
+        # Stored under a name of its own. The weights folder is shared by every
+        # account, and the uploaded name is the caller's choice: saving under it
+        # let anyone overwrite another person's trained model.
+        safe = _unique_weight_name(safe)
+        file.save(os.path.join(WEIGHTS_DIR, safe))
 
         # Store in state
         st = _get_state()
@@ -1197,7 +1336,7 @@ def demo_load():
     the dataset is loaded — exactly as if the visitor had uploaded the file —
     and they pick the columns and build the model themselves.
     """
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     key = body.get("key")
     entry = demo_data.get_demo(key)
     src = demo_data.demo_path(key)
@@ -1215,15 +1354,8 @@ def demo_load():
         return _internal_error("demo dataset load failed", e,
                                public_msg="Could not load that sample dataset.")
 
-    # Drop the copy from a previous click, unless a run is still reading it.
-    prev = st.get("dataset_path")
-    if (prev and prev != dst and os.path.basename(prev).startswith("demo_")
-            and os.path.exists(prev)
-            and not any(j.get("dataset_path") == prev for j in _jobs.values())):
-        try:
-            os.remove(prev)
-        except OSError:
-            pass
+    # Drop the dataset this one replaces, unless a run is still reading it.
+    _discard_dataset(st)
 
     st["dataset_file"] = entry["file"]
     st["dataset_path"] = dst
@@ -1299,7 +1431,7 @@ def last_run_predict():
     if run is None:
         return jsonify({"error": "No trained model to predict with yet — "
                                  "finish a training run first."}), 409
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     rows = body.get("rows") or []
     if isinstance(rows, dict):
         rows = [rows]
@@ -1338,9 +1470,6 @@ def last_run_predict():
 # ─────────────────────────────────────────────────────────
 # Sales / enterprise enquiries
 # ─────────────────────────────────────────────────────────
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
 @app.route("/api/sales/contact", methods=["POST"])
 @limiter.limit("5 per hour")
 def sales_contact():
@@ -1349,12 +1478,16 @@ def sales_contact():
     Open to signed-out visitors too (the form asks for an email). Nothing is
     sent anywhere from here — enquiries land in the `sales_inquiries` table.
     """
-    body = request.get_json(silent=True) or {}
-    name = (body.get("name") or "").strip()[:120]
-    email = (body.get("email") or "").strip()[:200]
-    company = (body.get("company") or "").strip()[:160]
-    message = (body.get("message") or "").strip()[:4000]
-    interest = (body.get("interest") or "").strip()[:60]
+    body = _json_body()
+    def text(key, limit):
+        value = body.get(key)
+        return value.strip()[:limit] if isinstance(value, str) else ""
+
+    name = text("name", 120)
+    email = text("email", 200)
+    company = text("company", 160)
+    message = text("message", 4000)
+    interest = text("interest", 60)
 
     if not name:
         return jsonify({"error": "Please tell us your name."}), 400
@@ -1383,9 +1516,10 @@ def _require_user():
     user_id = session.get("user_id")
     if not user_id:
         return None, (jsonify({"error": "Not authenticated"}), 401)
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         session.pop("user_id", None)
+        session.pop("user_mark", None)
         return None, (jsonify({"error": "User not found"}), 404)
     return user, None
 
@@ -1409,7 +1543,7 @@ def compare_projects():
     user, err = _require_user()
     if err:
         return err
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     raw_ids = body.get("ids") or []
     ids = []
     for i in raw_ids:
@@ -1605,7 +1739,7 @@ def predict_project(project_id):
         except Exception as e:
             return jsonify({"error": f"Could not read file: {e}"}), 400
     else:
-        body = request.get_json(silent=True) or {}
+        body = _json_body()
         rows = body.get("rows") or []
         if isinstance(rows, dict):
             rows = [rows]
@@ -1758,7 +1892,7 @@ def create_kb():
     user, err = _require_user()
     if err:
         return err
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     name = ((data.get("name") or "").strip() or "Knowledge Base")[:120]
     embedder = data.get("embedder", "tfidf")
     if embedder not in rag.EMBEDDERS:
@@ -1920,7 +2054,7 @@ def rag_download_model(device_id):
     device, derr = _resolve_rag_device(device_id, user.id)
     if derr:
         return derr
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     backend = data.get("backend")
     model = data.get("model")
     socket_id = data.get("socket_id")
@@ -1985,7 +2119,7 @@ def rag_cancel_download(device_id):
     device, derr = _resolve_rag_device(device_id, user.id)
     if derr:
         return derr
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     job_id = data.get("job_id")
     if not job_id:
         return jsonify({"error": "job_id is required"}), 400
@@ -2011,7 +2145,7 @@ def rag_delete_model(device_id):
     device, derr = _resolve_rag_device(device_id, user.id)
     if derr:
         return derr
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     backend = data.get("backend")  # 'ollama' or any HF-backed backend
     model = data.get("model")
     if not backend or not model:
@@ -2052,7 +2186,7 @@ def query_kb(kb_id):
     if not kb:
         return jsonify({"error": "Knowledge base not found"}), 404
 
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     query = (data.get("query") or "").strip()
     if not query:
         return jsonify({"error": "query is required"}), 400
@@ -2100,8 +2234,8 @@ def query_kb(kb_id):
     )
     socketio.start_background_task(monitor.loop)
     try:
-        result = rag.rag_answer(kb_id, query, backend=backend, model=model,
-                                top_k=top_k, temperature=temperature)
+        result = _run_blocking(rag.rag_answer, kb_id, query, backend=backend, model=model,
+                               top_k=top_k, temperature=temperature)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
@@ -2141,7 +2275,7 @@ def create_conversation():
     user, err = _require_user()
     if err:
         return err
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     backend = data.get("backend") or rag.default_backend()
     conv = Conversation(
         user_id=user.id,
@@ -2176,7 +2310,7 @@ def update_conversation(conv_id):
     conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     if "title" in data:
         conv.title = ((data.get("title") or "").strip() or conv.title)[:200]
     for field in ("backend", "model"):
@@ -2244,8 +2378,8 @@ def _launch_chat_stream(cid, backend, model, resolved_model, messages, cit_json,
         t0 = time.time()
         answer_parts, reasoning_parts, stopped = [], [], False
         try:
-            for kind, delta in rag.stream_chat(backend, model, messages,
-                                               temperature=temperature, reasoning=reasoning):
+            for kind, delta in _iter_blocking(rag.stream_chat(
+                    backend, model, messages, temperature=temperature, reasoning=reasoning)):
                 if job_id in _chat_cancel:
                     stopped = True
                     break
@@ -2312,7 +2446,7 @@ def _dispatch_chat(conv, user, messages, citations, socket_id, temperature):
         return jsonify({"status": "generating", "mode": "remote",
                         "job_id": job_id, "room": room, "citations": citations})
 
-    resolved_model = conv.model or rag.BACKENDS.get(conv.backend, {}).get("default_model")
+    resolved_model = rag.resolved_model(conv.backend, conv.model)
     cit_json = _json.dumps(citations) if citations else None
     _launch_chat_stream(conv.id, conv.backend, conv.model, resolved_model, messages,
                         cit_json, citations, temperature, room, job_id, reasoning=conv.reasoning)
@@ -2330,7 +2464,7 @@ def send_message(conv_id):
     conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     content = (data.get("content") or "").strip()
     if not content:
         return jsonify({"error": "content is required"}), 400
@@ -2362,7 +2496,7 @@ def regenerate_message(conv_id):
     conv = Conversation.query.filter_by(id=conv_id, user_id=user.id).first()
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     try:
         temperature = max(0.0, min(1.5, float(data.get("temperature", 0.7))))
     except (TypeError, ValueError):
@@ -2684,6 +2818,22 @@ def _notify_queue(device_id):
                       room=j["room"])
 
 
+def _unique_weight_name(filename):
+    """`filename` with a random tag, still readable by `parse_weight_filename`
+    (which drops one trailing `_suffix`). For weights whose name came from
+    outside the server: an upload, or a node agent's report."""
+    stem = filename[:-3] if filename.endswith(".pt") else filename
+    tag = uuid.uuid4().hex[:8]
+    expected = parse_weight_filename(filename)
+    for candidate in (f"{stem}-{tag}.pt", f"{stem}_{tag}.pt"):
+        try:
+            if parse_weight_filename(candidate) == expected:
+                return candidate
+        except ValueError:
+            continue
+    raise ValueError(f"Invalid weight filename format: {filename}")
+
+
 def _remove_orphan_weights(filename):
     """Delete a weights file (and its sidecar) that no saved project points at.
 
@@ -2755,14 +2905,20 @@ def _start_local_job(job):
                                   config["layer_sizes"], data["input_dim"],
                                   data["output_dim"],
                                   activation=config.get("activation", "relu"))
+            n_params = sum(p.numel() for p in model.parameters())
+            if n_params > _MAX_MODEL_PARAMS:
+                raise ValueError(f"this network has {n_params:,} weights, more than the shared "
+                                 f"server trains ({_MAX_MODEL_PARAMS:,}). Use fewer or narrower layers")
             torch_device = get_torch_device()
         except Exception as e:
             # Prep failure: free the device and (for a queued run) drop its
             # private snapshot, but leave the user's live dataset intact so they
             # can fix the selection and retry.
             _delete_job_snapshot(job)
+            reason = ("the uploaded file is no longer on the server — please upload it again"
+                      if isinstance(e, FileNotFoundError) else str(e))
             _conclude_job(job, "training_error",
-                          {"message": f"Could not prepare the dataset: {e}"})
+                          {"message": f"Could not prepare the dataset: {reason}"})
             return
 
         # Stopped while the dataset was being prepared — don't start at all.
@@ -2813,9 +2969,16 @@ def _start_local_job(job):
                                 data["preprocess"])
             except Exception as e:
                 print(f"[train] failed to save preprocess sidecar: {e}")
-            _persist_project(owner_user_id, config, result)
-            if owner_user_id is None and previous != result["weight_filename"]:
-                _remove_orphan_weights(previous)
+            # Whatever happens while saving, the job must still be concluded
+            # below: an exception here used to leave the device "busy" for good.
+            try:
+                _persist_project(owner_user_id, config, result)
+                if owner_user_id is None and previous != result["weight_filename"]:
+                    _remove_orphan_weights(previous)
+            except Exception as e:
+                logger.exception("could not save the finished run %s: %s", job_id, e)
+                db.session.rollback()
+                error, result = "The run finished, but saving it failed. Please train again.", None
         if result:
             _conclude_job(job, "training_complete",
                           emitter.held.get("training_complete") or result)
@@ -2920,8 +3083,11 @@ def _device_runtime(device):
     rt = {"online": online, "status": status, "job": None,
           "queue_length": len(_queues.get(device.id) or [])}
     if job:
+        # Anyone may see that the device is busy and for how long; what the
+        # run is called is only shown to the person it belongs to.
+        mine = has_request_context() and job.get("state_key") == _peek_state_key()
         rt["job"] = {
-            "project_name": job.get("project_name"),
+            "project_name": job.get("project_name") if mine else None,
             "epoch": job.get("epoch", 0),
             "total_epochs": job.get("total_epochs", 0),
             "eta_seconds": job.get("eta_seconds"),
@@ -2949,7 +3115,7 @@ def create_device():
     user, err = _require_user()
     if err:
         return err
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     nickname = ((data.get("nickname") or "").strip() or "My Device")[:80]
     dev = Device(
         user_id=user.id,
@@ -2971,7 +3137,7 @@ def update_device(device_id):
     dev = Device.query.filter_by(id=device_id, user_id=user.id).first()
     if not dev:
         return jsonify({"error": "Device not found"}), 404
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     nickname = (data.get("nickname") or "").strip()
     if nickname:
         dev.nickname = nickname[:80]
@@ -2993,6 +3159,12 @@ def delete_device(device_id):
     node = _nodes.pop(dev.id, None)
     if node:
         _node_sids.pop(node["sid"], None)
+    # Runs still waiting for this device have nowhere to go. Left in the queue,
+    # they (and their dataset) would be sent to whichever device is next given
+    # this id.
+    for job in _queues.pop(dev.id, []):
+        _delete_job_snapshot(job)
+        _emit_job(job, "training_error", {"message": "The device was unlinked before this run started."})
     db.session.delete(dev)
     db.session.commit()
     return jsonify({"status": "deleted"})
@@ -3237,11 +3409,28 @@ def on_node_chat_error(data):
                   room=f"rag:{data.get('job_id')}")
 
 
+def _node_job(data):
+    """The run a node event is about — but only when the sender is the node
+    agent that run was dispatched to.
+
+    These events arrive on the same socket endpoint every browser connects to.
+    Without this check any visitor could announce the end of a run on the
+    shared device (freeing it while the training loop carried on unseen) or
+    hand in "weights" for it.
+    """
+    job_id = data.get("job_id") if isinstance(data, dict) else None
+    job = _jobs.get(job_id) if isinstance(job_id, str) else None
+    if job is None or job["is_local"]:
+        return None
+    if _node_sids.get(request.sid) != job["device_id"]:
+        return None
+    return job
+
+
 @socketio.on("node_relay")
 def on_node_relay(data):
     """Relay a node's training event to the browser watching that job."""
-    data = data or {}
-    job = _jobs.get(data.get("job_id"))
+    job = _node_job(data)
     if not job:
         return
     event = data.get("event")
@@ -3256,14 +3445,20 @@ def on_node_relay(data):
 @socketio.on("node_complete")
 def on_node_complete(data):
     """A node finished a run: save the weights it shipped back, persist stats."""
-    data = data or {}
-    job = _jobs.get(data.get("job_id"))
+    job = _node_job(data)
     if not job:
         return
-    meta = data.get("meta") or {}
-    # A node's reported filename is data from the wire — strip any path part so
-    # it can only ever land inside WEIGHTS_DIR.
-    weight_filename = os.path.basename(meta.get("weight_filename") or "")
+    meta = data.get("meta")
+    if not isinstance(meta, dict):
+        meta = {}
+    # A node's reported filename is data from the wire: keep only a name that
+    # describes a network, and store it under a tag of our own so it can only
+    # land inside WEIGHTS_DIR and never on top of a file that is already there.
+    try:
+        weight_filename = _unique_weight_name(
+            secure_filename(os.path.basename(str(meta.get("weight_filename") or ""))))
+    except (ValueError, IndexError):
+        weight_filename = ""
     meta["weight_filename"] = weight_filename
     weights_b64 = data.get("weights_b64")
     saved = False
@@ -3298,7 +3493,7 @@ def on_node_complete(data):
 
 @socketio.on("node_stopped")
 def on_node_stopped(data):
-    job = _jobs.get((data or {}).get("job_id"))
+    job = _node_job(data)
     if not job:
         return
     state_key = job["state_key"]
@@ -3309,8 +3504,7 @@ def on_node_stopped(data):
 
 @socketio.on("node_error")
 def on_node_error(data):
-    data = data or {}
-    job = _jobs.get(data.get("job_id"))
+    job = _node_job(data)
     if not job:
         return
     state_key = job["state_key"]
@@ -3347,17 +3541,6 @@ with app.app_context():
 # ─────────────────────────────────────────────────────────
 # Novice-mode Chatbot
 # ─────────────────────────────────────────────────────────
-_anthropic_client = None
-
-
-def _get_anthropic_client():
-    """Lazily build the Anthropic client. ANTHROPIC_API_KEY comes from env."""
-    global _anthropic_client
-    if _anthropic_client is None:
-        _anthropic_client = anthropic.Anthropic()
-    return _anthropic_client
-
-
 CHAT_SYSTEM_PROMPT = (
     "You are a friendly machine-learning tutor embedded in VortexML, a web app "
     "for training small neural networks on tabular data.\n\n"
@@ -3389,7 +3572,10 @@ CHAT_SYSTEM_PROMPT = (
 # Limits to keep cost + latency predictable
 _CHAT_MAX_HISTORY = 20         # last N turns we'll forward to Claude
 _CHAT_MAX_MESSAGE_CHARS = 4000  # per-message cap (silently truncated)
-_CHAT_MAX_TOKENS = 1024         # cap on the assistant's reply
+# Ceiling on one reply. Any thinking the model does counts toward it too, so it
+# is set well above the few hundred tokens an answer takes: the prompt, not
+# this number, keeps answers short.
+_CHAT_MAX_TOKENS = 2048
 
 
 def _chatbot_available_reason(user):
@@ -3425,7 +3611,7 @@ def chat():
         status_code = 403 if user.is_beginner is False else 503
         return jsonify({"error": reason}), status_code
 
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     raw_messages = data.get("messages")
     if not isinstance(raw_messages, list) or not raw_messages:
         return jsonify({"error": "messages array required"}), 400
@@ -3437,15 +3623,12 @@ def chat():
         return jsonify({"error": "First message must be from the user."}), 400
 
     try:
-        client = _get_anthropic_client()
-        resp = client.messages.create(
-            # Sonnet 4.6 is ~40% cheaper per token than Opus 4.7 and the
-            # right tier for a Q&A tutor. Per the Anthropic migration guide,
-            # set `effort: low` and disable thinking for chat workloads —
-            # otherwise 4.6 defaults to `effort: high` and burns tokens.
-            model="claude-sonnet-4-6",
+        # The current Sonnet: the right tier for a Q&A tutor. Thinking cannot
+        # be switched off on current models; `effort: low` keeps it short (and
+        # skipped for simple questions), which is what a chat reply wants.
+        resp = _run_blocking(
+            claude_models.create, "sonnet",
             max_tokens=_CHAT_MAX_TOKENS,
-            thinking={"type": "disabled"},
             output_config={"effort": "low"},
             system=[
                 {
@@ -3466,11 +3649,7 @@ def chat():
         return _internal_error("chatbot call failed", e,
                                public_msg="Chatbot error — please try again.")
 
-    text = ""
-    for block in resp.content:
-        if getattr(block, "type", None) == "text":
-            text = block.text
-            break
+    text = claude_models.reply_text(resp)
 
     return jsonify({"role": "assistant", "content": text})
 
@@ -3750,9 +3929,8 @@ def _dataset_facts(transcript_text=""):
 
 @app.route("/api/auto-config/status", methods=["GET"])
 def auto_config_status():
-    user, err = _require_user()
-    if err:
-        return err
+    if not session.get("user_id"):
+        return jsonify({"available": False, "reason": "Sign in to use AI Auto-Configure."})
     reason = _auto_config_available_reason()
     if reason:
         return jsonify({"available": False, "reason": reason})
@@ -3770,7 +3948,7 @@ def auto_config_chat():
     if reason:
         return jsonify({"error": reason}), 503
 
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     raw_messages = data.get("messages")
     if not isinstance(raw_messages, list) or not raw_messages:
         return jsonify({"error": "messages array required"}), 400
@@ -3783,11 +3961,9 @@ def auto_config_chat():
     sys_text = f"{AUTO_CONFIG_QUESTIONER_PROMPT}\n\n--- DATASET SUMMARY ---\n{ds_context}"
 
     try:
-        client = _get_anthropic_client()
-        resp = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=400,
-            thinking={"type": "disabled"},
+        resp = _run_blocking(
+            claude_models.create, "sonnet",
+            max_tokens=_CHAT_MAX_TOKENS,
             output_config={"effort": "low"},
             system=[
                 {
@@ -3808,11 +3984,7 @@ def auto_config_chat():
         return _internal_error("auto-configure call failed", e,
                                public_msg="Auto-Configure error — please try again.")
 
-    text = ""
-    for block in resp.content:
-        if getattr(block, "type", None) == "text":
-            text = block.text
-            break
+    text = claude_models.reply_text(resp)
     return jsonify({"role": "assistant", "content": text})
 
 
@@ -3830,7 +4002,7 @@ def auto_config_decide():
     if not _get_state()["dataset_path"]:
         return jsonify({"error": "Upload a dataset before using Auto-Configure."}), 400
 
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     raw_messages = data.get("messages") or []
     if not isinstance(raw_messages, list):
         raw_messages = []
@@ -3859,23 +4031,18 @@ def auto_config_decide():
         }
     ]
 
-    # Picker uses the most capable model (Opus 4.7) with adaptive thinking at
-    # high effort — a single, high-stakes call per session, so quality wins.
+    # The picker uses the current Opus at high effort — a single, high-stakes
+    # call per session, so quality wins. (Effort is set outright: the default
+    # differs between Opus generations.)
     #
-    # Two API constraints we have to obey:
-    #   - Opus 4.7 only accepts thinking.type "adaptive" or "disabled". The
-    #     literal {"type": "enabled", "budget_tokens": N} form returns 400.
-    #     Adaptive + effort=high tells the model to deliberate as needed.
-    #   - Forced tool_choice ({"type": "tool", ...}) is rejected when thinking
-    #     is on. We leave tool_choice at the default ("auto") and rely on the
-    #     "OUTPUT CONTRACT" section of the system prompt to make calling the
-    #     tool the only sensible response.
+    # Current models reject a forced tool_choice ({"type": "tool", ...}), so it
+    # stays at the default ("auto") and the "OUTPUT CONTRACT" section of the
+    # system prompt makes calling the tool the only sensible response. If the
+    # model answers without the tool anyway, the rules below decide instead.
     try:
-        client = _get_anthropic_client()
-        resp = client.messages.create(
-            model="claude-opus-4-7",
-            max_tokens=8192,
-            thinking={"type": "adaptive"},
+        resp = _run_blocking(
+            claude_models.create, "opus",
+            max_tokens=16000,
             output_config={"effort": "high"},
             system=[
                 {
@@ -3979,7 +4146,7 @@ def explain_results():
     if reason:
         return jsonify({"error": reason}), 503
 
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     project_id = body.get("project_id")
     if project_id is not None:
         proj = Project.query.filter_by(id=project_id, user_id=user.id).first()
@@ -4015,11 +4182,9 @@ def explain_results():
 
     summary = _summarize_run(name, cfg, task_type, history, final)
     try:
-        client = _get_anthropic_client()
-        resp = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=700,
-            thinking={"type": "disabled"},
+        resp = _run_blocking(
+            claude_models.create, "sonnet",
+            max_tokens=_CHAT_MAX_TOKENS,
             output_config={"effort": "low"},
             system=[{"type": "text", "text": EXPLAIN_RESULTS_PROMPT,
                      "cache_control": {"type": "ephemeral"}}],
@@ -4036,544 +4201,43 @@ def explain_results():
         return _internal_error("explain-results call failed", e,
                                public_msg="Explain error — please try again.")
 
-    text = ""
-    for block in resp.content:
-        if getattr(block, "type", None) == "text":
-            text = block.text
-            break
+    text = claude_models.reply_text(resp)
     return jsonify({"explanation": text})
 
 
 # ─────────────────────────────────────────────────────────
 # Courses API
 # ─────────────────────────────────────────────────────────
-MOCK_COURSES = [
-    {
-        "id": "intro-nn",
-        "title": "Introduction to Neural Networks",
-        "type": "text",
-        "description": "Learn the mathematics, history, and intuition behind neural networks.",
-        "duration": "25 min",
-        "tags": ["Beginner", "Theory", "History"],
-        "content": r"""# Introduction to Neural Networks
-
-Neural networks are computing systems inspired by the biological neural networks that constitute animal brains. They are the backbone of modern Deep Learning, powering everything from voice assistants to autonomous vehicles.
-
-## 🏛️ A Brief History
-
-The history of neural networks spans several decades, marked by periods of intense hype followed by "AI winters":
-
-*   **1943: The McCulloch-Pitts Neuron.** Warren McCulloch and Walter Pitts created a computational model for neural networks based on mathematics and algorithms.
-*   **1958: The Perceptron.** Frank Rosenblatt created the Perceptron, an algorithm for pattern recognition based on a two-layer learning computer network. It generated massive hype but was later shown by Minsky and Papert (1969) to be incapable of solving non-linear problems like XOR.
-*   **1986: Backpropagation.** Geoffrey Hinton, David Rumelhart, and Ronald Williams popularized the backpropagation algorithm, allowing multi-layer networks to be trained efficiently.
-*   **2012: The Deep Learning Boom.** Alex Krizhevsky and his team won the ImageNet competition using a deep convolutional neural network (AlexNet) trained on GPUs, crushing traditional machine learning methods and sparking the current AI revolution.
-
-## 🧮 The Mathematics: Forward and Backward Propagation
-
-### 1. Forward Propagation (The Prediction)
-
-A single neuron takes inputs $x_i$, multiplies them by weights $w_i$, sums them up, adds a bias $b$, and passes the result through an activation function $\sigma$ (like ReLU or Sigmoid).
-
-Mathematically, for a single layer:
-$$Z = WX + b$$
-$$A = \sigma(Z)$$
-
-Where $W$ is the weight matrix, $X$ is the input vector, $b$ is the bias vector, and $A$ is the activation output.
-
-### 2. Loss Function (The Error)
-
-We need to measure how wrong our prediction was. A common choice for regression is Mean Squared Error (MSE):
-$$Loss = \frac{1}{n} \sum (y_{true} - y_{pred})^2$$
-
-### 3. Backpropagation (The Learning)
-
-To minimize the loss, we need to know how to adjust the weights. We use calculus (the Chain Rule) to find the gradient of the loss with respect to each weight.
-
-$$\frac{\partial Loss}{\partial W} = \frac{\partial Loss}{\partial A} \cdot \frac{\partial A}{\partial Z} \cdot \frac{\partial Z}{\partial W}$$
-
-We then update the weights using an optimizer (like Gradient Descent or Adam) and a learning rate $\eta$:
-$$W_{new} = W_{old} - \eta \cdot \frac{\partial Loss}{\partial W}$$
-
-## 💻 Code Example (PyTorch)
-
-Here is how you define a simple Neural Network layer in PyTorch:
-
-```python
-import torch
-import torch.nn as nn
-
-class SimpleNeuron(nn.Module):
-    def __init__(self, input_features):
-        super().__init__()
-        # nn.Linear automatically initializes Weights (W) and bias (b)
-        self.linear = nn.Linear(in_features=input_features, out_features=1)
-        # Activation function
-        self.relu = nn.ReLU()
-        
-    def forward(self, x):
-        # Z = WX + b
-        z = self.linear(x)
-        # A = sigma(Z)
-        a = self.relu(z)
-        return a
-
-# Create input tensor
-x = torch.randn(1, 5) # 1 sample, 5 features
-model = SimpleNeuron(5)
-output = model(x)
-print(output)
-```
-
-## 🌐 Architectures available in Vortex ML
-Proceed to our specialized courses for a deep dive into the architectures we support:
-*   Multi-Layer Perceptron (MLP) & Deep Neural Networks (DNN)
-*   1D Convolutional Neural Networks (CNN-1D)
-*   Recurrent Neural Networks (RNN, LSTM, GRU)
-*   Autoencoders (AE)
-*   Residual Networks (ResNet)
-*   Transformers
-*   Wide & Deep Networks
-"""
-    },
-    {
-        "id": "course-mlp-dnn",
-        "title": "MLP & Deep Neural Networks",
-        "type": "text",
-        "description": "Master classic feedforward networks: Multi-Layer Perceptrons and DNNs.",
-        "duration": "15 min",
-        "tags": ["Architecture", "Fundamentals"],
-        "content": r"""# Multi-Layer Perceptrons (MLP) and Deep Neural Networks (DNN)
-
-## The Multi-Layer Perceptron (MLP)
-An MLP is the quintessential deep learning architecture. It consists of multiple layers of nodes in a directed graph, with each layer fully connected to the next one. 
-
-### Why do we need hidden layers?
-A single-layer perceptron can only learn linearly separable patterns. By adding hidden layers with non-linear activation functions (like ReLU), an MLP becomes a **Universal Function Approximator**—capable of approximating any continuous function, allowing it to solve complex, non-linear problems XOR.
-
-## Deep Neural Networks (DNN)
-A DNN is essentially an MLP with many hidden layers. However, simply stacking layers leads to problems like vanishing gradients and overfitting. 
-
-In modern DNNs, we introduce specific layers to stabilize training:
-1.  **Batch Normalization (`nn.BatchNorm1d`)**: Normalizes the activations of the previous layer at each batch, stabilizing the learning process and significantly accelerating training.
-2.  **Dropout (`nn.Dropout`)**: Randomly zeroes some of the elements of the input tensor with probability $p$ during training. This prevents complex co-adaptations on training data (preventing overfitting).
-
-## 💻 PyTorch Implementation inside Vortex ML
-
-```python
-import torch.nn as nn
-
-class DNNModel(nn.Module):
-    def __init__(self, input_dim, output_dim, layer_sizes, dropout=0.3):
-        super().__init__()
-        layers = []
-        prev = input_dim
-        
-        for size in layer_sizes:
-            layers.append(nn.Linear(prev, size))
-            layers.append(nn.BatchNorm1d(size))  # Stabilize training
-            layers.append(nn.ReLU())             # Non-linearity
-            layers.append(nn.Dropout(dropout))   # Prevent overfitting
-            prev = size
-            
-        layers.append(nn.Linear(prev, output_dim))
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.net(x)
-```
-"""
-    },
-    {
-        "id": "course-cnn1d",
-        "title": "1D Convolutional Networks",
-        "type": "text",
-        "description": "Learn how convolutions apply to sequential and tabular feature data.",
-        "duration": "20 min",
-        "tags": ["Architecture", "Pattern Recognition"],
-        "content": r"""# 1D Convolutional Neural Networks (CNN-1D)
-
-While 2D CNNs are famous for image processing, **1D CNNs** are incredibly effective for sequential data, time series, and even tabular data where local feature interactions exist.
-
-## The Mathematics of Convolutions
-Instead of a matrix multiplying every input across the entire layer (dense layer), a convolution uses a small, sliding **Kernel** (or filter).
-
-Mathematically, a 1D convolution operation is defined as:
-$$(f * g)[n] = \sum_{m=-M}^{M} f[m] \cdot g[n-m]$$
-Where $f$ is our input vector, $g$ is our kernel vector, and $n$ is the current position.
-
-### Why Convolutions?
-1.  **Local Receptive Field:** Kernels only look at a tiny window of features at a time. This allows the network to learn "patterns" (e.g., a sudden spike in price).
-2.  **Weight Sharing:** The same kernel slides over the whole sequence. This drastically reduces the number of parameters needed compared to an MLP.
-
-## 💻 PyTorch Implementation inside Vortex ML
-
-In tabular data, we treat the input feature vector as a sequence of length $N$ with $1$ channel.
-
-```python
-import torch.nn as nn
-
-class CNN1DModel(nn.Module):
-    def __init__(self, input_dim, output_dim, layer_sizes):
-        super().__init__()
-        
-        conv_layers = []
-        in_channels = 1 # Treat tabular data as a 1D sequence
-        
-        for out_channels in layer_sizes:
-            # kernel_size=3 means the filter looks at 3 features at a time
-            conv_layers.append(
-                nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1)
-            )
-            conv_layers.append(nn.ReLU())
-            in_channels = out_channels
-            
-        self.conv = nn.Sequential(*conv_layers)
-        # Flatten the channels and features for the final prediction
-        self.fc = nn.Linear(in_channels * input_dim, output_dim)
-
-    def forward(self, x):
-        # Reshape: (batch_size, channels, sequence_length) -> (batch, 1, features)
-        x = x.unsqueeze(1)  
-        x = self.conv(x)     
-        x = x.view(x.size(0), -1) # Flatten
-        return self.fc(x)
-```
-"""
-    },
-    {
-        "id": "course-rnn-lstm-gru",
-        "title": "Sequences: RNN, LSTM, GRU",
-        "type": "text",
-        "description": "Dive into Recurrent networks and memory mechanism architectures.",
-        "duration": "25 min",
-        "tags": ["Architecture", "Time-Series", "Memory"],
-        "content": r"""# Recurrent Architectures (RNN, LSTM, GRU)
-
-Feedforward networks (like MLPs) have no memory. They process each input independently. Recurrent Neural Networks (RNNs) address this by maintaining a hidden state $h_t$ that carries information across time steps.
-
-## Vanilla RNN
-An RNN processes sequences step-by-step. At time $t$, it combines the current input $x_t$ with the previous hidden state $h_{t-1}$:
-
-$$h_t = \tanh(W_{hh}h_{t-1} + W_{xh}x_t + b)$$
-
-**The Flaw**: Vanilla RNNs suffer terribly from the **Vanishing Gradient Problem**. Over long sequences, the gradients multiplied during backpropagation shrink to zero, making the network "forget" early inputs.
-
-## Long Short-Term Memory (LSTM)
-LSTMs solve the vanishing gradient problem by introducing a **Cell State** ($C_t$) and three "Gates" that regulate information flow:
-1.  **Forget Gate**: Decides what information to throw away from the cell state.
-2.  **Input Gate**: Decides which new values to update in the cell state.
-3.  **Output Gate**: Decides what the next hidden state should be based on the cell state.
-
-Because the cell state acts like a highway strictly controlled by gates, gradients flow easily without vanishing.
-
-## Gated Recurrent Unit (GRU)
-GRUs are a newer variation on LSTMs. They combine the forget and input gates into a single "Update Gate" and merge the cell state and hidden state. They perform similarly to LSTMs but are computationally cheaper because they have fewer parameters.
-
-## 💻 PyTorch Implementation inside Vortex ML
-
-```python
-import torch.nn as nn
-
-class LSTMModel(nn.Module):
-    def __init__(self, input_dim, output_dim, layer_sizes):
-        super().__init__()
-        hidden_size = layer_sizes[0] if layer_sizes else 64
-        num_layers = len(layer_sizes) if layer_sizes else 1
-        
-        # PyTorch provides optimized LSTM implementations
-        self.lstm = nn.LSTM(
-            input_size=input_dim, 
-            hidden_size=hidden_size,
-            num_layers=num_layers, 
-            batch_first=True
-        )
-        self.fc = nn.Linear(hidden_size, output_dim)
-
-    def forward(self, x):
-        # We treat tabular data as a sequence of length 1: (batch, seq_len=1, features)
-        x = x.unsqueeze(1)
-        
-        # LSTM returns: output, (hidden_state, cell_state)
-        # We only care about the output from the final sequence step: [:, -1, :]
-        out, (h_n, c_n) = self.lstm(x)
-        return self.fc(out[:, -1, :])
-```
-"""
-    },
-    {
-        "id": "course-autoencoders",
-        "title": "Autoencoders & Bottlenecks",
-        "type": "text",
-        "description": "Learn representation learning through Encoders and Decoders.",
-        "duration": "15 min",
-        "tags": ["Architecture", "Unsupervised", "Anomaly Detection"],
-        "content": r"""# Autoencoders (AE)
-
-Autoencoders are an unsupervised learning technique where neural networks are trained to copy their input to their output. 
-
-## The Bottleneck
-If we simply made a wide network, it would trivially learn the identity function ($output = input$). Autoencoders force the data through an information **bottleneck**. 
-
-The architecture consists of two parts:
-1.  **Encoder**: Compresses the input $x$ into a latent-space representation $z$ (a lower-dimensional feature vector).
-2.  **Decoder**: Reconstructs the input $x'$ from the latent space $z$.
-
-By forcing the network to compress and reconstruct, it is forced to learn the most salient, underlying features of the training data.
-
-### Use Cases in Tabular Data
-*   **Dimensionality Reduction**: Like PCA, but non-linear and much more powerful.
-*   **Anomaly Detection**: If an Autoencoder is trained entirely on "normal" data, it will accurately reconstruct normal rows. If you pass an anomalous/fraudulent row, the reconstruction error will be massively high, raising a flag.
-
-## 💻 PyTorch Implementation inside Vortex ML
-
-```python
-import torch.nn as nn
-
-class AutoencoderModel(nn.Module):
-    def __init__(self, input_dim, output_dim, layer_sizes):
-        super().__init__()
-        
-        # ENCODER: Compresses down to the latent space (bottleneck)
-        enc_layers = []
-        prev = input_dim
-        for size in layer_sizes:
-            enc_layers.append(nn.Linear(prev, size))
-            enc_layers.append(nn.ReLU())
-            prev = size
-        self.encoder = nn.Sequential(*enc_layers)
-
-        # DECODER: Reconstructs back to original input dimension
-        dec_layers = []
-        for size in reversed(layer_sizes[:-1]):
-            dec_layers.append(nn.Linear(prev, size))
-            dec_layers.append(nn.ReLU())
-            prev = size
-        dec_layers.append(nn.Linear(prev, input_dim))
-        self.decoder = nn.Sequential(*dec_layers)
-
-        # PREDICTION HEAD: Uses the compressed latent vector for the actual task
-        latent_dim = layer_sizes[-1] if layer_sizes else input_dim
-        self.head = nn.Linear(latent_dim, output_dim)
-
-    def forward(self, x):
-        # Predict target based on compressed latent representation
-        encoded = self.encoder(x)
-        return self.head(encoded)
-
-    def reconstruct(self, x):
-        # Utility method for Anomaly Detection (not used directly in standard forward)
-        return self.decoder(self.encoder(x))
-```
-"""
-    },
-     {
-        "id": "course-resnet",
-        "title": "Residual Networks (ResNet)",
-        "type": "text",
-        "description": "Master Skip Connections designed to train ultra-deep networks.",
-        "duration": "18 min",
-        "tags": ["Architecture", "Deep Learning"],
-        "content": r"""# Residual Networks (ResNet)
-
-As deep learning progressed, researchers realized that adding more layers didn't always improve performance. Often, **ultradeep networks performed worse** than shallow ones due to the vanishing gradient problem.
-
-In 2015, Kaiming He introduced ResNets, altering the fundamental architecture of neural networks and winning every major AI competition that year.
-
-## The Skip Connection
-
-The core idea of a ResNet is the **Residual Block**. Instead of layers learning the desired underlying mapping directly, they are forced to learn a **residual** (the difference) from the identity mapping.
-
-This is achieved via "Skip Connections" or "Shortcut Connections", where the input to a block is added the block's output:
-$$y = F(x) + x$$
-
-Where $F(x)$ represents the stacked non-linear layers.
-
-**Why is this brilliant?**
-1.  If the optimal mapping is closer to an identity mapping, it is easier for the network to push the non-linear weights to zero ($F(x) = 0$).
-2.  **Gradient Superhighways:** During backpropagation, the gradients can flow completely unimpeded along the skip connection ($+x$). This explicitly solves the vanishing gradient problem, allowing networks with *thousands* of layers to easily train.
-
-## 💻 PyTorch Implementation inside Vortex ML
-
-While famous for CNNs on images, this paradigm is equally powerful for dense MLPs on tabular data.
-
-```python
-import torch.nn as nn
-
-class ResidualBlock(nn.Module):
-    def __init__(self, dim, dropout=0.1):
-        super().__init__()
-        # F(x) path
-        self.block = nn.Sequential(
-            nn.Linear(dim, dim),
-            nn.BatchNorm1d(dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(dim, dim),
-            nn.BatchNorm1d(dim),
-        )
-        self.act = nn.ReLU()
-
-    def forward(self, x):
-        # y = F(x) + x
-        return self.act(self.block(x) + x)
-
-class ResNetModel(nn.Module):
-    def __init__(self, input_dim, output_dim, layer_sizes):
-        super().__init__()
-        hidden = layer_sizes[0] if layer_sizes else 64
-        
-        # Project inputs to the hidden dimension size
-        self.input_proj = nn.Linear(input_dim, hidden)
-        
-        # Stack Residual blocks based on layer configurations
-        self.blocks = nn.Sequential(
-            *[ResidualBlock(hidden) for _ in layer_sizes]
-        )
-        self.head = nn.Linear(hidden, output_dim)
-
-    def forward(self, x):
-        x = self.input_proj(x)
-        x = self.blocks(x)
-        return self.head(x)
-```
-"""
-    },
-    {
-        "id": "course-transformers",
-        "title": "Transformers & Attention",
-        "type": "text",
-        "description": "Understand Attention mechanisms, the foundation of modern LLMs.",
-        "duration": "30 min",
-        "tags": ["Architecture", "State of the Art"],
-        "content": r"""# Transformers and Attention Mechanisms
-
-Introduced in the seminal 2017 paper *"Attention Is All You Need"*, Transformers completely usurped RNNs and LSTMs, leading directly to the creation of GPT, BERT, and the modern generative AI era.
-
-## The Problem with RNNs
-RNNs compress entire sequences into a single fixed-size bottleneck vector (the hidden state). They also process data sequentially, which makes them incredibly slow to train on GPUs since computation cannot be parallelized.
-
-## The Solution: Self-Attention
-Transformers throw out recurrence entirely. Instead, they look at the *entire* sequence at once and compute an **Attention Score**.
-For every word (or feature), Self-Attention asks: *How important is every other feature in the sequence for understanding this specific feature?*
-
-### The Math: Scaled Dot-Product Attention
-Inputs are multiplied by learned weight matrices to create three vectors for each feature:
-*   **Query ($Q$)**: What am I looking for?
-*   **Key ($K$)**: What do I represent?
-*   **Value ($V$)**: If I am what you're looking for, here is my information.
-
-$$Attention(Q, K, V) = softmax\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
-Where $d_k$ is the dimension of the keys, scaling the dot product down so gradients don't vanish inside the softmax function.
-
-## 💻 PyTorch Implementation inside Vortex ML
-
-While famous for NLP, Attention performs brilliantly on tabular data by dynamically weighting the importance of different columns for each specific row.
-
-```python
-import torch.nn as nn
-
-class TransformerModel(nn.Module):
-    def __init__(self, input_dim, output_dim, layer_sizes):
-        super().__init__()
-        d_model = layer_sizes[0] if layer_sizes else 64
-        
-        # Multi-Head Attention requires d_model to be divisible by n_heads
-        n_heads = max(1, d_model // 16)
-        d_model = n_heads * (d_model // n_heads) 
-        num_layers = len(layer_sizes) if layer_sizes else 1
-
-        # Project flat tabular features into the embedding dimension
-        self.input_proj = nn.Linear(input_dim, d_model)
-        
-        # PyTorch provides optimized Transformer logic
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, 
-            nhead=n_heads, 
-            dim_feedforward=d_model * 4,
-            dropout=0.1, 
-            batch_first=True
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.head = nn.Linear(d_model, output_dim)
-
-    def forward(self, x):
-        # Add a dummy sequence dimension: (batch, 1, d_model)
-        x = self.input_proj(x).unsqueeze(1)  
-        
-        # Self-Attention is computed here
-        x = self.transformer(x)
-        
-        # Extract the sequence and predict
-        return self.head(x[:, 0, :])
-```
-"""
-    },
-    {
-        "id": "course-wide-deep",
-        "title": "Wide & Deep Networks",
-        "type": "text",
-        "description": "Combine memorization and generalization (invented by Google for Recommender systems).",
-        "duration": "15 min",
-        "tags": ["Architecture", "Production"],
-        "content": r"""# Wide & Deep Networks
-
-Originally developed by Google in 2016 for their Play Store Recommendation Engine, the Wide & Deep architecture elegantly solves a classic problem: how do we memorize specific sparse rules while still generalizing to unseen data?
-
-## The Problem
-*   **Linear Models (Wide)** are great at **memorization**. For example, they can strongly learn the specific rule: `IF user_searches="Fried Chicken" AND user_city="KFC" THEN predict=High_CTR`. However, they fail to generalize to unseen combinations.
-*   **Deep Neural Networks (Deep)** are great at **generalization** by learning dense feature embeddings. However, they can sometimes overdraw generalized conclusions and ignore highly specific, perfectly correlated rule exceptions.
-
-## The Solution: Combine Them
-A Wide & Deep Network trains both architectures synchronously.
-
-1.  **The Wide Part**: A simple linear layer connecting input features directly to the output node.
-2.  **The Deep Part**: A stacked MLP.
-
-Their outputs are simply summed before the final prediction.
-
-## 💻 PyTorch Implementation inside Vortex ML
-
-```python
-import torch.nn as nn
-
-class WideDeepModel(nn.Module):
-    def __init__(self, input_dim, output_dim, layer_sizes):
-        super().__init__()
-        
-        # 1. WIDE PATH: Direct linear mapping (Memorization)
-        self.wide = nn.Linear(input_dim, output_dim)
-
-        # 2. DEEP PATH: Multi-Layer Perceptron (Generalization)
-        deep_layers = []
-        prev = input_dim
-        for size in layer_sizes:
-            deep_layers.append(nn.Linear(prev, size))
-            deep_layers.append(nn.ReLU())
-            prev = size
-        deep_layers.append(nn.Linear(prev, output_dim))
-        
-        self.deep = nn.Sequential(*deep_layers)
-
-    def forward(self, x):
-        # Simply sum the memorized output and the generalized output
-        return self.wide(x) + self.deep(x)
-```
-"""
-    }
-]
+# The lessons are Markdown files in backend/courses/, one per course, listed
+# (with title, description, duration and tags) in index.json. The site build
+# reads the same files to write every lesson as a static page, so a lesson
+# changed here shows on the site after the next build (`start.sh` runs one).
+COURSES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "courses")
+
+
+def _load_courses():
+    with open(os.path.join(COURSES_DIR, "index.json"), encoding="utf-8") as f:
+        courses = json.load(f)
+    for course in courses:
+        with open(os.path.join(COURSES_DIR, f"{course['id']}.md"), encoding="utf-8") as f:
+            course["content"] = f.read()
+    return courses
+
+
+COURSES = _load_courses()
 
 @app.route("/api/courses", methods=["GET"])
 def get_courses():
     # Return everything except the heavy content/transcript for the grid list
     summaries = []
-    for c in MOCK_COURSES:
+    for c in COURSES:
         summary = {k: v for k, v in c.items() if k not in ["content", "transcript", "video_url", "notebook_url"]}
         summaries.append(summary)
     return jsonify(summaries)
 
 @app.route("/api/courses/<course_id>", methods=["GET"])
 def get_course_detail(course_id):
-    course = next((c for c in MOCK_COURSES if c["id"] == course_id), None)
+    course = next((c for c in COURSES if c["id"] == course_id), None)
     if not course:
         return jsonify({"error": "Course not found"}), 404
     return jsonify(course)
@@ -4583,6 +4247,7 @@ def get_course_detail(course_id):
 # ─────────────────────────────────────────────────────────
 @socketio.on("connect")
 def on_connect():
+    _drop_stale_login()
     print("Client connected")
 
 
@@ -4624,6 +4289,20 @@ def on_disconnect():
     print(f"[node] disconnected: device #{dev_id}")
 
 
+def _claude_models_loop():
+    """Keep `claude_models` pointed at the newest Opus and Sonnet."""
+    while True:
+        wait = claude_models.REFRESH_SECONDS
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            try:
+                _run_blocking(claude_models.refresh)
+            except Exception as e:
+                # Not fatal: the pinned models are used meanwhile. Look again soon.
+                logger.warning("could not list Claude models (%s); using the pinned ones", e)
+                wait = 600
+        socketio.sleep(wait)
+
+
 # ─────────────────────────────────────────────────────────
 # Run
 # ─────────────────────────────────────────────────────────
@@ -4635,7 +4314,21 @@ if __name__ == "__main__":
     debug = os.environ.get("FLASK_DEBUG") == "1"
     host = os.environ.get("VORTEX_BIND", "127.0.0.1")
     port = int(os.environ.get("VORTEX_PORT", "5050"))
+    # Which upload belongs to whom is only known in memory, so after a restart
+    # no dataset left in uploads/ can be reached again. Datasets are promised to
+    # be temporary: remove them. (Only here, when the server itself starts —
+    # never on import, where a test or a script could share this folder with a
+    # running server. Weights and knowledge bases live in sub-folders.)
+    for _name in os.listdir(UPLOAD_DIR):
+        _path = os.path.join(UPLOAD_DIR, _name)
+        if os.path.isfile(_path):
+            try:
+                os.remove(_path)
+            except OSError:
+                pass
     # Periodically prune abandoned anonymous working-state so memory doesn't
     # grow without bound on a long-running public instance.
     socketio.start_background_task(_state_evictor_loop)
+    # Find the newest Opus and Sonnet now, and look again every few hours.
+    socketio.start_background_task(_claude_models_loop)
     socketio.run(app, host=host, port=port, debug=debug)

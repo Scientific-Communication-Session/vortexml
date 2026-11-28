@@ -29,6 +29,8 @@ from importlib.util import find_spec
 
 import numpy as np
 
+import claude_models
+
 RAG_DIR = os.path.join(os.path.dirname(__file__), "uploads", "rag")
 os.makedirs(RAG_DIR, exist_ok=True)
 
@@ -348,15 +350,10 @@ BACKENDS = {
         "use_when": "You want it to just work, or your machine can't run a local LLM.",
         "local": False,
         "novice_default": True,
-        "default_model": "claude-opus-4-8",
-        "models": ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
-        # Friendly names shown in the model picker (the API returns these so the
-        # UI can label opaque model IDs).
-        "model_labels": {
-            "claude-opus-4-8": "Claude Opus 4.8 (1M context) — most capable",
-            "claude-sonnet-4-6": "Claude Sonnet 4.6 — balanced",
-            "claude-haiku-4-5": "Claude Haiku 4.5 — fastest / cheapest",
-        },
+        # Family names, not versions: `_cloud_models()` turns "opus" and
+        # "sonnet" into the newest model of each (see claude_models.py).
+        "default_model": "opus",
+        "models": ["opus", "sonnet", "claude-haiku-4-5"],
         "setup": "Set ANTHROPIC_API_KEY in the server's .env.",
     },
     "mlx": {
@@ -454,10 +451,34 @@ def supports_thinking(backend):
     return backend in THINKING_BACKENDS
 
 
+def _cloud_models():
+    """The cloud backend's model list as the picker shows it: the current Opus
+    and Sonnet by id, with the friendly names the API gives them."""
+    opus, sonnet = claude_models.resolve("opus"), claude_models.resolve("sonnet")
+    return {
+        "default_model": opus,
+        "models": [opus, sonnet, "claude-haiku-4-5"],
+        "model_labels": {
+            opus: f"{claude_models.display_name('opus')} — most capable",
+            sonnet: f"{claude_models.display_name('sonnet')} — balanced",
+            "claude-haiku-4-5": "Claude Haiku 4.5 — fastest / cheapest",
+        },
+    }
+
+
+def resolved_model(backend, model):
+    """The model a request to `backend` will really use, for display and stats."""
+    if backend == "cloud":
+        return claude_models.resolve(model or "opus")
+    return model or BACKENDS.get(backend, {}).get("default_model")
+
+
 def list_backends():
     recommended = "mlx" if backend_available("mlx") else "cloud"
     out = []
     for key, meta in BACKENDS.items():
+        if key == "cloud":
+            meta = {**meta, **_cloud_models()}
         out.append({
             "key": key,
             "label": meta["label"],
@@ -805,39 +826,39 @@ def _mlx_prompt(tokenizer, messages, reasoning):
     return tokenizer.apply_chat_template(messages, add_generation_prompt=True)
 
 
-# Cloud models that accept adaptive thinking + the `effort` knob: Opus 4.x and
-# Sonnet 4.6. Haiku 4.5 supports neither — sending `output_config.effort` (or a
-# `thinking` block) to it returns a 400 — so we omit both for it. Opus 4.8 keeps
-# the same request surface as 4.7 (adaptive thinking only; no temperature/top_p/
-# budget_tokens) and offers a 1M context window natively (no beta header needed).
+# Opus and Sonnet take the `effort` setting, which is how much they think: on
+# the current models thinking cannot be switched off, only kept short. Haiku 4.5
+# has no such setting — sending `output_config.effort` to it returns a 400. None
+# of them is sent temperature / top_p: current models reject those.
 def _cloud_supports_effort(model):
-    m = (model or "").lower()
-    if "haiku" in m:
-        return False
-    return ("opus-4" in m) or ("sonnet-4-6" in m) or ("sonnet-4.6" in m)
+    return "haiku-4" not in (model or "").lower()
 
 
 def _cloud_kwargs(messages, model, max_tokens, reasoning):
-    """Build the messages.create/stream kwargs, gating thinking+effort by model."""
+    """The Messages request for a chat turn, without the model (the caller
+    names it). Returns (model family or id, kwargs)."""
     model = model or BACKENDS["cloud"]["default_model"]
     system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     convo = [{"role": m["role"], "content": m["content"]}
              for m in messages if m["role"] in ("user", "assistant")]
-    kwargs = dict(model=model, max_tokens=max_tokens, messages=convo)
+    kwargs = dict(max_tokens=max_tokens, messages=convo)
     if _cloud_supports_effort(model):
-        kwargs["thinking"] = {"type": "adaptive"} if reasoning else {"type": "disabled"}
         kwargs["output_config"] = {"effort": "high" if reasoning else "low"}
+        # Thinking counts toward max_tokens even when its text is not shown:
+        # leave room for it, or the answer is cut off before it starts.
+        kwargs["max_tokens"] = max(max_tokens, 16000 if reasoning else 4096)
+        if reasoning:
+            # Ask for a readable summary of the reasoning (it is hidden by default).
+            kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
     if system:
         kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
-    return kwargs
+    return model, kwargs
 
 
 def _chat_cloud(messages, model, temperature, max_tokens, reasoning=False):
-    import anthropic
-    client = anthropic.Anthropic()
-    resp = client.messages.create(**_cloud_kwargs(messages, model, max_tokens, reasoning))
-    text = next((b.text for b in resp.content if getattr(b, "type", None) == "text"), "")
-    return text, getattr(getattr(resp, "usage", None), "output_tokens", None)
+    model, kwargs = _cloud_kwargs(messages, model, max_tokens, reasoning)
+    resp = claude_models.create(model, **kwargs)
+    return claude_models.reply_text(resp), getattr(getattr(resp, "usage", None), "output_tokens", None)
 
 
 def _chat_mlx(messages, model, temperature, max_tokens, reasoning=False):
@@ -906,24 +927,35 @@ _CHAT_GENERATORS = {
 # -- streaming generators: yield (kind, delta) where kind is "reasoning" or
 # "answer", as the tokens are produced --
 def _stream_cloud(messages, model, temperature, max_tokens, reasoning=False):
-    import anthropic
-    client = anthropic.Anthropic()
-    kwargs = _cloud_kwargs(messages, model, max_tokens, reasoning)
-    # Only stream separate reasoning when the model actually supports thinking.
-    thinking_on = kwargs.get("thinking", {}).get("type") == "adaptive"
-    with client.messages.stream(**kwargs) as stream:
-        if not thinking_on:
-            for delta in stream.text_stream:
-                yield ("answer", delta)
-            return
-        for event in stream:
-            if getattr(event, "type", None) == "content_block_delta":
-                d = event.delta
-                dt = getattr(d, "type", None)
-                if dt == "thinking_delta":
-                    yield ("reasoning", getattr(d, "thinking", ""))
-                elif dt == "text_delta":
-                    yield ("answer", getattr(d, "text", ""))
+    model, kwargs = _cloud_kwargs(messages, model, max_tokens, reasoning)
+    tried = []
+    for model_id in claude_models.candidates(model):
+        started = False
+        try:
+            with claude_models.client().messages.stream(model=model_id, **kwargs) as stream:
+                for event in stream:
+                    if getattr(event, "type", None) != "content_block_delta":
+                        continue
+                    d = event.delta
+                    dt = getattr(d, "type", None)
+                    if dt == "thinking_delta" and reasoning:
+                        started = True
+                        yield ("reasoning", getattr(d, "thinking", ""))
+                    elif dt == "text_delta":
+                        started = True
+                        yield ("answer", getattr(d, "text", ""))
+                if stream.get_final_message().stop_reason == "refusal" and not started:
+                    yield ("answer", claude_models.DECLINED)
+        except claude_models.REJECTED:
+            # The newest model turned the request down before answering: try
+            # the pinned one. Once text has been sent there is no going back.
+            if started or model_id == claude_models.candidates(model)[-1]:
+                raise
+            tried.append(model_id)
+            continue
+        for rejected in tried:
+            claude_models.turned_down(rejected)
+        return
 
 
 def _stream_mlx(messages, model, temperature, max_tokens, reasoning=False):
@@ -1062,6 +1094,6 @@ def rag_answer(kb_id, query, backend="cloud", model=None, top_k=4,
                 "stats": None}
     gen = generate(backend, model, ctx["system"], ctx["user"], temperature, max_tokens)
     return {"answer": gen["text"], "citations": ctx["citations"], "chunks": ctx["hits"],
-            "backend": backend, "model": model or BACKENDS[backend]["default_model"],
+            "backend": backend, "model": resolved_model(backend, model),
             "stats": {"tokens": gen["tokens"], "gen_time": gen["gen_time"],
                       "tokens_per_second": gen["tokens_per_second"]}}

@@ -4,6 +4,7 @@ Handles file uploads, Excel→CSV conversion, dataset analysis, and data prepara
 """
 
 import os
+import uuid
 import json
 import pandas as pd
 import numpy as np
@@ -149,7 +150,12 @@ def save_uploaded_file(file_storage):
     written out as CSV so the downstream analyze/prepare pipeline keeps working.
     """
     filename = safe_filename(file_storage.filename)
-    filepath = os.path.join(UPLOAD_DIR, filename)
+    # Stored under a random prefix. The folder is shared by everyone: under the
+    # plain name, two people uploading `data.csv` overwrote each other, and the
+    # first run to finish deleted the file the other still needed. The name the
+    # person sees stays the one they chose.
+    stored = f"{uuid.uuid4().hex[:12]}_{filename}"
+    filepath = os.path.join(UPLOAD_DIR, stored)
     file_storage.save(filepath)
 
     ext = os.path.splitext(filename)[1].lower()
@@ -168,7 +174,7 @@ def save_uploaded_file(file_storage):
                 os.remove(filepath)
             raise
         csv_filename = os.path.splitext(filename)[0] + ".csv"
-        csv_path = os.path.join(UPLOAD_DIR, csv_filename)
+        csv_path = os.path.join(UPLOAD_DIR, os.path.splitext(stored)[0] + ".csv")
         df.to_csv(csv_path, index=False)
         # Remove the original non-CSV upload (unless it WAS the csv target name).
         if os.path.exists(filepath) and filepath != csv_path:

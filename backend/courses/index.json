@@ -1,0 +1,93 @@
+[
+  {
+    "id": "intro-nn",
+    "title": "Introduction to Neural Networks",
+    "type": "text",
+    "description": "Learn the mathematics, history, and intuition behind neural networks.",
+    "duration": "25 min",
+    "tags": [
+      "Beginner",
+      "Theory",
+      "History"
+    ]
+  },
+  {
+    "id": "course-mlp-dnn",
+    "title": "MLP & Deep Neural Networks",
+    "type": "text",
+    "description": "Master classic feedforward networks: Multi-Layer Perceptrons and DNNs.",
+    "duration": "15 min",
+    "tags": [
+      "Architecture",
+      "Fundamentals"
+    ]
+  },
+  {
+    "id": "course-cnn1d",
+    "title": "1D Convolutional Networks",
+    "type": "text",
+    "description": "Learn how convolutions apply to sequential and tabular feature data.",
+    "duration": "20 min",
+    "tags": [
+      "Architecture",
+      "Pattern Recognition"
+    ]
+  },
+  {
+    "id": "course-rnn-lstm-gru",
+    "title": "Sequences: RNN, LSTM, GRU",
+    "type": "text",
+    "description": "Dive into Recurrent networks and memory mechanism architectures.",
+    "duration": "25 min",
+    "tags": [
+      "Architecture",
+      "Time-Series",
+      "Memory"
+    ]
+  },
+  {
+    "id": "course-autoencoders",
+    "title": "Autoencoders & Bottlenecks",
+    "type": "text",
+    "description": "Learn representation learning through Encoders and Decoders.",
+    "duration": "15 min",
+    "tags": [
+      "Architecture",
+      "Unsupervised",
+      "Anomaly Detection"
+    ]
+  },
+  {
+    "id": "course-resnet",
+    "title": "Residual Networks (ResNet)",
+    "type": "text",
+    "description": "Master Skip Connections designed to train ultra-deep networks.",
+    "duration": "18 min",
+    "tags": [
+      "Architecture",
+      "Deep Learning"
+    ]
+  },
+  {
+    "id": "course-transformers",
+    "title": "Transformers & Attention",
+    "type": "text",
+    "description": "Understand Attention mechanisms, the foundation of modern LLMs.",
+    "duration": "30 min",
+    "tags": [
+      "Architecture",
+      "State of the Art"
+    ]
+  },
+  {
+    "id": "course-wide-deep",
+    "title": "Wide & Deep Networks",
+    "type": "text",
+    "description": "Combine memorization and generalization (invented by Google for Recommender systems).",
+    "duration": "15 min",
+    "tags": [
+      "Architecture",
+      "Production"
+    ]
+  }
+]

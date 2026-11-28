@@ -184,7 +184,8 @@ def main():
         expect(not os.path.exists(ana_kb_dir), "her knowledge-base index is removed from disk")
     expect(_wait(lambda: f"user:{ana_id}" not in _states and f"user:{ana_id}" not in _recent_runs, 15),
            "her working state and last-run summary are gone, also after the stopped run wound down")
-    expect(ana.get("/api/auth/me").status_code == 401, "her browser is signed out")
+    expect(ana.get("/api/auth/me").get_json()["user"] is None, "her browser is signed out")
+    expect(ana.get("/api/auth/export").status_code == 401, "and can no longer reach account pages")
     r = app.test_client().post("/api/auth/signin", json={"email": "ana@example.com", "password": PASSWORD})
     expect(r.status_code == 401, "she can no longer sign in")
 

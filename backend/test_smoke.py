@@ -86,7 +86,7 @@ def main():
     expect(c.post("/api/auth/signup", json={"email": email, "username": email.split("@")[0],
                                             "password": "test1234"}).status_code == 201, "signup -> 201")
     expect(c.post("/api/auth/signup", json={"email": email, "username": "other",
-                                            "password": "x"}).status_code == 409, "duplicate email -> 409")
+                                            "password": "other1234"}).status_code == 409, "duplicate email -> 409")
     expect(c.get("/api/auth/me").status_code == 200, "me -> 200")
 
     print("\n-- Dataset (incl. path-traversal sanitisation) -----")
@@ -157,6 +157,16 @@ def main():
     expect(c.patch(f"/api/conversations/{conv['id']}", json={"title": "Renamed"}).get_json()["conversation"]["title"] == "Renamed", "rename via PATCH")
     expect(c.post(f"/api/conversations/{conv['id']}/message", json={"content": "  "}).status_code == 400, "empty message -> 400")
     expect(c.delete(f"/api/conversations/{conv['id']}").status_code == 200, "conversation delete -> 200")
+
+    # --- Courses: read from backend/courses/ (index.json + one Markdown file each) ---
+    anon = app.test_client()
+    courses = anon.get("/api/courses").get_json()
+    expect(len(courses) >= 8 and all("content" not in x and x["title"] for x in courses),
+           "course list: summaries without the lesson text")
+    lesson = anon.get(f"/api/courses/{courses[0]['id']}").get_json()
+    expect(lesson["title"] == courses[0]["title"] and lesson["content"].startswith("# "),
+           "course detail: the lesson's Markdown")
+    expect(anon.get("/api/courses/no-such-course").status_code == 404, "unknown course -> 404")
 
     print("\n----------------------------------------------------")
     for f in _artifacts:
