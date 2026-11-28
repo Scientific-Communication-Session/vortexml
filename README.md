@@ -162,16 +162,9 @@ Fontshare, and builds the frontend.
 
 ## How it is built
 
-```mermaid
-flowchart LR
-    B["Browser"] -->|HTTPS| T["Cloudflare tunnel"]
-    T --> F["Frontend server<br>prerendered React pages"]
-    F -->|"/api and /socket.io"| S["Flask + Socket.IO"]
-    N["Node agents<br>users' own machines"] <-->|"jobs and live metrics"| S
-    S --> E["PyTorch<br>training engine"]
-    S --> D[("SQLite or<br>PostgreSQL")]
-    S --> C["Claude API<br>tutor, co-pilot, chat"]
-```
+<p align="center">
+  <img src="docs/readme/architecture.png" alt="Architecture: the browser reaches the frontend server through a Cloudflare tunnel; the frontend passes /api and /socket.io to Flask with Socket.IO, which uses the PyTorch training engine, a SQLite or PostgreSQL database and the Claude API, and exchanges jobs and live metrics with node agents on users' own machines." width="860">
+</p>
 
 | Part | Made with |
 |---|---|
