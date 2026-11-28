@@ -11,7 +11,8 @@
     "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr --emptyOutDir && node scripts/prerender.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:agents": "playwright test"
+    "test:agents": "playwright test",
+    "indexnow": "node scripts/indexnow.mjs"
   },
   "dependencies": {
     "chart.js": "^4.5.1",

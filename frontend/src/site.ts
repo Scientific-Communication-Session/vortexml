@@ -7,7 +7,7 @@
 export const SITE = {
     name: 'VortexML',
     url: 'https://vortexml.ro',
-    operator: 'Rădulescu Răzvan-Alexandru and Niță Andrei-Sebastian',
+    operator: 'Niță Andrei-Sebastian and Rădulescu Răzvan-Alexandru',
     contactEmail: 'andreisebastian.nita@gmail.com',
     country: 'Romania',
     // Shown as "Last updated" on the legal pages; change it with their text.

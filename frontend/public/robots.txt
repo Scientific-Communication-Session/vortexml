@@ -20,8 +20,8 @@ User-agent: MistralAI-User
 User-agent: DuckAssistBot
 User-agent: CCBot
 # What the content may be used for (https://contentsignals.org): showing it in
-# search results, and reading it to answer someone's question.
-Content-Signal: search=yes, ai-input=yes
+# search results, reading it to answer someone's question, and training models.
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 # Public, read-only JSON (no sign-in needed)
 Allow: /api/demo/datasets
