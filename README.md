@@ -167,10 +167,10 @@ flowchart LR
     B["Browser"] -->|HTTPS| T["Cloudflare tunnel"]
     T --> F["Frontend server<br>prerendered React pages"]
     F -->|"/api and /socket.io"| S["Flask + Socket.IO"]
+    N["Node agents<br>users' own machines"] <-->|"jobs and live metrics"| S
     S --> E["PyTorch<br>training engine"]
     S --> D[("SQLite or<br>PostgreSQL")]
     S --> C["Claude API<br>tutor, co-pilot, chat"]
-    S <-->|"jobs and live metrics"| N["Node agents<br>users' own machines"]
 ```
 
 | Part | Made with |
